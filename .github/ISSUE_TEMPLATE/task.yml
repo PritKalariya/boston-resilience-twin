@@ -1,0 +1,37 @@
+name: Task
+description: One task, one owner, one due date
+title: "[W<n>-<m>] "
+body:
+  - type: input
+    id: owner
+    attributes:
+      label: Owner
+      description: One GitHub handle. Also set the Assignee and the phase label in the sidebar.
+    validations:
+      required: true
+  - type: input
+    id: due
+    attributes:
+      label: Due date
+      placeholder: YYYY-MM-DD
+    validations:
+      required: true
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Phase
+      options:
+        - setup
+        - data
+        - model
+        - deploy
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria
+      description: Each item is a command to run or a state to observe.
+      value: "- [ ] "
+    validations:
+      required: true
