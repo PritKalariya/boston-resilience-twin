@@ -12,7 +12,7 @@ Issue #3 requires the first GCP project's base infrastructure: an Airflow VM, a 
 ## Decision
 
 - **State backend:** a GCS bucket (boston-resilience-twin-tfstate), created by hand before the first run because Terraform cannot create the bucket that holds its own state. Versioned, private, public access prevention enforced. Terraform never destroys it; it is removed by hand at project end.
-- **Region/zone:** us-east1 / us-east1-b. Closest region to Boston and the one the course labs use.
+- **Region/zone:** us-east1 / us-east1-b. Matches the region the course labs use; low latency to Boston is not a factor for a batch pipeline.
 - **VM:** e2-medium, 30 GB pd-balanced boot disk, Ubuntu 24.04 LTS, OS Login for SSH. Stopped when idle in October, 24/7 from Nov 1.
 - **External IP:** ephemeral, not reserved. An ephemeral IP is released when the VM stops and bills nothing; a reserved IP bills even while stopped. This keeps the stopped-state cost to the disk alone.
 - **No service account keys:** the VM uses its attached service account via the metadata server. No key file is ever created or downloaded, removing the most common credential-leak path for a public repo.
