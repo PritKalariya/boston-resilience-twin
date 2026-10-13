@@ -56,3 +56,8 @@ Data Pipeline Oct 25. Model Development Nov 15. Deployment Dec 6. Expo requireme
 
 ## Commands
 Add each command here, in the PR that introduces it. Do not guess commands that are not listed.
+
+- `pip install -r Data-Pipeline/requirements.txt`
+- `python Data-Pipeline/scripts/legacy_311.py`: parse legacy 311 files in `Data-Pipeline/data/raw/311/` to `Data-Pipeline/data/interim/legacy_311.parquet`, with per-file drop counts
+- `python Data-Pipeline/scripts/measure_311.py`: reconciliation, sparsity, and storm ratio tables (markdown)
+- `python -m pytest Data-Pipeline/tests`
