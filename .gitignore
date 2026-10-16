@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.coverage
+.env
+*.env
+
+Data-Pipeline/data/*
+!Data-Pipeline/data/.gitkeep
+
+*.tfstate
+*.tfstate.*
+.terraform/
