@@ -1,14 +1,44 @@
-__pycache__/
-*.py[cod]
-.venv/
-.pytest_cache/
-.coverage
-.env
-*.env
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+*.tfplan
+crash.log
+crash.*.log
+# The provider lock file is kept on purpose so every member resolves the same
+# provider versions. Do not ignore it.
+!.terraform.lock.hcl
 
+# Secrets and credentials
+.env
+.env.*
+*.env
+!.env.example
+*-key.json
+*credentials*.json
+*.pem
+
+# Data (versioned by DVC, never committed)
 Data-Pipeline/data/*
 !Data-Pipeline/data/.gitkeep
 
-*.tfstate
-*.tfstate.*
-.terraform/
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.coverage
+*.egg-info/
+
+# Scoping PDF and personal notes (docs/ holds project docs only)
+*.pdf
+
+# OS and editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
