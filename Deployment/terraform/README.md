@@ -18,18 +18,23 @@ credits per member, not pooled.
 
 ## Teardown
 
-Stop the VM (keeps everything, ends the ~$24 compute charge):
+Stop the VM (keeps everything; ends about $28 of the ~$31 monthly charge, while
+the disk keeps billing about $3):
 
     gcloud compute instances stop airflow-vm --zone=us-east1-b
 
-Destroy all Project 1 resources (empty the data bucket first; force_destroy is off
-by design, so a non-empty bucket makes destroy fail loudly):
+Empty the data bucket first, including old versions (force_destroy is off by
+design, so a non-empty bucket makes destroy fail loudly):
+
+    gcloud storage rm -r --all-versions gs://boston-resilience-twin-data/**
+
+Then destroy all Project 1 resources:
 
     cd Deployment/terraform && terraform destroy -var-file=terraform.tfvars
 
 The state bucket is not destroyed by Terraform. Remove it by hand only when the
 project is over:
 
-    gcloud storage rm --recursive gs://boston-resilience-twin-tfstate
+    gcloud storage rm -r --all-versions gs://boston-resilience-twin-tfstate
 
 Full operational procedure: see ../../docs/runbook.md

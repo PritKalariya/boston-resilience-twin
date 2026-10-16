@@ -17,10 +17,12 @@ State is in the GCS bucket `boston-resilience-twin-tfstate` under the prefix
 
 | Resource | Running | Stopped or idle |
 |---|---|---|
-| `airflow-vm` (e2-medium, us-east1) | about $24 a month | $0 of compute |
+| `airflow-vm` (e2-medium, us-east1) | about $24.46 a month | $0 of compute |
 | 30 GB pd-balanced boot disk | about $3 a month | about $3 a month, billed even when the VM is stopped |
+| Ephemeral external IPv4 | about $3.65 a month ($0.005/hour) | $0, released when the VM stops |
 | `boston-resilience-twin-data` bucket | storage charged per GB stored | same |
 | Service account, secret slots, IAM, API enablement | $0 | $0 |
+| **Total** | **about $31.11 a month** | **about $3 a month** |
 
 Budget is $50 of credits per member and is not pooled. The VM stays stopped
 when idle in October and runs 24/7 from Nov 1.
@@ -100,7 +102,7 @@ are still in it. Empty it first, deliberately, only when the data is no longer
 needed:
 
 ```bash
-gcloud storage rm -r gs://boston-resilience-twin-data/**
+gcloud storage rm -r --all-versions gs://boston-resilience-twin-data/**
 ```
 
 **The state bucket is not destroyed by Terraform.** `boston-resilience-twin-tfstate`
@@ -108,5 +110,5 @@ is outside this config on purpose, so a destroy cannot delete the state it is
 reading. Remove it by hand, last, after the destroy has finished:
 
 ```bash
-gcloud storage rm -r gs://boston-resilience-twin-tfstate
+gcloud storage rm -r --all-versions gs://boston-resilience-twin-tfstate
 ```

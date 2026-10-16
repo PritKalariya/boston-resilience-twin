@@ -1,5 +1,5 @@
 # Airflow in Docker (ADR-010). Stopped when idle in October, on 24/7 from Nov 1.
-# Running cost is about about $31 a month (VM, disk, and ephemeral IP).
+# Running cost is about $31 a month (VM, disk, and ephemeral IP).
 resource "google_compute_instance" "airflow" {
   project      = var.project_id
   name         = "airflow-vm"

@@ -48,7 +48,7 @@ The repo is public. Never commit keys, tokens, `.env`, Terraform state, raw or v
 ## Cloud and cost
 - GCP resources come from Terraform only. No console click-ops.
 - Two projects (ADR-009). Project 1: VM, Cloud Storage, monitoring, Secret Manager. Project 2: Cloud Run, Artifact Registry, Vertex registry, Gemini. Never put a resource in the wrong project.
-- Budget is $50 credits per member, not pooled. The VM (about $24 a month) stays stopped when idle in October and runs 24/7 from Nov 1.
+- Budget is $50 credits per member, not pooled. The VM (about $31 a month running, about $3 stopped) stays stopped when idle in October and runs 24/7 from Nov 1.
 - Never run `terraform apply` or `terraform destroy`. Before any change that creates a resource, print its running cost and the command that tears it down.
 
 ## Deadlines that drive priority

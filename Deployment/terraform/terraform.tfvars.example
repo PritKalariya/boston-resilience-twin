@@ -1,5 +1,5 @@
 # Copy to terraform.tfvars and fill in the real addresses.
-# terraform.tfvars is gitignored and MUST NEVER BE COMMITED.
+# terraform.tfvars is gitignored and MUST NEVER BE COMMITTED.
 
 project_id = "boston-resilience-twin"
 region     = "us-east1"
