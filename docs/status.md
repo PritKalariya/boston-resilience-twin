@@ -9,8 +9,9 @@ Week 1: Setup and ingestion (due 2026-10-12)
 | Issue | Owner | Due | State | Note |
 |---|---|---|---|---|
 | #1 Harden repo and team workflow | Prit | 2026-10-10 | in progress | |
-| #3 Terraform project 1 | Prit | 2026-10-11 | applied, PR #30 in review | 51 resources applied and verified on owner account; plan clean; VM stopped. ADR-015 in PR #30. |
+| #3 Terraform project 1 | Prit | 2026-10-11 | done, merged in #30 | 51 resources applied and verified on owner account; plan clean; VM stopped. ADR-015 in PR #30. |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | in review | results below; unblocks #6, #10, #11 |
+| #29 Verify teammate IAM | Prit | 2026-10-15 | in review | All 6 members granted. Added `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start + SSH verified; plan clean running and stopped; VM stopped. |
 
 ## Blocked
 None.
