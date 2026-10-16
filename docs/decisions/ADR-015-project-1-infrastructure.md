@@ -38,6 +38,7 @@ Issue #3 requires the first GCP project's base infrastructure: an Airflow VM, a 
 - Because teammate access uses additive google_project_iam_member resources, a partial apply failure is recoverable: grants that succeed are kept, and a later apply retries only the missing ones. An authoritative policy resource would have failed all-or-nothing.
 - **Team IAM depends on each member's first GCP login.** GCP rejects a grant to a @northeastern.edu identity that has never signed in to Cloud ("User ... does not exist"). The owner's grants applied; the other five failed on first apply for this reason. This will recur when project 2 is set up. The fix is operational, not code: each member signs in once, then apply is re-run.
 - Choosing instanceAdmin.v1 means a teammate could delete the VM. Accepted because the blast radius is low (recreatable from code, data and state are in separate protected buckets) and the deadline favored a predefined role over a custom one.
+- Team members also hold roles/iam.serviceAccountUser on airflow-vm-sa (added in #29). OS Login SSH to a VM with an attached service account requires it. It is scoped to that one service account, not the project, so members cannot act as any other service account, and it grants nothing beyond the bucket and secret access they already hold directly.
 
 ## Revisit when
 - The VM moves to 24/7 on Nov 1 and an accidental delete would cost more: reconsider the custom least-privilege role.
