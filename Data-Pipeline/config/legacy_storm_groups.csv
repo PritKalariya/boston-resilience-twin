@@ -1,0 +1,14 @@
+type,storm_group
+Request for Snow Plowing,snow_ice
+Request for Snow Plowing (Emergency Responder),snow_ice
+Unshoveled Sidewalk,snow_ice
+Misc. Snow Complaint,snow_ice
+City/State Snow Issues,snow_ice
+Snow Removal,snow_ice
+Snow/Ice Control,snow_ice
+Catchbasin,flooding
+Roadway Flooding,flooding
+No Utilities - Food Establishment - Flood,flooding
+Tree Emergencies,tree
+Tree Maintenance Requests,tree
+Tree in Park,tree
