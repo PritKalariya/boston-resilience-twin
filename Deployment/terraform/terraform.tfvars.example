@@ -13,3 +13,8 @@ team_members = [
   "user:member-five@northeastern.edu",
   "user:member-six@northeastern.edu",
 ]
+
+# Members who may add secret values (secretVersionAdder on the two secrets only).
+secret_writers = [
+  "user:member-five@northeastern.edu",
+]

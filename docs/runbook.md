@@ -61,6 +61,26 @@ printf '%s' "$NOAA_CDO_TOKEN" | gcloud secrets versions add noaa-cdo-token --dat
 printf '%s' "$CENSUS_API_KEY" | gcloud secrets versions add census-api-key --data-file=-
 ```
 
+### Adding a secret value
+
+Who can: the members listed in the `secret_writers` tfvars variable. They hold
+`roles/secretmanager.secretVersionAdder` on `noaa-cdo-token` and
+`census-api-key` only, which is the permission to add a new version. It is not
+project wide and it does not let them read the values back; reading is
+`roles/secretmanager.secretAccessor`, which every team member already has.
+
+```bash
+gcloud secrets versions add <secret> --data-file=-
+```
+
+`--data-file=-` reads the value from stdin. Paste the value, press Enter, then
+Ctrl+D. Doing it this way keeps the value out of shell history, which is where
+it would land if it were passed as a command argument.
+
+A secret value never goes into chat, the repo, a `.tf` file, a tfvars file, or
+a ticket. If one is exposed, add a new version with a fresh value and disable
+the old version.
+
 ### Stop the VM when idle
 
 ```bash

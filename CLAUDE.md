@@ -66,3 +66,4 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `terraform plan -var-file=terraform.tfvars`: read-only dry run against project 1 (`terraform.tfvars` is gitignored; copy from `terraform.tfvars.example`)
 - `terraform apply -var-file=terraform.tfvars`: human only, never run by Claude Code
 - `gcloud compute instances start|stop airflow-vm --zone=us-east1-b`: VM power; Terraform does not manage run state
+- `gcloud secrets versions add <secret> --data-file=-`: add a secret value from stdin (paste, then Ctrl+D). Human only, never run by Claude Code

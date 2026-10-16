@@ -24,3 +24,14 @@ variable "team_members" {
   EOT
   type        = list(string)
 }
+
+variable "secret_writers" {
+  description = <<-EOT
+    IAM member strings for the members who may add new versions to the
+    project 1 secrets, for example ["user:name@northeastern.edu"]. They get
+    roles/secretmanager.secretVersionAdder on those secrets only, never
+    project wide. No default on purpose: the real addresses are supplied
+    through a tfvars file that is never committed.
+  EOT
+  type        = list(string)
+}
