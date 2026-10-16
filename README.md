@@ -32,7 +32,55 @@ git clone https://github.com/PritKalariya/boston-resilience-twin.git
 cd boston-resilience-twin
 ```
 
-Setup and usage instructions will be added as each milestone lands.
+### Local Airflow stack
+
+`docker-compose.yaml` runs Airflow 3.3.2 (LocalExecutor) with a Postgres 16 metadata database. The project uses Python 3.12 everywhere (ADR-013).
+
+**Prerequisites**
+- Docker Desktop (Windows uses the WSL 2 backend) or Docker Engine 25+ with the Compose plugin. Give Docker at least 4 GB of memory; 8 GB is better.
+- Python 3.12 for running scripts and tests outside Docker (see `.python-version`).
+
+**Start**
+
+```bash
+docker compose up -d --wait
+```
+
+The first start downloads about 0.8 GB of images and sets up the database, which takes a few minutes. Later starts take under a minute. `docker compose ps -a` should show four services as `(healthy)` and `airflow-init` as `Exited (0)`.
+
+Open http://localhost:8080 and log in as `airflow` / `airflow`. These defaults are for your own machine only.
+
+**Run the hello DAG.** It is a smoke test that also checks the image runs Python 3.12. New DAGs start paused, so unpause it first:
+
+```bash
+docker compose exec airflow-scheduler airflow dags unpause hello
+docker compose exec airflow-scheduler airflow dags trigger hello
+docker compose exec airflow-scheduler airflow dags list-runs hello
+```
+
+The run reaches `success` within a minute. You can also unpause and trigger it from the UI.
+
+**Where things live**
+- DAG files: `Data-Pipeline/dags/`. New files are picked up within 30 seconds.
+- Task logs: `Data-Pipeline/logs/` (gitignored).
+
+**Stop**
+
+```bash
+docker compose down      # stop; keeps the database and run history
+docker compose down -v   # stop and delete the database (full reset)
+```
+
+**Optional overrides.** Copy `.env.example` to `.env` (`cp .env.example .env`, or `Copy-Item .env.example .env` in PowerShell) and fill in only what you need. Never commit `.env`. In Windows PowerShell 5.1, do not create `.env` with `>` or `Out-File`: they write UTF-16 and every compose command then fails.
+
+**On Linux and the VM**, set `AIRFLOW_UID` and every secret in `.env` before the first start. The runbook (`docs/runbook.md`) has those steps and fixes for common problems.
+
+**Tests**
+
+```bash
+pip install -r Data-Pipeline/requirements.txt
+python -m pytest Data-Pipeline/tests
+```
 
 ## Data and licenses
 
