@@ -21,10 +21,10 @@ Data pipeline: Srikar. Fairness and data quality: Alekhya. Forecast model, respo
 - Cloud Run: forecast API, agent service, dashboard. Gemini on Vertex AI for the agent and critic.
 - GitHub Actions for CI/CD, Terraform for infrastructure
 - Cloud Monitoring and Evidently. Slack and email alerts. No Grafana, Prometheus, or W&B.
-- Python, Docker Compose for local development
+- Python 3.12 (ADR-013), Docker Compose for local development (Airflow 3.3.2, Postgres 16)
 
 ## Open: do not choose, ask the user
-Python version, Airflow executor and metadata DB, API framework (FastAPI is a candidate only), dashboard and map libraries, Gemini tier and per-event cap, alert thresholds.
+Airflow executor and metadata DB (the local stack in `docker-compose.yaml` uses LocalExecutor and Postgres 16; the ADR comes with #20), API framework (FastAPI is a candidate only), dashboard and map libraries, Gemini tier and per-event cap, alert thresholds.
 
 ## Workflow rules
 - One issue per task, one assignee, due date, phase label, acceptance criteria.
@@ -67,3 +67,11 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `terraform apply -var-file=terraform.tfvars`: human only, never run by Claude Code
 - `gcloud compute instances start|stop airflow-vm --zone=us-east1-b`: VM power; Terraform does not manage run state
 - `gcloud secrets versions add <secret> --data-file=-`: add a secret value from stdin (paste, then Ctrl+D). Human only, never run by Claude Code
+- `docker compose config --quiet`: validate `docker-compose.yaml`; no output means valid
+- `docker compose up -d --wait`: start Airflow 3.3.2 (LocalExecutor) and Postgres 16 and wait until healthy; UI at http://localhost:8080, login airflow / airflow (local defaults)
+- `docker compose ps -a`: service state and health; `airflow-init` shows `Exited (0)` once the database is migrated
+- `docker compose logs <service>`: logs of one service, for example `airflow-scheduler`
+- `docker compose exec airflow-scheduler airflow dags list-import-errors`: DAG import errors; `No data found` when every DAG imports
+- `docker compose exec airflow-scheduler airflow dags unpause|trigger|list-runs hello`: run the hello smoke test (new DAGs start paused)
+- `docker compose exec airflow-scheduler python --version`: Python in the Airflow image (ADR-013 pins 3.12)
+- `docker compose down`: stop and remove the containers, keep the metadata DB; add `-v` to delete it too (full reset)
