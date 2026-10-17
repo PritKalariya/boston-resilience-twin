@@ -136,15 +136,36 @@ terraform apply tfplan
 Run `terraform plan` once more after the apply. A clean plan ("No changes")
 is the check that the config matches what is actually in the project.
 
-### Fill the secret slots
+### Adding a secret value
 
-Terraform creates empty secrets. Values are added out of band and never go
-into a `.tf` file or a tfvars file:
+Terraform creates the secret slots empty. Values are added by hand and never
+go into a `.tf` file, a tfvars file, chat, the repo, or a ticket.
+
+Who can: the members listed in the `secret_writers` tfvars variable. They hold
+`roles/secretmanager.secretVersionAdder` on `noaa-cdo-token` and
+`census-api-key` only, which is the permission to add a new version. It is not
+project wide and it does not let them read the values back; reading is
+`roles/secretmanager.secretAccessor`, which every team member already has.
 
 ```bash
-printf '%s' "$NOAA_CDO_TOKEN" | gcloud secrets versions add noaa-cdo-token --data-file=-
-printf '%s' "$CENSUS_API_KEY" | gcloud secrets versions add census-api-key --data-file=-
+read -rs VALUE && printf '%s' "$VALUE" | gcloud secrets versions add <secret> --data-file=-; unset VALUE
 ```
+
+Run it, paste the value at the blank prompt, and press Enter. `read -s` hides
+the paste, and `printf '%s'` sends it without a trailing newline. gcloud stores
+stdin byte for byte, so a trailing newline would become part of the key and the
+NOAA and Census APIs would reject it. The value never appears in shell history,
+and `unset` clears it from the shell even if the gcloud call fails.
+
+To confirm a stored value has no trailing newline (prints its last character):
+
+```bash
+gcloud secrets versions access latest --secret=<secret> | tail -c 1 | od -An -c
+```
+
+If it prints `\n`, add a new version with the command above and disable the
+old one. If a value is ever exposed, add a new version with a fresh value and
+disable the old version.
 
 ### Stop the VM when idle
 

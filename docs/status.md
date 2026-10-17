@@ -9,11 +9,12 @@ Week 2: Processing (due 2026-10-18)
 | Issue | Owner | Due | State | Note |
 |---|---|---|---|---|
 | #1 Harden repo and team workflow | Prit | 2026-10-10 | in progress | |
-| #2 Local dev environment and Python pin | Punith | 2026-10-13 | in review | `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); hello DAG passes; ADR-013 pins Python 3.12; unblocks #20 and #22 |
+| #2 Local dev environment and Python pin | Punith | 2026-10-13 | done | PR #55 merged. `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); ADR-013 pins Python 3.12 |
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | in review | results below; new-system clock settled in ADR-020; flooding gap needs a team call |
 | #29 Verify teammate IAM | Prit | 2026-10-15 | done | PR #51 merged. All 6 members granted, plus `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start and SSH verified; VM stopped. |
+| #50 Let Kirtan add secret values | Prit | 2026-10-16 | done | PR #54 merged. secretVersionAdder for `secret_writers` on both secret slots (secret level); ADR-019. |
 
 ## Blocked
 None.
