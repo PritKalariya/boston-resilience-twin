@@ -42,6 +42,14 @@ cd boston-resilience-twin
 
 **Start**
 
+On Linux (the VM too), first save your user id in `.env` so the files Airflow writes to `Data-Pipeline/logs/` stay owned by you. macOS and Windows skip this step and need no `.env`:
+
+```bash
+echo "AIRFLOW_UID=$(id -u)" > .env
+```
+
+Then, on every system:
+
 ```bash
 docker compose up -d --wait
 ```
@@ -71,9 +79,11 @@ docker compose down      # stop; keeps the database and run history
 docker compose down -v   # stop and delete the database (full reset)
 ```
 
-**Optional overrides.** Copy `.env.example` to `.env` (`cp .env.example .env`, or `Copy-Item .env.example .env` in PowerShell) and fill in only what you need. Never commit `.env`. In Windows PowerShell 5.1, do not create `.env` with `>` or `Out-File`: they write UTF-16 and every compose command then fails.
+The containers restart whenever Docker starts (for example after a reboot) until you run `docker compose down`.
 
-**On Linux and the VM**, set `AIRFLOW_UID` and every secret in `.env` before the first start. The runbook (`docs/runbook.md`) has those steps and fixes for common problems.
+**Optional overrides.** `.env` is for local development only. To change a dev default, such as the port, add the line to `.env` using the names in `.env.example`. Never commit `.env`. In Windows PowerShell 5.1, do not create `.env` with `>` or `Out-File`: they write UTF-16 and every compose command then fails.
+
+The VM gets its secrets from Secret Manager (ADR-015), set up in #20. The runbook (`docs/runbook.md`) has the operating steps and fixes for common problems.
 
 **Tests**
 
@@ -81,6 +91,8 @@ docker compose down -v   # stop and delete the database (full reset)
 pip install -r Data-Pipeline/requirements.txt
 python -m pytest Data-Pipeline/tests
 ```
+
+These run on whatever Python your machine has. A test command pinned to Python 3.12 comes with W3-7 (#38).
 
 ## Data and licenses
 

@@ -16,10 +16,14 @@ since a deferred task waits forever without one.
 ### Start and check
 
 ```bash
+echo "AIRFLOW_UID=$(id -u)" > .env   # Linux only (the VM too), once per clone
 docker compose up -d --wait
 docker compose ps -a
 curl -fsS http://127.0.0.1:8080/api/v2/monitor/health
 ```
+
+Without `AIRFLOW_UID`, Linux log files end up owned by uid 50000 (see Stop
+and reset). macOS and Windows need no `.env`.
 
 Healthy means: four services `(healthy)`, `airflow-init` `Exited (0)`, and
 the health JSON shows `metadatabase`, `scheduler` and `dag_processor` as
@@ -44,23 +48,28 @@ docker compose down      # keeps the postgres-db-volume (run history)
 docker compose down -v   # deletes it (full reset)
 ```
 
-### Secrets and overrides
+The containers restart whenever Docker starts until `docker compose down`.
+`down -v` deletes the database volume only; task logs in `Data-Pipeline/logs/`
+are host files and stay.
 
-Local development needs no `.env`; every value in `docker-compose.yaml` has a
-dev default. On the VM (and any shared machine), before the first `up`:
+On Linux, if the stack ever ran without `AIRFLOW_UID`, those log files belong
+to uid 50000 and deleting them fails with "Permission denied". Take them back:
 
 ```bash
-cp .env.example .env
-# set AIRFLOW_UID=$(id -u), POSTGRES_PASSWORD, the admin user and password,
-# AIRFLOW__API_AUTH__JWT_SECRET, AIRFLOW__API__SECRET_KEY and FERNET_KEY
-openssl rand -hex 32   # one value per secret
-chmod 600 .env
+sudo chown -R "$(id -u):$(id -g)" Data-Pipeline/logs
 ```
 
-Postgres and the admin user keep their first password until
-`docker compose down -v`. The JWT secret, API secret key and Fernet key must
-be identical in every container; the shared environment block in
-`docker-compose.yaml` takes care of that, so set them only in `.env`.
+### Overrides and secrets
+
+`.env` is for local development only. macOS and Windows need none; Linux
+needs `AIRFLOW_UID` (above). Other local overrides use the names in
+`.env.example`. Postgres and the admin user keep their first password until
+`docker compose down -v`.
+
+The VM does not use `.env` for secrets: they come from Secret Manager
+(ADR-015), set up in #20. However they are supplied, the JWT secret, API
+secret key and Fernet key must be identical in every container; the shared
+environment block in `docker-compose.yaml` passes one value to all of them.
 
 ### Troubleshooting
 
@@ -73,6 +82,9 @@ be identical in every container; the shared environment block in
   file was written as UTF-16 by Windows PowerShell 5.1 `>` or `Out-File`.
   Recreate it with `Copy-Item .env.example .env` or an editor saving UTF-8.
 - **Port 8080 is busy.** Set `AIRFLOW_HOST_PORT` in `.env`.
+- **"Permission denied" on `Data-Pipeline/logs` (Linux).** The stack ran
+  without `AIRFLOW_UID`. Run the `sudo chown` under Stop and reset, then
+  write `.env` before the next start.
 - **A DAG does not show up.** Run `airflow dags list-import-errors` (above).
   New files are picked up within 30 seconds.
 

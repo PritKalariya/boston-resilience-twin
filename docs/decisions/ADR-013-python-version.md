@@ -31,7 +31,7 @@ Python support of the planned libraries, checked on PyPI on 2026-10-16:
 - **Python 3.12** for all project code: Airflow DAGs and pipeline scripts, model training, Cloud Run services, CI, and local environments.
 - **Airflow image** `apache/airflow:3.3.2-python3.12`, pinned in `docker-compose.yaml`.
 - **`.python-version`** at the repo root says `3.12`. Tools that read it (pyenv, uv, and the `python-version-file` input of `actions/setup-python`) follow it.
-- **Cloud Run images** start from `python:3.12-slim`.
+- **Cloud Run images** use Python 3.12; base image decided in the serving ADR.
 - **Checked against the image on 2026-10-16:** inside `apache/airflow:3.3.2-python3.12`, `python --version` prints `Python 3.12.14` and `airflow version` prints `3.3.2`. The `hello` DAG run `verify_20261016T223438Z` succeeded, including its `check_python_pin` task, which fails when the image's Python is not 3.12. Its log reads "Python 3.12.14 matches the ADR-013 pin".
 
 ## Alternatives considered

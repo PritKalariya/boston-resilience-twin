@@ -1,6 +1,7 @@
 # Local Airflow stack: Airflow 3.3.2 with LocalExecutor and a Postgres 16 metadata DB.
-# Works on a clean clone with no .env. Defaults are for local use only;
-# the VM overrides every secret in .env (see .env.example).
+# macOS and Windows: works on a clean clone with no .env. Linux: put AIRFLOW_UID in
+# .env first (README). Defaults are for local use only; on the VM the secrets come
+# from Secret Manager (ADR-015, #20).
 # Adapted from the official Airflow 3.3.2 docker-compose.yaml (Apache License 2.0):
 # https://airflow.apache.org/docs/apache-airflow/3.3.2/docker-compose.yaml
 
