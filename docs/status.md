@@ -1,14 +1,15 @@
 # Status
 
-Updated: 2026-10-15 by PritKalariya. Edit this file in the PR that changes the state.
+Updated: 2026-10-16 by Pu1ni2. Edit this file in the PR that changes the state.
 
 ## Current milestone
-Week 1: Setup and ingestion (due 2026-10-12)
+Week 2: Processing (due 2026-10-18)
 
 ## Open work
 | Issue | Owner | Due | State | Note |
 |---|---|---|---|---|
 | #1 Harden repo and team workflow | Prit | 2026-10-10 | in progress | |
+| #2 Local dev environment and Python pin | Punith | 2026-10-13 | in review | `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); hello DAG passes; ADR-013 pins Python 3.12; unblocks #20 and #22 |
 | #3 Terraform project 1 | Prit | 2026-10-11 | done, merged in #30 | 51 resources applied and verified on owner account; plan clean; VM stopped. ADR-015 in PR #30. |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | in review | results below; unblocks #6, #10, #11 |
 | #29 Verify teammate IAM | Prit | 2026-10-15 | in review | All 6 members granted. Added `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start + SSH verified; plan clean running and stopped; VM stopped. |
@@ -19,6 +20,8 @@ None.
 ## Risks raised
 - Legacy storm groups cover only 6.9% of legacy requests (210,049 of 3,037,969), against about 15% in the pre-scoping check. The group list in `Data-Pipeline/config/legacy_storm_groups.csv` may be narrower than the first run's. Worth a look before #10 locks the unit.
 - Tree requests leave the legacy files after Oct 2025 and flooding after Jul 2026 (moved to the new system). Legacy-only numbers for 2025 to 2026 undercount until #13 maps the new-system rows in.
+- The local Airflow stack idles at about 0.95 GB of memory (scheduler 397 MiB, API server 294 MiB, DAG processor 193 MiB, Postgres 67 MiB; `docker stats`, 2026-10-16). The e2-medium has 4 GB, so tasks get roughly 2.5 GB once Ubuntu is counted (estimate). #20 should confirm headroom on the VM, and pipeline tasks should avoid loading every legacy year into memory at once.
+- The Airflow 3.3.2 image ships pandas 3.0.5 and pyarrow 25.0.1, while `Data-Pipeline/requirements.txt` asks only for `pandas>=2.2`. The current 14 tests pass in the image (Python 3.12.14, pandas 3.0.5; 2026-10-16), but the requirements should be aligned with the Airflow constraints before the scripts move into DAGs (#22).
 
 ## W1-5 results (2026-10-13)
 

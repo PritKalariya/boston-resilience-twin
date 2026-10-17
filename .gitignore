@@ -24,6 +24,10 @@ crash.*.log
 Data-Pipeline/data/*
 !Data-Pipeline/data/.gitkeep
 
+# Airflow logs (bind-mounted into the containers by docker-compose.yaml)
+Data-Pipeline/logs/*
+!Data-Pipeline/logs/.gitkeep
+
 # Python
 __pycache__/
 *.py[cod]

@@ -3,6 +3,91 @@
 Operational steps for the Boston Resilience Twin. Update this file in the PR
 that changes an operational step.
 
+## Local Airflow stack (Docker Compose)
+
+`docker-compose.yaml` at the repo root runs Airflow 3.3.2 with LocalExecutor
+and a Postgres 16 metadata database: `postgres`, a one-shot `airflow-init`,
+`airflow-apiserver` (UI and API on 127.0.0.1:8080 only), `airflow-scheduler`
+(also runs the tasks), and `airflow-dag-processor`. The image is pinned to
+`apache/airflow:3.3.2-python3.12` (ADR-013). There is no triggerer: add the
+official triggerer service back when the first deferrable operator lands,
+since a deferred task waits forever without one.
+
+### Start and check
+
+```bash
+echo "AIRFLOW_UID=$(id -u)" > .env   # Linux only (the VM too), once per clone
+docker compose up -d --wait
+docker compose ps -a
+curl -fsS http://127.0.0.1:8080/api/v2/monitor/health
+```
+
+Without `AIRFLOW_UID`, Linux log files end up owned by uid 50000 (see Stop
+and reset). macOS and Windows need no `.env`.
+
+Healthy means: four services `(healthy)`, `airflow-init` `Exited (0)`, and
+the health JSON shows `metadatabase`, `scheduler` and `dag_processor` as
+`healthy`. `triggerer` is `null` because none is deployed.
+
+Smoke test:
+
+```bash
+docker compose exec airflow-scheduler airflow dags list-import-errors
+docker compose exec airflow-scheduler airflow dags unpause hello
+docker compose exec airflow-scheduler airflow dags trigger hello
+docker compose exec airflow-scheduler airflow dags list-runs hello
+```
+
+`list-import-errors` prints `No data found` when every DAG file imports. The
+hello run reaches `success` within a minute.
+
+### Stop and reset
+
+```bash
+docker compose down      # keeps the postgres-db-volume (run history)
+docker compose down -v   # deletes it (full reset)
+```
+
+The containers restart whenever Docker starts until `docker compose down`.
+`down -v` deletes the database volume only; task logs in `Data-Pipeline/logs/`
+are host files and stay.
+
+On Linux, if the stack ever ran without `AIRFLOW_UID`, those log files belong
+to uid 50000 and deleting them fails with "Permission denied". Take them back:
+
+```bash
+sudo chown -R "$(id -u):$(id -g)" Data-Pipeline/logs
+```
+
+### Overrides and secrets
+
+`.env` is for local development only. macOS and Windows need none; Linux
+needs `AIRFLOW_UID` (above). Other local overrides use the names in
+`.env.example`. Postgres and the admin user keep their first password until
+`docker compose down -v`.
+
+The VM does not use `.env` for secrets: they come from Secret Manager
+(ADR-015), set up in #20. However they are supplied, the JWT secret, API
+secret key and Fernet key must be identical in every container; the shared
+environment block in `docker-compose.yaml` passes one value to all of them.
+
+### Troubleshooting
+
+- **Docker Desktop quits a few seconds after it starts (Windows).** Podman
+  Desktop also claims the `\\.\pipe\docker_engine` pipe, and Docker Desktop
+  crashes when the pipe is taken. Quit Podman Desktop (system tray), then
+  start Docker Desktop. Turn off Podman Desktop's start-on-login to keep it
+  from happening after a reboot.
+- **Every compose command fails with "unexpected character" in `.env`.** The
+  file was written as UTF-16 by Windows PowerShell 5.1 `>` or `Out-File`.
+  Recreate it with `Copy-Item .env.example .env` or an editor saving UTF-8.
+- **Port 8080 is busy.** Set `AIRFLOW_HOST_PORT` in `.env`.
+- **"Permission denied" on `Data-Pipeline/logs` (Linux).** The stack ran
+  without `AIRFLOW_UID`. Run the `sudo chown` under Stop and reset, then
+  write `.env` before the next start.
+- **A DAG does not show up.** Run `airflow dags list-import-errors` (above).
+  New files are picked up within 30 seconds.
+
 ## Project 1 infrastructure (Terraform)
 
 Config lives in `Deployment/terraform/`. It covers project 1 only (ADR-009):
