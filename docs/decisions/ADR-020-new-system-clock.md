@@ -1,6 +1,6 @@
 # ADR-020: New-system 311 times are Boston local, not UTC
 
-- Status: proposed
+- Status: accepted (team sign-off 2026-10-16, requested on #52)
 - Date: 2026-10-16
 - Owner: Srikarmk
 - Phase: data
