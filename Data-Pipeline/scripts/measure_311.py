@@ -29,6 +29,12 @@ HEAT_DAY_C = 32.2
 AFTERMATH_DAYS = 3
 
 
+def legacy_storm_groups(path: Path | str) -> pd.DataFrame:
+    cmap = pd.read_csv(path, dtype=str, keep_default_na=False)
+    legacy = cmap[(cmap["system"] == "legacy") & (cmap["storm_group"] != "")]
+    return legacy.rename(columns={"source_category": "type"})[["type", "storm_group"]]
+
+
 def normalize_neighborhood(values: pd.Series) -> pd.Series:
     cleaned = values.astype("string").str.strip()
     cleaned = cleaned.replace(NEIGHBORHOOD_ALIASES)
@@ -154,11 +160,11 @@ def main() -> None:
     parser.add_argument("--raw-dir", default="Data-Pipeline/data/raw/311")
     parser.add_argument("--weather", default="Data-Pipeline/data/raw/weather/ghcnd_USW00014739.csv")
     parser.add_argument("--published", default="Data-Pipeline/config/published_311_counts.csv")
-    parser.add_argument("--storm-groups", default="Data-Pipeline/config/legacy_storm_groups.csv")
+    parser.add_argument("--map", default="docs/data/category-map.csv")
     args = parser.parse_args()
 
     df = pd.read_parquet(args.parsed, columns=["open_dt", "type", "neighborhood"])
-    storm_groups = pd.read_csv(args.storm_groups)
+    storm_groups = legacy_storm_groups(args.map)
     weather = load_weather(args.weather)
     published = pd.read_csv(args.published)
 

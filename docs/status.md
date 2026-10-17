@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-16 by PritKalariya. Edit this file in the PR that changes the state.
+Updated: 2026-10-16 by Srikarmk. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -9,20 +9,59 @@ Week 2: Processing (due 2026-10-18)
 | Issue | Owner | Due | State | Note |
 |---|---|---|---|---|
 | #1 Harden repo and team workflow | Prit | 2026-10-10 | in progress | |
-| #2 Local dev environment and Python pin | Punith | 2026-10-13 | in review | `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); hello DAG passes; ADR-013 pins Python 3.12; unblocks #20 and #22 |
-| #3 Terraform project 1 | Prit | 2026-10-11 | done, merged in #30 | 51 resources applied and verified on owner account; plan clean; VM stopped. ADR-015 in PR #30. |
-| #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | in review | results below; unblocks #6, #10, #11 |
-| #29 Verify teammate IAM | Prit | 2026-10-15 | in review | All 6 members granted. Added `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start + SSH verified; plan clean running and stopped; VM stopped. |
-| #50 Let Kirtan add secret values | Prit | 2026-10-16 | in review | Applied: secretVersionAdder for secret_writers on both secret slots (secret-level); binding verified with get-iam-policy. ADR-019. |
+| #2 Local dev environment and Python pin | Punith | 2026-10-13 | done | PR #55 merged. `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); ADR-013 pins Python 3.12 |
+| #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
+| #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
+| #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | in review | results below; new-system clock settled in ADR-020; flooding gap needs a team call |
+| #29 Verify teammate IAM | Prit | 2026-10-15 | done | PR #51 merged. All 6 members granted, plus `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start and SSH verified; VM stopped. |
+| #50 Let Kirtan add secret values | Prit | 2026-10-16 | done | PR #54 merged. secretVersionAdder for `secret_writers` on both secret slots (secret level); ADR-019. |
 
 ## Blocked
 None.
 
 ## Risks raised
-- Legacy storm groups cover only 6.9% of legacy requests (210,049 of 3,037,969), against about 15% in the pre-scoping check. The group list in `Data-Pipeline/config/legacy_storm_groups.csv` may be narrower than the first run's. Worth a look before #10 locks the unit.
-- Tree requests leave the legacy files after Oct 2025 and flooding after Jul 2026 (moved to the new system). Legacy-only numbers for 2025 to 2026 undercount until #13 maps the new-system rows in.
+- Legacy storm groups cover only 6.9% of legacy requests (210,049 of 3,037,969), against about 15% in the pre-scoping check. The groups now live in `docs/data/category-map.csv` (`storm_group` column) and may be narrower than the first run's. Worth a look before #10 locks the unit.
+- **New-system times are Boston local, not UTC.** `open_date` ends in `+00`, but 1,283 cases resubmitted from the legacy system open a median 2.6 minutes before the legacy close time, in both EST and EDT. Real UTC would be 4 to 5 hours later. Converting from UTC would shift every new-system time 4 to 5 hours early and move 1,124 requests (1.6%) to the previous day. The pipeline treats them as local and re-checks this on every run (`map_311.check_clock`). Recorded in ADR-020, accepted by the team on 2026-10-16; CLAUDE.md is updated to match.
+- **Flooding has no new-system category.** Legacy flooding requests (mostly Catchbasin) stop after Jul 2026 and nothing in the new system replaces them, so live flooding counts are zero. Affects the target and #11.
+- **Snow has not been through the new system yet.** Snow Plowing and Emergency Responder Snow Plowing exist (2 requests), but all of winter 2025 to 2026 went to the legacy system. Unshoveled Sidewalk has no new category so far. The first snow storm this winter is the real switch for snow_ice.
+- Neighborhood names differ between systems: 23 legacy and 25 new-system names, 16 shared (the new system splits Allston and Brighton, adds North End, Chinatown, West End and others). #15 needs one unit list, from the spatial join or a name map, before daily counts.
+- Animal requests are missing from 2025-06-12 (last legacy) to 2025-08-01 (first day of the new export).
 - The local Airflow stack idles at about 0.95 GB of memory (scheduler 397 MiB, API server 294 MiB, DAG processor 193 MiB, Postgres 67 MiB; `docker stats`, 2026-10-16). The e2-medium has 4 GB, so tasks get roughly 2.5 GB once Ubuntu is counted (estimate). #20 should confirm headroom on the VM, and pipeline tasks should avoid loading every legacy year into memory at once.
 - The Airflow 3.3.2 image ships pandas 3.0.5 and pyarrow 25.0.1, while `Data-Pipeline/requirements.txt` asks only for `pandas>=2.2`. The current 14 tests pass in the image (Python 3.12.14, pandas 3.0.5; 2026-10-16), but the requirements should be aligned with the Airflow constraints before the scripts move into DAGs (#22).
+- On all years (2015 to 2026), `map_311.py` peaks at about 3.5 GB, above the roughly 2.5 GB left for tasks on the e2-medium, and `legacy_311.py` at about 1.9 GB. #22 should split them per year or read fewer columns before they move into DAGs.
+
+## W2-1 results (2026-10-16)
+
+Commands: `python Data-Pipeline/scripts/legacy_311.py`, `python Data-Pipeline/scripts/new_311.py`, then `python Data-Pipeline/scripts/map_311.py`. Data: legacy files 2015 to 2026 and the new-system export (2025-08-01 to 2026-10-12).
+
+### Category map
+
+`docs/data/category-map.csv` lists all 197 legacy types and 71 new-system categories. Each maps to a shared `category` (the new-system name where one exists) and a `storm_group`. A category not in the file maps to `unmapped` and is counted, so a new city category shows up in the run output instead of disappearing. New tree categories take the group of the legacy types that feed them, so `tree` means the same thing before and after the switch.
+
+| system | rows | same | renamed | merged | split | legacy or new only | unmapped | excluded |
+|---|---|---|---|---|---|---|---|---|
+| legacy | 3,036,686 | 126,864 | 1,169,732 | 220,374 | 179,661 | 1,340,054 | 0 | 1 |
+| new | 68,542 | 2,578 | 32,867 | 12,496 | 12,104 | 8,441 | 56 | 0 |
+
+The 56 unmapped new-system rows have a blank category in the export. The excluded legacy row is "Test Case A". 1,283 legacy rows that were resubmitted to the new system are dropped, so those cases count once. Another 342 legacy rows name a new case that is not in the export (56 predate it); they are kept, since the legacy row is the only copy.
+
+2,519 legacy rows were opened on or after their own category's switch date (27 categories, 20 with more than one row, up to 110 days after). Nothing links them to a new-system case, so they are kept and marked with the `after_switch` column. What to do with them is #53.
+
+| storm group | legacy | new |
+|---|---|---|
+| snow_ice | 123,167 | 2 |
+| tree | 80,227 | 6,727 |
+| flooding | 6,655 | 0 |
+
+Tree volumes carry over the Oct 2025 switch at a similar level (Mar 2025: 291 legacy, Mar 2026: 340 new; Feb 137 and 144).
+
+### Time zone
+
+Both systems are stored as naive Boston wall-clock time. Legacy times are already local. New-system times are kept as published (see Risks). Since Aug 2025 the median request hour is 12.7 in legacy and 13.5 in the new system; converting the new times from UTC would put it at 9.7, with 32% of requests before 7am.
+
+### Change points
+
+`docs/data/change-points.csv` has the first new-system date for each shared category and storm group. Departments switched in waves: animals by 2025-08-01, street lights 2025-10-14 to 22, trees 2025-10-27, parks 2025-11-21 and 2026-03-10, public works 2026-06-23, needles 2026-09-08, signs and signals 2026-09-29. Storm groups: tree 2025-10-27, snow_ice 2026-06-23 (no snow since), flooding none.
 
 ## W1-5 results (2026-10-13)
 

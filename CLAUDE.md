@@ -39,7 +39,7 @@ Airflow executor and metadata DB (the local stack in `docker-compose.yaml` uses 
 - Splits are time-based, never shuffled: train 2015 to 2023, validate 2024, test 2025 to mid-2026.
 - A feature is used only if its history covers the training years.
 - Observed weather in training makes backtests upper bounds. Validation and test use Open-Meteo archived forecasts (CC BY 4.0, keep attribution).
-- The 311 migration is a change point: new-system times are UTC, categories are not one-to-one. The old-to-new category mapping is a versioned file changed only by reviewed PR.
+- The 311 migration is a change point: new-system times carry a `+00` suffix but are Boston local (ADR-020), categories are not one-to-one. The old-to-new category mapping is a versioned file changed only by reviewed PR.
 - The target unit and surge rule are frozen by ADR before Model Development. Do not redefine them in code.
 
 ## Security
@@ -60,6 +60,8 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `pip install -r Data-Pipeline/requirements.txt`
 - `python Data-Pipeline/scripts/legacy_311.py`: parse legacy 311 files in `Data-Pipeline/data/raw/311/` to `Data-Pipeline/data/interim/legacy_311.parquet`, with per-file drop counts
 - `python Data-Pipeline/scripts/measure_311.py`: reconciliation, sparsity, and storm ratio tables (markdown)
+- `python Data-Pipeline/scripts/new_311.py`: parse the new-system export to `Data-Pipeline/data/interim/new_311.parquet`, with drop counts
+- `python Data-Pipeline/scripts/map_311.py`: apply `docs/data/category-map.csv`, combine both systems into `Data-Pipeline/data/interim/311_combined.parquet`, write `docs/data/change-points.csv`
 - `python -m pytest Data-Pipeline/tests`
 - `cd Deployment/terraform && terraform init`: configure the GCS state backend and providers (needs `gcloud auth application-default login`)
 - `terraform fmt -check && terraform validate`: format and syntax check, no cloud calls

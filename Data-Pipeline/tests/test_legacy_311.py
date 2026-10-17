@@ -97,3 +97,25 @@ def test_duplicates_across_years_are_dropped(tmp_path):
     df, reports = read_years(tmp_path, [2015, 2016])
     assert len(df) == 1
     assert reports[-1].dropped == {"duplicate_case_id_across_years": 1}
+
+
+def test_resubmitted_case_id_is_kept(tmp_path):
+    body = "case_enquiry_id,open_dt,type,closure_reason\n" + (
+        "1,2026-01-06 12:06:00,PWD Graffiti,Case Closed. Resubmitted as BCS-00139755\n"
+        "2,2026-01-06 12:06:00,PWD Graffiti,Case Resolved\n"
+        "3,2026-01-06 12:06:00,PWD Graffiti,\n"
+        "4,2026-01-06 12:06:00,PWD Graffiti,See new case BCS-0081615\n"
+        "5,2026-01-06 12:06:00,PWD Graffiti,Resubmitted as BCS-000276248\n"
+    )
+    df, _ = read_legacy(write(tmp_path, "2026.csv", body), year=2026)
+    ids = df["resubmitted_as"].tolist()
+    assert ids[0] == "BCS-00139755"
+    assert ids[3:] == ["BCS-00081615", "BCS-00276248"]
+    assert df["resubmitted_as"].isna().tolist() == [False, True, True, False, False]
+    assert "closure_reason" not in df.columns
+
+
+def test_resubmitted_without_closure_column(tmp_path):
+    body = HEADER + "1,2015-01-01 08:00:00,,Pothole,Dorchester,42.3,-71.0\n"
+    df, _ = read_legacy(write(tmp_path, "2015.csv", body), year=2015)
+    assert df["resubmitted_as"].isna().all()
