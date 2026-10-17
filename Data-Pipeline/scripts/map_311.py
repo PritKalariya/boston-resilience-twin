@@ -35,6 +35,7 @@ COLUMNS = [
     "latitude",
     "longitude",
     "source",
+    "after_switch",
 ]
 LEGACY_RENAME = {"case_enquiry_id": "case_id", "type": "source_category", "location_zipcode": "zipcode"}
 NEW_RENAME = {
@@ -78,7 +79,7 @@ def load_category_map(path: Path | str) -> pd.DataFrame:
 def standardize(df: pd.DataFrame, system: str) -> pd.DataFrame:
     rename = LEGACY_RENAME if system == "legacy" else NEW_RENAME
     out = df.rename(columns=rename).assign(source_system=system)
-    return out.reindex(columns=[c for c in COLUMNS if c not in {"category", "storm_group", "match"}])
+    return out.reindex(columns=[c for c in COLUMNS if c not in {"category", "storm_group", "match", "after_switch"}])
 
 
 def apply_map(df: pd.DataFrame, cmap: pd.DataFrame, system: str) -> pd.DataFrame:
@@ -149,6 +150,18 @@ def change_points(combined: pd.DataFrame) -> pd.DataFrame:
     ])
 
 
+def flag_after_switch(combined: pd.DataFrame, points: pd.DataFrame) -> pd.Series:
+    """Legacy rows opened on or after their category's first new-system day.
+
+    Only flags them; what to do with them is #53.
+    """
+    if combined.empty:
+        return pd.Series(False, index=combined.index)
+    switch = points.loc[points["level"] == "category"].set_index("name")["switch_date"]
+    starts = pd.to_datetime(combined["category"].map(switch))
+    return (combined["source_system"] == "legacy") & (combined["open_dt"] >= starts)
+
+
 def combine(legacy: pd.DataFrame, new: pd.DataFrame, cmap: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     legacy, resubmitted = drop_resubmitted(legacy, new["case_id"])
     parts = [
@@ -157,7 +170,9 @@ def combine(legacy: pd.DataFrame, new: pd.DataFrame, cmap: pd.DataFrame) -> tupl
     ]
     parts = [p for p in parts if not p.empty]
     combined = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
-    return combined.reindex(columns=COLUMNS), {"resubmitted_dropped": resubmitted}
+    combined = combined.reindex(columns=COLUMNS)
+    combined["after_switch"] = flag_after_switch(combined, change_points(combined)).astype(bool)
+    return combined, {"resubmitted_dropped": resubmitted, "after_switch": int(combined["after_switch"].sum())}
 
 
 def summary(combined: pd.DataFrame) -> pd.DataFrame:
@@ -189,6 +204,7 @@ def main() -> None:
     change_points(combined).to_csv(args.change_points, index=False)
 
     print(f"dropped {stats['resubmitted_dropped']:,} legacy rows resubmitted to the new system")
+    print(f"flagged {stats['after_switch']:,} legacy rows opened after their category switched (after_switch)")
     print(summary(combined).to_string())
     unmapped = combined.loc[combined["match"] == UNMAPPED, ["source_system", "source_category"]]
     if not unmapped.empty:

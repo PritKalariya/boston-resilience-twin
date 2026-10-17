@@ -32,7 +32,7 @@ REQUIRED_COLUMNS = {"case_id", "open_date", "service_name"}
 # open_date is published with a +00 suffix, but the wall-clock time is
 # Boston local. Cases resubmitted from the legacy system open within minutes
 # of the legacy close time (local) in both EST and EDT; true UTC would put
-# them 4 to 5 hours later. map_311.check_clock re-tests this every run.
+# them 4 to 5 hours later (ADR-020). map_311.check_clock re-tests this every run.
 # Set to "utc" if the city starts publishing real UTC.
 CLOCK = "local"
 BOSTON = "America/New_York"

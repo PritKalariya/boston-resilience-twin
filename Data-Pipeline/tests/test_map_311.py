@@ -150,3 +150,20 @@ def test_change_points(tmp_path):
     assert row["legacy_after_switch"] == 1
     assert ("storm_group", "tree") in cp.index
     assert ("category", "Parking Enforcement") not in cp.index
+
+
+def test_after_switch_flags_late_legacy_rows_only(tmp_path):
+    cmap = load_category_map(write_map(tmp_path))
+    legacy = legacy_rows([
+        ["1", "2025-10-26 23:59", None, "Tree Emergencies", None],
+        ["2", "2025-10-27 00:00", None, "Tree Emergencies", None],
+        ["3", "2026-02-12 09:00", None, "Tree Emergencies", None],
+        ["4", "2026-02-12 09:00", None, "Parking Enforcement", None],
+    ])
+    new = new_rows([["BCS-1", "2025-10-27 15:00", "Fallen Tree or Branches"]])
+    combined, stats = combine(legacy, new, cmap)
+    flags = combined.set_index("case_id")["after_switch"]
+    assert flags.dtype == bool
+    assert flags.to_dict() == {"1": False, "2": True, "3": True, "4": False, "BCS-1": False}
+    assert stats["after_switch"] == 2
+    assert len(combined) == 5

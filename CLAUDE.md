@@ -39,7 +39,7 @@ Airflow executor and metadata DB (the local stack in `docker-compose.yaml` uses 
 - Splits are time-based, never shuffled: train 2015 to 2023, validate 2024, test 2025 to mid-2026.
 - A feature is used only if its history covers the training years.
 - Observed weather in training makes backtests upper bounds. Validation and test use Open-Meteo archived forecasts (CC BY 4.0, keep attribution).
-- The 311 migration is a change point: new-system times are UTC, categories are not one-to-one. The old-to-new category mapping is a versioned file changed only by reviewed PR.
+- The 311 migration is a change point: new-system times carry a `+00` suffix but are Boston local (ADR-020), categories are not one-to-one. The old-to-new category mapping is a versioned file changed only by reviewed PR.
 - The target unit and surge rule are frozen by ADR before Model Development. Do not redefine them in code.
 
 ## Security
