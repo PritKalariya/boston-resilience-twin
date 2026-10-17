@@ -22,7 +22,9 @@ boston-resilience-twin/
 ├── Monitoring/             drift jobs, dashboards, alert rules
 ├── Frontend/               digital twin map and dashboards
 ├── .github/workflows/      CI/CD pipelines
-└── docs/                   project status, decision records, runbook
+├── docs/                   project status, decision records, runbook
+├── docker-compose.yaml     shared Airflow stack for every component (ADR-017)
+└── .env.example            local dev overrides only
 ```
 
 ## Setup

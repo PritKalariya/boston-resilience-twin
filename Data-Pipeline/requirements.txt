@@ -1,3 +1,9 @@
-pandas>=2.2
-pyarrow>=15
-pytest>=8
+# Pins from Apache Airflow's constraints for the image in docker-compose.yaml (ADR-013, ADR-017).
+# The -c line applies the same constraints to every transitive dependency.
+# airflow and pendulum come from the Airflow image, not this file.
+# pytest is not in the constraints file; pinned to the version the tests passed on.
+-c https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt
+numpy==2.5.3
+pandas==3.0.5
+pyarrow==25.0.1
+pytest==9.1.1
