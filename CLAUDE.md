@@ -66,6 +66,7 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `terraform plan -var-file=terraform.tfvars`: read-only dry run against project 1 (`terraform.tfvars` is gitignored; copy from `terraform.tfvars.example`)
 - `terraform apply -var-file=terraform.tfvars`: human only, never run by Claude Code
 - `gcloud compute instances start|stop airflow-vm --zone=us-east1-b`: VM power; Terraform does not manage run state
+- `read -rs VALUE && printf '%s' "$VALUE" | gcloud secrets versions add <secret> --data-file=-; unset VALUE`: add a secret value with no trailing newline and nothing in shell history (see runbook). Human only, never run by Claude Code
 - `docker compose config --quiet`: validate `docker-compose.yaml`; no output means valid
 - `docker compose up -d --wait`: start Airflow 3.3.2 (LocalExecutor) and Postgres 16 and wait until healthy; UI at http://localhost:8080, login airflow / airflow (local defaults)
 - `docker compose ps -a`: service state and health; `airflow-init` shows `Exited (0)` once the database is migrated

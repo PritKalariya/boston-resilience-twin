@@ -73,3 +73,26 @@ resource "google_service_account_iam_member" "team_act_as_vm_sa" {
   role               = "roles/iam.serviceAccountUser"
   member             = each.value
 }
+
+# --- Secret writers ---------------------------------------------------------
+
+# Adding a secret value needs more than accessor. The grant is per secret, so a
+# writer can add versions to these two slots and to nothing else in the project.
+locals {
+  secret_writer_grants = {
+    for pair in setproduct(var.secret_writers, local.secret_ids) :
+    "${pair[0]}|${pair[1]}" => {
+      member    = pair[0]
+      secret_id = pair[1]
+    }
+  }
+}
+
+resource "google_secret_manager_secret_iam_member" "secret_writers" {
+  for_each = local.secret_writer_grants
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.project_1[each.value.secret_id].secret_id
+  role      = "roles/secretmanager.secretVersionAdder"
+  member    = each.value.member
+}
