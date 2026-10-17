@@ -9,6 +9,7 @@ Week 2: Processing (due 2026-10-18)
 | Issue | Owner | Due | State | Note |
 |---|---|---|---|---|
 | #1 Harden repo and team workflow | Prit | 2026-10-10 | in progress | |
+| #2 Local dev environment and Python pin | Punith | 2026-10-13 | in review | `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); hello DAG passes; ADR-013 pins Python 3.12; unblocks #20 and #22 |
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | in review | results below; new-system clock and flooding gap need a team call |
@@ -24,6 +25,9 @@ None.
 - **Snow has not been through the new system yet.** Snow Plowing and Emergency Responder Snow Plowing exist (2 requests), but all of winter 2025 to 2026 went to the legacy system. Unshoveled Sidewalk has no new category so far. The first snow storm this winter is the real switch for snow_ice.
 - Neighborhood names differ between systems: 23 legacy and 25 new-system names, 16 shared (the new system splits Allston and Brighton, adds North End, Chinatown, West End and others). #15 needs one unit list, from the spatial join or a name map, before daily counts.
 - Animal requests are missing from 2025-06-12 (last legacy) to 2025-08-01 (first day of the new export).
+- The local Airflow stack idles at about 0.95 GB of memory (scheduler 397 MiB, API server 294 MiB, DAG processor 193 MiB, Postgres 67 MiB; `docker stats`, 2026-10-16). The e2-medium has 4 GB, so tasks get roughly 2.5 GB once Ubuntu is counted (estimate). #20 should confirm headroom on the VM, and pipeline tasks should avoid loading every legacy year into memory at once.
+- The Airflow 3.3.2 image ships pandas 3.0.5 and pyarrow 25.0.1, while `Data-Pipeline/requirements.txt` asks only for `pandas>=2.2`. The current 14 tests pass in the image (Python 3.12.14, pandas 3.0.5; 2026-10-16), but the requirements should be aligned with the Airflow constraints before the scripts move into DAGs (#22).
+- On all years (2015 to 2026), `map_311.py` peaks at about 3.5 GB, above the roughly 2.5 GB left for tasks on the e2-medium, and `legacy_311.py` at about 1.9 GB. #22 should split them per year or read fewer columns before they move into DAGs.
 
 ## W2-1 results (2026-10-16)
 
