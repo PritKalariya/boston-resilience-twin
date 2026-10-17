@@ -22,6 +22,7 @@ Data pipeline: Srikar. Fairness and data quality: Alekhya. Forecast model, respo
 - GitHub Actions for CI/CD, Terraform for infrastructure
 - Cloud Monitoring and Evidently. Slack and email alerts. No Grafana, Prometheus, or W&B.
 - Python 3.12 (ADR-013), Docker Compose for local development (Airflow 3.3.2, Postgres 16)
+- Layout (ADR-017): one top-level folder per component; the root `docker-compose.yaml` is the shared Airflow stack and mounts each component's `dags/` at `/opt/airflow/dags/<component>`.
 
 ## Open: do not choose, ask the user
 Airflow executor and metadata DB (the local stack in `docker-compose.yaml` uses LocalExecutor and Postgres 16; the ADR comes with #20), API framework (FastAPI is a candidate only), dashboard and map libraries, Gemini tier and per-event cap, alert thresholds.
@@ -57,7 +58,7 @@ Data Pipeline Oct 25. Model Development Nov 15. Deployment Dec 6. Expo requireme
 ## Commands
 Add each command here, in the PR that introduces it. Do not guess commands that are not listed.
 
-- `pip install -r Data-Pipeline/requirements.txt`
+- `pip install -r Data-Pipeline/requirements.txt`: pinned from the Airflow 3.3.2 constraints (the `-c` line). A new package takes the constraints file's version; if the file has none, pin the version the tests passed on.
 - `python Data-Pipeline/scripts/legacy_311.py`: parse legacy 311 files in `Data-Pipeline/data/raw/311/` to `Data-Pipeline/data/interim/legacy_311.parquet`, with per-file drop counts
 - `python Data-Pipeline/scripts/measure_311.py`: reconciliation, sparsity, and storm ratio tables (markdown)
 - `python Data-Pipeline/scripts/new_311.py`: parse the new-system export to `Data-Pipeline/data/interim/new_311.parquet`, with drop counts
