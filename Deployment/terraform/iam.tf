@@ -64,3 +64,12 @@ resource "google_secret_manager_secret_iam_member" "team_secrets" {
   role      = "roles/secretmanager.secretAccessor"
   member    = each.value.member
 }
+
+# SSH via OS Login to a VM that has a service account attached also requires permission to act as that service account.
+resource "google_service_account_iam_member" "team_act_as_vm_sa" {
+  for_each = toset(var.team_members)
+
+  service_account_id = google_service_account.airflow_vm.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = each.value
+}

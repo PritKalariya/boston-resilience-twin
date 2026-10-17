@@ -160,6 +160,17 @@ SSH goes through OS Login:
 gcloud compute ssh airflow-vm --zone=us-east1-b
 ```
 
+Two IAM facts make that work, both of them in Terraform: every team member has
+`roles/compute.osLogin`, and every team member has
+`roles/iam.serviceAccountUser` on `airflow-vm-sa` alone. The second one is
+needed because the VM has a service account attached, and logging in to such a
+VM counts as acting as that service account. The grant is scoped to the one
+service account, not the project.
+
+A grant to a member who has never signed in to GCP fails with
+"User ... does not exist". Each member signs in once, then `terraform apply` is
+re-run to pick up the grants that failed.
+
 A stopped VM still plans clean: the config ignores the attributes that move on
 their own (the ephemeral IP, the resolved boot image, OS Login SSH keys).
 

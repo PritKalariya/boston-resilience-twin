@@ -10,8 +10,9 @@ Week 2: Processing (due 2026-10-18)
 |---|---|---|---|---|
 | #1 Harden repo and team workflow | Prit | 2026-10-10 | in progress | |
 | #2 Local dev environment and Python pin | Punith | 2026-10-13 | in review | `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); hello DAG passes; ADR-013 pins Python 3.12; unblocks #20 and #22 |
-| #3 Terraform project 1 | Prit | 2026-10-11 | applied, PR #30 in review | 51 resources applied and verified on owner account; plan clean; VM stopped. ADR-015 in PR #30. |
+| #3 Terraform project 1 | Prit | 2026-10-11 | done, merged in #30 | 51 resources applied and verified on owner account; plan clean; VM stopped. ADR-015 in PR #30. |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | in review | results below; unblocks #6, #10, #11 |
+| #29 Verify teammate IAM | Prit | 2026-10-15 | in review | All 6 members granted. Added `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start + SSH verified; plan clean running and stopped; VM stopped. |
 
 ## Blocked
 None.
