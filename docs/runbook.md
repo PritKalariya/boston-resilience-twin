@@ -207,6 +207,32 @@ re-run to pick up the grants that failed.
 A stopped VM still plans clean: the config ignores the attributes that move on
 their own (the ephemeral IP, the resolved boot image, OS Login SSH keys).
 
+### Sudo on the VM
+
+`roles/compute.osLogin`, which every team member has, is SSH without sudo.
+Sudo is `roles/compute.osAdminLogin`, and it is held only by the members
+listed in the `vm_admins` tfvars variable (the owner and Srikar). The grant is
+on the `airflow-vm` instance, not on the project, so it does not follow to any
+other VM that project 1 gains later.
+
+Check whether you have it by running any root command over SSH:
+
+```bash
+gcloud compute ssh airflow-vm --zone=us-east1-b --command='sudo -n true && echo sudo ok'
+```
+
+To give someone sudo, add their `user:` address to `vm_admins` in
+`terraform.tfvars` (one line) and apply:
+
+```bash
+cd Deployment/terraform
+terraform plan -var-file=terraform.tfvars -out=tfplan
+terraform apply tfplan
+```
+
+Removing the line and applying again takes it away. A member who has never
+signed in to GCP fails the same way as the other IAM grants above.
+
 ### Tear down
 
 ```bash

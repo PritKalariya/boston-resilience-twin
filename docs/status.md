@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-16 by Srikarmk. Edit this file in the PR that changes the state.
+Updated: 2026-10-16 by PritKalariya. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -14,6 +14,7 @@ Week 2: Processing (due 2026-10-18)
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | in review | results below; new-system clock settled in ADR-020; flooding gap needs a team call |
 | #29 Verify teammate IAM | Prit | 2026-10-15 | done | PR #51 merged. All 6 members granted, plus `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start and SSH verified; VM stopped. |
+| #49 Decide who gets sudo on the Airflow VM | Prit | 2026-10-17 | in review | Owner call: owner plus Srikar get `roles/compute.osAdminLogin`, bound to the `airflow-vm` instance only, through the new `vm_admins` variable. Plan-only; apply from main after merge. |
 | #50 Let Kirtan add secret values | Prit | 2026-10-16 | done | PR #54 merged. secretVersionAdder for `secret_writers` on both secret slots (secret level); ADR-019. |
 
 ## Blocked
