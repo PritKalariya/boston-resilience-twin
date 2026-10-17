@@ -35,3 +35,14 @@ variable "secret_writers" {
   EOT
   type        = list(string)
 }
+
+variable "vm_admins" {
+  description = <<-EOT
+    IAM member strings for the members who get sudo on the Airflow VM, for
+    example ["user:name@northeastern.edu"]. They get
+    roles/compute.osAdminLogin on the airflow-vm instance only, never project
+    wide. No default on purpose: the real addresses are supplied through a
+    tfvars file that is never committed.
+  EOT
+  type        = list(string)
+}
