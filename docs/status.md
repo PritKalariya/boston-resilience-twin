@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-16 by Prit. Edit this file in the PR that changes the state.
+Updated: 2026-10-18 by Prit. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -13,6 +13,7 @@ Week 2: Processing (due 2026-10-18)
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | in review | results below; new-system clock settled in ADR-020; flooding gap needs a team call |
+| #20 Airflow on the VM | Prit | 2026-10-18 | done | Airflow stack on airflow-vm (LocalExecutor, Postgres 16; ADR-016); UI by SSH tunnel only; VM stopped. Runbook: "Airflow on the VM". After #58 merges, run the update step in the runbook on the VM |
 | #29 Verify teammate IAM | Prit | 2026-10-15 | done | PR #51 merged. All 6 members granted, plus `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start and SSH verified; VM stopped. |
 | #50 Let Kirtan add secret values | Prit | 2026-10-16 | done | PR #54 merged. secretVersionAdder for `secret_writers` on both secret slots (secret level); ADR-019. |
 | #48 Lifecycle rule for noncurrent versions on the data bucket | Prit | 2026-10-18 | in review | Delete noncurrent versions of `boston-resilience-twin-data` 30 days after they go noncurrent. Plan-only (0 to add, 1 to change, 0 to destroy); apply from main after merge. |
