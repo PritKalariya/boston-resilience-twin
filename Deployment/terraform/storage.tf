@@ -11,6 +11,17 @@ resource "google_storage_bucket" "data" {
     enabled = true
   }
 
+  # Versioning keeps every overwritten raw pull forever otherwise.
+  lifecycle_rule {
+    condition {
+      days_since_noncurrent_time = 30
+      with_state                 = "ARCHIVED"
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
   # Default. Teardown of a bucket holding objects is a deliberate manual step.
   force_destroy = false
 
