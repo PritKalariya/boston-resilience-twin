@@ -16,6 +16,7 @@ Week 2: Processing (due 2026-10-18)
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | in review | results below; new-system clock settled in ADR-020; flooding gap needs a team call |
 | #29 Verify teammate IAM | Prit | 2026-10-15 | done | PR #51 merged. All 6 members granted, plus `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start and SSH verified; VM stopped. |
 | #50 Let Kirtan add secret values | Prit | 2026-10-16 | done | PR #54 merged. secretVersionAdder for `secret_writers` on both secret slots (secret level); ADR-019. |
+| #48 Lifecycle rule for noncurrent versions on the data bucket | Prit | 2026-10-18 | in review | Delete noncurrent versions of `boston-resilience-twin-data` 30 days after they go noncurrent. Plan-only (0 to add, 1 to change, 0 to destroy); apply from main after merge. |
 
 ## Blocked
 None.

@@ -120,6 +120,18 @@ Vertex, or Gemini.
 State is in the GCS bucket `boston-resilience-twin-tfstate` under the prefix
 `project1`. That bucket is not managed by Terraform.
 
+The data bucket `boston-resilience-twin-data` has object versioning on, so an
+overwritten raw pull is kept as a noncurrent version. A lifecycle rule deletes
+noncurrent versions 30 days after they become noncurrent, which bounds the cost
+of keeping every overwrite. Live objects are never deleted by the rule, so a
+mistaken overwrite can still be rolled back inside that 30-day window. Confirm
+the rule on the bucket with:
+
+```bash
+gcloud storage buckets describe gs://boston-resilience-twin-data \
+  --format="default(lifecycle_config)"
+```
+
 ### Cost before you apply
 
 | Resource | Running | Stopped or idle |
@@ -231,17 +243,20 @@ their own (the ephemeral IP, the resolved boot image, OS Login SSH keys).
 
 ### Tear down
 
-```bash
-cd Deployment/terraform
-terraform destroy -var-file=terraform.tfvars
-```
-
 The data bucket has `force_destroy = false`, so a destroy fails while objects
 are still in it. Empty it first, deliberately, only when the data is no longer
-needed:
+needed. The 30-day lifecycle rule clears old versions, not live ones, so this
+step is still required:
 
 ```bash
 gcloud storage rm -r --all-versions gs://boston-resilience-twin-data/**
+```
+
+Then destroy all Project 1 resources:
+
+```bash
+cd Deployment/terraform
+terraform destroy -var-file=terraform.tfvars
 ```
 
 **The state bucket is not destroyed by Terraform.** `boston-resilience-twin-tfstate`
