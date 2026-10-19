@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-16 by Srikarmk. Edit this file in the PR that changes the state.
+Updated: 2026-10-19 by Pu1ni2. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -12,6 +12,7 @@ Week 2: Processing (due 2026-10-18)
 | #2 Local dev environment and Python pin | Punith | 2026-10-13 | done | PR #55 merged. `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); ADR-013 pins Python 3.12 |
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
+| #11 Decision: live baselines for the new 311 format | Punith | 2026-10-13 | in review | ADR-005: baseline = same weeks of the previous 3 years, both systems; replay passes for tree and street lights; results below |
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | in review | results below; new-system clock settled in ADR-020; flooding gap needs a team call |
 | #29 Verify teammate IAM | Prit | 2026-10-15 | done | PR #51 merged. All 6 members granted, plus `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start and SSH verified; VM stopped. |
 | #50 Let Kirtan add secret values | Prit | 2026-10-16 | done | PR #54 merged. secretVersionAdder for `secret_writers` on both secret slots (secret level); ADR-019. |
@@ -22,13 +23,27 @@ None.
 ## Risks raised
 - Legacy storm groups cover only 6.9% of legacy requests (210,049 of 3,037,969), against about 15% in the pre-scoping check. The groups now live in `docs/data/category-map.csv` (`storm_group` column) and may be narrower than the first run's. Worth a look before #10 locks the unit.
 - **New-system times are Boston local, not UTC.** `open_date` ends in `+00`, but 1,283 cases resubmitted from the legacy system open a median 2.6 minutes before the legacy close time, in both EST and EDT. Real UTC would be 4 to 5 hours later. Converting from UTC would shift every new-system time 4 to 5 hours early and move 1,124 requests (1.6%) to the previous day. The pipeline treats them as local and re-checks this on every run (`map_311.check_clock`). Recorded in ADR-020, accepted by the team on 2026-10-16; CLAUDE.md is updated to match.
-- **Flooding has no new-system category.** Legacy flooding requests (mostly Catchbasin) stop after Jul 2026 and nothing in the new system replaces them, so live flooding counts are zero. Affects the target and #11.
-- **Snow has not been through the new system yet.** Snow Plowing and Emergency Responder Snow Plowing exist (2 requests), but all of winter 2025 to 2026 went to the legacy system. Unshoveled Sidewalk has no new category so far. The first snow storm this winter is the real switch for snow_ice.
+- **Flooding has no new-system category.** Legacy flooding requests (mostly Catchbasin) stop after Jul 2026 and nothing in the new system replaces them, so live flooding counts are zero. Affects the target; ADR-005 escalates it, since no baseline can fix a missing source. Needs a team decision (#10, #16) before the target freeze.
+- **Snow has not been through the new system yet.** Snow Plowing and Emergency Responder Snow Plowing exist (2 requests), but all of winter 2025 to 2026 went to the legacy system. Unshoveled Sidewalk (48% of last winter's snow requests) has no new category so far. The first snow storm this winter is the real switch for snow_ice; ADR-005 sets a re-check for it (runbook).
+- Five new-system categories appeared after the W2-1 run (Illegal Parking 909, Abandoned Vehicles 51, Parking Meter Repairs 13, OPC Public Inquiry 2, Moving Permits 1; export of 2026-10-19). They are `unmapped` until `docs/data/category-map.csv` gets rows for them. None is storm related.
 - Neighborhood names differ between systems: 23 legacy and 25 new-system names, 16 shared (the new system splits Allston and Brighton, adds North End, Chinatown, West End and others). #15 needs one unit list, from the spatial join or a name map, before daily counts.
 - Animal requests are missing from 2025-06-12 (last legacy) to 2025-08-01 (first day of the new export).
 - The local Airflow stack idles at about 0.95 GB of memory (scheduler 397 MiB, API server 294 MiB, DAG processor 193 MiB, Postgres 67 MiB; `docker stats`, 2026-10-16). The e2-medium has 4 GB, so tasks get roughly 2.5 GB once Ubuntu is counted (estimate). #20 should confirm headroom on the VM, and pipeline tasks should avoid loading every legacy year into memory at once.
 - The Airflow 3.3.2 image ships pandas 3.0.5 and pyarrow 25.0.1, while `Data-Pipeline/requirements.txt` asks only for `pandas>=2.2`. The current 14 tests pass in the image (Python 3.12.14, pandas 3.0.5; 2026-10-16), but the requirements should be aligned with the Airflow constraints before the scripts move into DAGs (#22).
 - On all years (2015 to 2026), `map_311.py` peaks at about 3.5 GB, above the roughly 2.5 GB left for tasks on the e2-medium, and `legacy_311.py` at about 1.9 GB. #22 should split them per year or read fewer columns before they move into DAGs.
+
+## W1-11 results (2026-10-19)
+
+Command: `python Data-Pipeline/scripts/live_baselines.py` (plus `--window-days 84` and `--drop-after-switch`, same verdicts). Data: legacy files 2015 to 2026 and the new-system export downloaded 2026-10-19, combined with `map_311.py`; last full day 2026-10-17; Logan GHCN-D with WSF5 gusts.
+
+| series | switch | step after/before vs normal years | replay, method A (k 1.5) | verdict |
+|---|---|---|---|---|
+| tree | 2025-10-27 | 0.34 vs 0.37 to 0.70 (lower, -31%); monthly 0.82 of the previous 3 years | quiet days flagged 1.2% (normal 2.5%), weather days 15.2% (normal 16.3%) | pass |
+| Street Light Outage | 2025-10-22 | 1.23 vs 0.84 to 1.34 (no shift) | quiet days 5.6% (normal 4.8%) | pass; trailing methods B and C fail |
+| snow_ice | 2026-06-23 | not testable: no new-system winter; 50.4% of last winter's requests have a new category | | re-check at first snow |
+| flooding | none | no new-system source | | escalated |
+
+Decision in ADR-005: method A (same day plus or minus 14 days in each of the previous 3 years, both systems, broad storm groups).
 
 ## W2-1 results (2026-10-16)
 

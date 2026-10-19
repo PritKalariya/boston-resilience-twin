@@ -88,6 +88,28 @@ environment block in `docker-compose.yaml` passes one value to all of them.
 - **A DAG does not show up.** Run `airflow dags list-import-errors` (above).
   New files are picked up within 30 seconds.
 
+## Surge baseline re-check (ADR-005)
+
+ADR-005 builds surge baselines from the same weeks of the previous 3 years,
+both 311 systems combined. Rerun the check when any of these happens:
+
+- the first new-system snow of 25 mm or more at Logan;
+- a `docs/data/category-map.csv` PR that touches a storm group;
+- the live quiet-day surge rate stays above the replay maximum for 30 days.
+
+```bash
+python Data-Pipeline/scripts/legacy_311.py
+python Data-Pipeline/scripts/new_311.py
+python Data-Pipeline/scripts/map_311.py --change-points Data-Pipeline/data/interim/change-points.csv
+python Data-Pipeline/scripts/live_baselines.py
+```
+
+`map_311.py` writes the switch dates to the gitignored data folder here, so
+the committed `docs/data/change-points.csv` only changes in a reviewed PR.
+For snow, compare snow-day counts with the legacy range and look for
+unmapped or non-snow categories that jump on snow days; open a category-map
+PR if so, and update ADR-005.
+
 ## Project 1 infrastructure (Terraform)
 
 Config lives in `Deployment/terraform/`. It covers project 1 only (ADR-009):

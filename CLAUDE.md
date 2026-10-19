@@ -62,6 +62,7 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `python Data-Pipeline/scripts/measure_311.py`: reconciliation, sparsity, and storm ratio tables (markdown)
 - `python Data-Pipeline/scripts/new_311.py`: parse the new-system export to `Data-Pipeline/data/interim/new_311.parquet`, with drop counts
 - `python Data-Pipeline/scripts/map_311.py`: apply `docs/data/category-map.csv`, combine both systems into `Data-Pipeline/data/interim/311_combined.parquet`, write `docs/data/change-points.csv`
+- `python Data-Pipeline/scripts/live_baselines.py`: test the 311 switch dates as change points and replay surge baseline methods across them (markdown for ADR-005); `--window-days 84` and `--drop-after-switch` for sensitivity
 - `python -m pytest Data-Pipeline/tests`
 - `cd Deployment/terraform && terraform init`: configure the GCS state backend and providers (needs `gcloud auth application-default login`)
 - `terraform fmt -check && terraform validate`: format and syntax check, no cloud calls
