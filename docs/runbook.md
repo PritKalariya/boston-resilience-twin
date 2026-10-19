@@ -110,6 +110,18 @@ For snow, compare snow-day counts with the legacy range and look for
 unmapped or non-snow categories that jump on snow days; open a category-map
 PR if so, and update ADR-005.
 
+## Static layers
+
+`Data-Pipeline/config/static_layers.csv` lists each static layer: file name, source URL, publisher, vintage, license, and the key column that must be present, unique and non-blank. To add or replace a layer, change a row there in a reviewed PR.
+
+```bash
+python Data-Pipeline/scripts/static_layers.py --download   # fresh clone: fetch missing files, then load
+python Data-Pipeline/scripts/static_layers.py              # files already in Data-Pipeline/data/raw/static/
+python Data-Pipeline/scripts/static_layers.py --refresh    # fetch every file again (source updated)
+```
+
+Raw files go to `Data-Pipeline/data/raw/static/` and the loaded layers to `Data-Pipeline/data/interim/static/` (vectors as GeoParquet in EPSG:4326), both gitignored. The run rewrites `docs/data/static-layers.csv` with the source CRS, row count, retrieval date and SHA-256 of each file; commit it with the change. A changed hash after `--refresh` means the city published a new version, so check the row counts before using it. The run stops on a missing, empty or unreadable file, a missing or duplicate key, or a layer that falls outside Boston after reprojection (usually a wrong CRS).
+
 ## Project 1 infrastructure (Terraform)
 
 Config lives in `Deployment/terraform/`. It covers project 1 only (ADR-009):
