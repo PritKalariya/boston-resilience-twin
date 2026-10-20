@@ -47,6 +47,24 @@ NEW_RENAME = {
     "report_source": "source",
 }
 
+# Everything standardize() keeps, plus the resubmitted link. `reason` is not needed.
+LEGACY_COLUMNS = [
+    "case_enquiry_id",
+    "open_dt",
+    "closed_dt",
+    "case_status",
+    "type",
+    "department",
+    "neighborhood",
+    "ward",
+    "precinct",
+    "location_zipcode",
+    "latitude",
+    "longitude",
+    "source",
+    "resubmitted_as",
+]
+
 MAX_CLOCK_OFFSET_HOURS = 0.5
 MIN_LINKED_CASES = 20
 
@@ -83,12 +101,14 @@ def standardize(df: pd.DataFrame, system: str) -> pd.DataFrame:
 
 
 def apply_map(df: pd.DataFrame, cmap: pd.DataFrame, system: str) -> pd.DataFrame:
-    side = cmap.loc[cmap["system"] == system, ["source_category", "category", "storm_group", "match"]]
-    out = df.merge(side, on="source_category", how="left", validate="many_to_one")
-    unknown = out["category"].isna()
-    out.loc[unknown, "category"] = UNMAPPED
-    out.loc[unknown, "match"] = UNMAPPED
-    out["storm_group"] = out["storm_group"].fillna("").replace("", pd.NA)
+    # A lookup, not a merge: a merge copies every column of the 3M-row legacy table.
+    side = cmap.loc[cmap["system"] == system].set_index("source_category")
+    source = df["source_category"]
+    out = df.assign(
+        category=source.map(side["category"]).fillna(UNMAPPED),
+        storm_group=source.map(side["storm_group"]).replace("", pd.NA),
+        match=source.map(side["match"]).fillna(UNMAPPED),
+    )
     return out.reindex(columns=COLUMNS)
 
 
@@ -124,30 +144,35 @@ def check_clock(legacy: pd.DataFrame, new: pd.DataFrame) -> tuple[float, int]:
 
 def change_points(combined: pd.DataFrame) -> pd.DataFrame:
     """First new-system date for every category and storm group fed by both systems."""
-    new_start = combined.loc[combined["source_system"] == "new", "open_dt"].min()
+    columns = ["level", "name", "storm_group", "switch_date", "legacy_last", "legacy_after_switch", "note"]
+    if combined.empty:
+        return pd.DataFrame(columns=columns)
+    opened = combined["open_dt"]
+    is_legacy = combined["source_system"] == "legacy"
+    new_start = opened[~is_legacy].min()
     rows = []
-    levels = [("category", "category"), ("storm_group", "storm_group")]
-    for level, key in levels:
-        for name, g in combined.dropna(subset=[key]).groupby(key):
-            if name == UNMAPPED:
-                continue
-            legacy = g.loc[g["source_system"] == "legacy", "open_dt"]
-            new = g.loc[g["source_system"] == "new", "open_dt"]
-            if legacy.empty or new.empty:
-                continue
-            switch = new.min().normalize()
+    for level in ("category", "storm_group"):
+        key = combined[level]
+        new_first = opened.where(~is_legacy).groupby(key).min().dt.normalize()
+        legacy_last = opened.where(is_legacy).groupby(key).max()
+        both = new_first.notna() & legacy_last.reindex(new_first.index).notna()
+        names = sorted(n for n in new_first.index[both] if n != UNMAPPED)
+        if not names:
+            continue
+        switch = new_first[names]
+        after = (is_legacy & (opened >= key.map(switch))).groupby(key).sum()
+        group = combined["storm_group"].groupby(key).first()
+        for name in names:
             rows.append({
                 "level": level,
                 "name": name,
-                "storm_group": g["storm_group"].dropna().iloc[0] if g["storm_group"].notna().any() else "",
-                "switch_date": switch.date(),
-                "legacy_last": legacy.max().date(),
-                "legacy_after_switch": int((legacy >= switch).sum()),
-                "note": "new data starts here, switch may be earlier" if switch == new_start.normalize() else "",
+                "storm_group": group.get(name) if pd.notna(group.get(name)) else "",
+                "switch_date": switch[name].date(),
+                "legacy_last": legacy_last[name].date(),
+                "legacy_after_switch": int(after[name]),
+                "note": "new data starts here, switch may be earlier" if switch[name] == new_start.normalize() else "",
             })
-    return pd.DataFrame(rows, columns=[
-        "level", "name", "storm_group", "switch_date", "legacy_last", "legacy_after_switch", "note",
-    ])
+    return pd.DataFrame(rows, columns=columns)
 
 
 def flag_after_switch(combined: pd.DataFrame, points: pd.DataFrame) -> pd.Series:
@@ -163,6 +188,7 @@ def flag_after_switch(combined: pd.DataFrame, points: pd.DataFrame) -> pd.Series
 
 
 def combine(legacy: pd.DataFrame, new: pd.DataFrame, cmap: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    offset, linked = check_clock(legacy, new)
     legacy, resubmitted = drop_resubmitted(legacy, new["case_id"])
     parts = [
         apply_map(standardize(legacy, "legacy"), cmap, "legacy"),
@@ -172,7 +198,12 @@ def combine(legacy: pd.DataFrame, new: pd.DataFrame, cmap: pd.DataFrame) -> tupl
     combined = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
     combined = combined.reindex(columns=COLUMNS)
     combined["after_switch"] = flag_after_switch(combined, change_points(combined)).astype(bool)
-    return combined, {"resubmitted_dropped": resubmitted, "after_switch": int(combined["after_switch"].sum())}
+    return combined, {
+        "clock_offset_hours": offset,
+        "linked_cases": linked,
+        "resubmitted_dropped": resubmitted,
+        "after_switch": int(combined["after_switch"].sum()),
+    }
 
 
 def summary(combined: pd.DataFrame) -> pd.DataFrame:
@@ -191,13 +222,12 @@ def main() -> None:
     args = parser.parse_args()
 
     cmap = load_category_map(args.map)
-    legacy = pd.read_parquet(args.legacy)
-    new = pd.read_parquet(args.new)
-
-    offset, linked = check_clock(legacy, new)
-    print(f"clock check: median offset {offset:+.2f}h over {linked} resubmitted cases")
-
-    combined, stats = combine(legacy, new, cmap)
+    # Read inline so main() holds no reference to the unfiltered legacy table
+    # while combine() works; that copy alone was about 0.6 GB.
+    combined, stats = combine(
+        pd.read_parquet(args.legacy, columns=LEGACY_COLUMNS), pd.read_parquet(args.new), cmap
+    )
+    print(f"clock check: median offset {stats['clock_offset_hours']:+.2f}h over {stats['linked_cases']} resubmitted cases")
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     combined.to_parquet(out, index=False)

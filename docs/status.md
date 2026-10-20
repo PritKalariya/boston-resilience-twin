@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-20 by Alekhya. Edit this file in the PR that changes the state.
+Updated: 2026-10-20 by Srikarmk. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -33,7 +33,7 @@ None.
 - Animal requests are missing from 2025-06-12 (last legacy) to 2025-08-01 (first day of the new export).
 - The local Airflow stack idles at about 0.95 GB of memory (scheduler 397 MiB, API server 294 MiB, DAG processor 193 MiB, Postgres 67 MiB; `docker stats`, 2026-10-16). The e2-medium has 4 GB, so tasks get roughly 2.5 GB once Ubuntu is counted (estimate). #20 should confirm headroom on the VM, and pipeline tasks should avoid loading every legacy year into memory at once.
 - The Airflow 3.3.2 image ships pandas 3.0.5 and pyarrow 25.0.1, while `Data-Pipeline/requirements.txt` asks only for `pandas>=2.2`. The current 14 tests pass in the image (Python 3.12.14, pandas 3.0.5; 2026-10-16), but the requirements should be aligned with the Airflow constraints before the scripts move into DAGs (#22).
-- On all years (2015 to 2026), `map_311.py` peaks at about 3.5 GB, above the roughly 2.5 GB left for tasks on the e2-medium, and `legacy_311.py` at about 1.9 GB. #22 should split them per year or read fewer columns before they move into DAGs.
+- On all years (2015 to 2026), `map_311.py` now peaks at about 2.1 GB (was 3.7 GB) and `legacy_311.py` at about 1.8 GB (Python 3.12, pandas 3). Both fit the roughly 2.5 GB left for tasks on the e2-medium, with little headroom, so #22 should run them as separate tasks, not side by side.
 - **Four neighborhood lists.** The BPDA boundaries have 26 neighborhoods, the tract-built boundaries and the 2025 population tables have 24, and 311 has 23 legacy and 25 new-system names. ADR-004 (proposed) uses the 24 tract-built neighborhoods and places requests by coordinates, so the 311 field is not used for the unit.
 - **Social vulnerability uses 2010 tracts** (180, `GEOID10`), while every other layer uses 2020 tracts (207). Joining it to 2020 tracts needs a crosswalk or an area overlay (#14).
 - **Climate Ready Boston flood layers are coastal only.** Most legacy flooding requests are catch basins (stormwater), which these maps do not cover. No stormwater flood layer is on Analyze Boston.

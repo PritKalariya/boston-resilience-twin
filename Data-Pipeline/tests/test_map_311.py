@@ -167,3 +167,12 @@ def test_after_switch_flags_late_legacy_rows_only(tmp_path):
     assert flags.to_dict() == {"1": False, "2": True, "3": True, "4": False, "BCS-1": False}
     assert stats["after_switch"] == 2
     assert len(combined) == 5
+
+
+def test_combine_runs_the_clock_check(tmp_path):
+    cmap = load_category_map(write_map(tmp_path))
+    legacy, new = linked(-0.02)
+    _, stats = combine(legacy, new, cmap)
+    assert stats["linked_cases"] == 25 and abs(stats["clock_offset_hours"]) < 0.1
+    with pytest.raises(ValueError, match="clock"):
+        combine(*linked(5), cmap)
