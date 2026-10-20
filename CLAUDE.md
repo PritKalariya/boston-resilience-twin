@@ -62,6 +62,7 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `python Data-Pipeline/scripts/measure_311.py`: reconciliation, sparsity, and storm ratio tables (markdown)
 - `python Data-Pipeline/scripts/new_311.py`: parse the new-system export to `Data-Pipeline/data/interim/new_311.parquet`, with drop counts
 - `python Data-Pipeline/scripts/map_311.py`: apply `docs/data/category-map.csv`, combine both systems into `Data-Pipeline/data/interim/311_combined.parquet`, write `docs/data/change-points.csv`
+- `python Data-Pipeline/scripts/live_baselines.py`: test the 311 switch dates as change points and replay surge baseline methods across them (markdown for ADR-005); `--window-days 84` and `--drop-after-switch` for sensitivity
 - `python Data-Pipeline/scripts/static_layers.py [--download|--refresh]`: load the layers in `Data-Pipeline/config/static_layers.csv` to `Data-Pipeline/data/interim/static/` (EPSG:4326) and write `docs/data/static-layers.csv`; `--download` fetches missing files, `--refresh` all of them
 - `python Data-Pipeline/scripts/compare_units.py`: compare candidate modeling units (empty-cell share, surge rate with the ADR-005 baseline) from `311_combined.parquet` and the static tracts and neighborhoods (markdown; about 4 minutes)
 - `python -m pytest Data-Pipeline/tests`
