@@ -88,6 +88,40 @@ environment block in `docker-compose.yaml` passes one value to all of them.
 - **A DAG does not show up.** Run `airflow dags list-import-errors` (above).
   New files are picked up within 30 seconds.
 
+## Surge baseline re-check (ADR-005)
+
+ADR-005 builds surge baselines from the same weeks of the previous 3 years,
+both 311 systems combined. Rerun the check when any of these happens:
+
+- the first new-system snow of 25 mm or more at Logan;
+- a `docs/data/category-map.csv` PR that touches a storm group;
+- the live quiet-day surge rate stays above the replay maximum for 30 days.
+
+```bash
+python Data-Pipeline/scripts/legacy_311.py
+python Data-Pipeline/scripts/new_311.py
+python Data-Pipeline/scripts/map_311.py --change-points Data-Pipeline/data/interim/change-points.csv
+python Data-Pipeline/scripts/live_baselines.py
+```
+
+`map_311.py` writes the switch dates to the gitignored data folder here, so
+the committed `docs/data/change-points.csv` only changes in a reviewed PR.
+For snow, compare snow-day counts with the legacy range and look for
+unmapped or non-snow categories that jump on snow days; open a category-map
+PR if so, and update ADR-005.
+
+## Static layers
+
+`Data-Pipeline/config/static_layers.csv` lists each static layer: file name, source URL, publisher, vintage, license, and the key column that must be present, unique and non-blank. To add or replace a layer, change a row there in a reviewed PR.
+
+```bash
+python Data-Pipeline/scripts/static_layers.py --download   # fresh clone: fetch missing files, then load
+python Data-Pipeline/scripts/static_layers.py              # files already in Data-Pipeline/data/raw/static/
+python Data-Pipeline/scripts/static_layers.py --refresh    # fetch every file again (source updated)
+```
+
+Raw files go to `Data-Pipeline/data/raw/static/` and the loaded layers to `Data-Pipeline/data/interim/static/` (vectors as GeoParquet in EPSG:4326), both gitignored. The run rewrites `docs/data/static-layers.csv` with the source CRS, row count, retrieval date and SHA-256 of each file; commit it with the change. A changed hash after `--refresh` means the city published a new version, so check the row counts before using it. The run stops on a missing, empty or unreadable file, a missing or duplicate key, or a layer that falls outside Boston after reprojection (usually a wrong CRS).
+
 ## Project 1 infrastructure (Terraform)
 
 Config lives in `Deployment/terraform/`. It covers project 1 only (ADR-009):
@@ -97,6 +131,18 @@ Vertex, or Gemini.
 
 State is in the GCS bucket `boston-resilience-twin-tfstate` under the prefix
 `project1`. That bucket is not managed by Terraform.
+
+The data bucket `boston-resilience-twin-data` has object versioning on, so an
+overwritten raw pull is kept as a noncurrent version. A lifecycle rule deletes
+noncurrent versions 30 days after they become noncurrent, which bounds the cost
+of keeping every overwrite. Live objects are never deleted by the rule, so a
+mistaken overwrite can still be rolled back inside that 30-day window. Confirm
+the rule on the bucket with:
+
+```bash
+gcloud storage buckets describe gs://boston-resilience-twin-data \
+  --format="default(lifecycle_config)"
+```
 
 ### Cost before you apply
 
@@ -235,17 +281,20 @@ signed in to GCP fails the same way as the other IAM grants above.
 
 ### Tear down
 
-```bash
-cd Deployment/terraform
-terraform destroy -var-file=terraform.tfvars
-```
-
 The data bucket has `force_destroy = false`, so a destroy fails while objects
 are still in it. Empty it first, deliberately, only when the data is no longer
-needed:
+needed. The 30-day lifecycle rule clears old versions, not live ones, so this
+step is still required:
 
 ```bash
 gcloud storage rm -r --all-versions gs://boston-resilience-twin-data/**
+```
+
+Then destroy all Project 1 resources:
+
+```bash
+cd Deployment/terraform
+terraform destroy -var-file=terraform.tfvars
 ```
 
 **The state bucket is not destroyed by Terraform.** `boston-resilience-twin-tfstate`
