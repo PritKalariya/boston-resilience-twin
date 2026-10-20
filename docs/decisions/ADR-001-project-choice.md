@@ -30,7 +30,7 @@ Build Boston Resilience Twin, proposed by Punith, trimmed to fit the team:
 ## Consequences
 
 - Ground truth arrives daily (provisional the next evening, final after 48 hours), so drift, grading, and retraining all fit inside the term.
-- The 311 migration through fall 2026 is in scope: category mapping, UTC times in the new system, and switch dates as change points.
+- The 311 migration through fall 2026 is in scope: category mapping, the new system's clock (ADR-020), and switch dates as change points.
 - The controller is a research question. If it doesn't beat the drift-threshold rule, the rule stays (ADR-007) and the result is reported.
 - About 100 hours of slack. Anything beyond one agent plus a critic is stretch work.
 - Area owners are set in ADR-011.
