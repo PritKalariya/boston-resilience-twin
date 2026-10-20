@@ -6,6 +6,10 @@ Manager slots, and team IAM. Scoped to project boston-resilience-twin, region
 us-east1. State lives in gs://boston-resilience-twin-tfstate, created by hand and
 never destroyed by Terraform.
 
+The data bucket is versioned, so every overwritten raw pull is kept as a
+noncurrent version. A lifecycle rule deletes those noncurrent versions 30 days
+after they become noncurrent. The live version of an object is never touched.
+
 ## Cost
 
 | State | Monthly |
