@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-20 by Alekhya. Edit this file in the PR that changes the state.
+Updated: 2026-10-20 by Srikarmk. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -19,6 +19,7 @@ Week 2: Processing (due 2026-10-18)
 | #48 Lifecycle rule for noncurrent versions on the data bucket | Prit | 2026-10-18 | done | PR #56 merged; noncurrent versions in the data bucket deleted after 30 days |
 | #9 Static layers | Alekhya | 2026-10-13 | done | PR #62 merged; results below |
 | #10 Decision: lock the modeling unit | Alekhya | 2026-10-13 | done | PR #66 merged; ADR-004 proposed (team sign-off pending): neighborhood x day, 24 tract-built neighborhoods, surge in any storm group |
+| #24 Write ADRs 002, 003 | Srikar | 2026-10-18 | in review | ADR-002 supporting sources, ADR-003 feature-history rule; both record scoping decisions (dated 2026-10-04) |
 
 ## Blocked
 None.
