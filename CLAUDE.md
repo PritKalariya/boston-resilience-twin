@@ -22,7 +22,7 @@ Data pipeline: Srikar. Fairness and data quality: Alekhya. Forecast model, respo
 - GitHub Actions for CI/CD, Terraform for infrastructure
 - Cloud Monitoring and Evidently. Slack and email alerts. No Grafana, Prometheus, or W&B.
 - Python 3.12 (ADR-013), Docker Compose for local development (Airflow 3.3.2, Postgres 16)
-- Layout (ADR-017): one top-level folder per component; the root `docker-compose.yaml` is the shared Airflow stack and mounts each component's `dags/` at `/opt/airflow/dags/<component>`.
+- Layout (ADR-017): one top-level folder per component; the root `docker-compose.yaml` is the shared Airflow stack and mounts each component's `dags/` at `/opt/airflow/dags/<component>`, named in snake_case (`data_pipeline`). A DAG imports helpers in its own folder as `data_pipeline.<module>`, never by bare module name.
 
 ## Open: do not choose, ask the user
 Airflow executor and metadata DB (the local stack in `docker-compose.yaml` uses LocalExecutor and Postgres 16; the ADR comes with #20), API framework (FastAPI is a candidate only), dashboard and map libraries, Gemini tier and per-event cap, alert thresholds.

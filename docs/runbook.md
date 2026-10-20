@@ -86,7 +86,10 @@ environment block in `docker-compose.yaml` passes one value to all of them.
   without `AIRFLOW_UID`. Run the `sudo chown` under Stop and reset, then
   write `.env` before the next start.
 - **A DAG does not show up.** Run `airflow dags list-import-errors` (above).
-  New files are picked up within 30 seconds.
+  New files are picked up within 30 seconds. A new component also needs a
+  volume line for its `dags/` folder in `docker-compose.yaml`, mounted at
+  `/opt/airflow/dags/<component>` in snake_case (ADR-017); without it, Airflow
+  never sees the folder.
 
 ## Surge baseline re-check (ADR-005)
 
