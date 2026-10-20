@@ -3,7 +3,7 @@
 - Status: accepted
 - Date: 2026-10-18
 - Owner: PritKalariya
-- Phase: deploy
+- Phase: setup
 
 ## Context
 
@@ -32,17 +32,18 @@ ADR-010 puts Airflow in Docker on one e2-medium VM (2 shared vCPUs, 4 GB, no swa
 
 - Measured on the VM on 2026-10-18: the containers use 837 MiB idle (scheduler 284, API server 268, dag-processor 202, Postgres 83 MiB), leaving 2,504 MiB available.
 - First start took 9m47s, about 5 minutes of it pulling the Airflow image. After a VM start, the stack is healthy in about 1 minute without running `up`.
-- Concurrency is limited only by `core.parallelism` (default 32). Cap it to fit memory before heavier DAGs land.
+- `core.parallelism` is 4, set in `docker-compose.yaml` for this VM (the Airflow default is 32). LocalExecutor pre-forks 4 workers, so at most 4 tasks run at once, and the 837 MiB above includes them. W4-2 (#61) measures a real DAG run and confirms or lowers the cap.
 - Stop the VM, never the containers. `unless-stopped` brings containers back on boot only if nobody stopped them by hand.
 - Postgres run history lives on the boot disk. Replacing the VM or running `terraform destroy` wipes it, so anything that must survive goes to GCS.
-- The UI's real access control is OS Login (IAM). The compose default login stays for October, because every teammate with OS Login also has `compute.instanceAdmin.v1`, which can already reach root (ADR-015).
+- The UI's real access control is OS Login (IAM): every teammate who can reach the VM also has `compute.instanceAdmin.v1`, which can already reach root (ADR-015).
+- In October the VM runs on the compose file's development defaults for every secret: the `airflow`/`airflow` admin login, `POSTGRES_PASSWORD=airflow`, the dev-only `AIRFLOW__API_AUTH__JWT_SECRET` and `AIRFLOW__API__SECRET_KEY`, and an empty `FERNET_KEY`, so connections and variables stored in the metadata DB are not encrypted. That is acceptable only while no credential is stored in Airflow on the VM. W4-3 (#64) moves them to Secret Manager before Nov 1 or the first stored credential, whichever comes first.
 - The UI's health panel shows Triggerer in red. That is expected.
 - Docker was installed by hand from Docker's apt repo (see the runbook), not by Terraform.
 
 ## Revisit when
 
 - A DAG needs a deferrable operator: add the triggerer service (about 200 MiB, similar to the dag-processor).
-- A real DAG run pushes memory above about 3 GB or a task is OOM-killed: cap parallelism, add swap, or resize (e2-standard-2 with 8 GB is about $49/month, over one member's budget).
+- A real DAG run pushes memory above about 3 GB or a task is OOM-killed: lower parallelism below 4, add swap, or resize (e2-standard-2 with 8 GB is about $49/month, over one member's budget).
 - Run history must survive VM loss: move to Cloud SQL.
 - Airflow needs a second machine: CeleryExecutor.
 - Someone needs a UI without SSH: IAP TCP forwarding, never a public port.
