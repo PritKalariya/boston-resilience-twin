@@ -421,7 +421,7 @@ def test_legacy_header_with_byte_order_mark_is_accepted(raw, catalog):
 # New-system records
 
 
-def test_new_system_utc_timestamps_are_preserved(raw, catalog):
+def test_new_system_timestamps_are_preserved(raw, catalog):
     run(raw, catalog)
     assert (raw / "new_system.csv").read_bytes() == NEW_CSV
     df = pd.read_parquet(raw / "prepared" / "new_system.parquet")
@@ -589,7 +589,16 @@ def test_bad_bucket_name_is_rejected(bucket):
 
 
 def test_uploader_without_google_library_explains(monkeypatch):
-    monkeypatch.setitem(sys.modules, "google", None)
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "google" or name.startswith("google."):
+            raise ImportError(f"No module named {name!r}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(RuntimeError, match="google-cloud-storage"):
         ing.GcsUploader("brt-bucket")
 
