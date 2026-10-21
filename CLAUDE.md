@@ -78,5 +78,8 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `docker compose logs <service>`: logs of one service, for example `airflow-scheduler`
 - `docker compose exec airflow-scheduler airflow dags list-import-errors`: DAG import errors; `No data found` when every DAG imports
 - `docker compose exec airflow-scheduler airflow dags unpause|trigger|list-runs hello`: run the hello smoke test (new DAGs start paused)
+- `docker compose exec airflow-scheduler airflow dags trigger daily_pipeline -r <run-id> -c '{"start": "2025-01-01", "end": "2025-12-31"}'`: run the pipeline DAG on a slice, dates inclusive, written to `Data-Pipeline/data/slices/<start>_<end>/`; without `-c` it is the full build into `Data-Pipeline/data/interim/` (unpause it first, as for hello)
+- `docker compose exec airflow-scheduler airflow tasks states-for-dag-run daily_pipeline <run-id>`: the state of every task in one run
+- `docker compose exec airflow-scheduler airflow dags test daily_pipeline -c '<conf>' [--mark-success-pattern <task-id regex>]`: run every task once in the CLI process, without the scheduler; matching tasks are marked success without running (pause the DAG first)
 - `docker compose exec airflow-scheduler python --version`: Python in the Airflow image (ADR-013 pins 3.12)
 - `docker compose down`: stop and remove the containers, keep the metadata DB; add `-v` to delete it too (full reset)

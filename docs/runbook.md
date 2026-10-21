@@ -41,6 +41,60 @@ docker compose exec airflow-scheduler airflow dags list-runs hello
 `list-import-errors` prints `No data found` when every DAG file imports. The
 hello run reaches `success` within a minute.
 
+### Run the data pipeline DAG
+
+`Data-Pipeline/dags/daily_pipeline.py` chains ingestion, processing and
+validation, one task per module (#22). `docker-compose.yaml` mounts the repo
+under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
+`Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
+`PYTHONPATH`, so tasks import the scripts (ADR-017).
+
+- Four tasks run scripts: `ingest_static_layers`, `parse_legacy_311`,
+  `parse_new_311` and `combine_311`.
+- The other 14 are placeholders. Each logs the issue that builds it
+  (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
+- Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
+  hand.
+
+The DAG runs only when triggered. It takes two params, both inclusive:
+`start` (2015-01-01 or later) and `end` (empty: through the latest data).
+
+```bash
+docker compose exec airflow-scheduler airflow dags unpause daily_pipeline
+# One year, into Data-Pipeline/data/slices/2025-01-01_2025-12-31/
+docker compose exec airflow-scheduler airflow dags trigger daily_pipeline -r slice-2025 -c '{"start": "2025-01-01", "end": "2025-12-31"}'
+# Full build, into Data-Pipeline/data/interim/
+docker compose exec airflow-scheduler airflow dags trigger daily_pipeline -r full-build
+docker compose exec airflow-scheduler airflow dags list-runs daily_pipeline
+docker compose exec airflow-scheduler airflow tasks states-for-dag-run daily_pipeline slice-2025
+```
+
+In the UI, Trigger opens a form with the two dates. A slice never overwrites
+the full-build files that other scripts read; delete its folder in
+`Data-Pipeline/data/slices/` when you are done. A run fails at `check_range`
+on a start before 2015, an end before the start, or an unknown conf key.
+Each task's log, with everything its script printed, is in
+`Data-Pipeline/logs/dag_id=daily_pipeline/run_id=<run>/task_id=<task>/`.
+On a laptop (2026-10-21), a one-year slice took 40 seconds and the full
+build about 2.5 minutes. The full build peaked at 3.4 GiB in the scheduler
+container, with `map_311.py` before #68.
+
+- **`ingest_static_layers` fails with `No module named 'geopandas'`.** The
+  image gets the geo packages in #69. Until then, for a local run, install
+  them in the running scheduler; they are gone when the container is
+  recreated:
+
+  ```bash
+  docker compose exec airflow-scheduler python -m pip install geopandas==1.2.0 shapely==2.2.0 pyogrio==0.13.0 pyproj==3.8.0 --constraint https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt
+  ```
+
+  Or skip the step in a one-off run, with the DAG paused:
+  `airflow dags test daily_pipeline -c '<conf>' --mark-success-pattern ingest_static_layers`.
+- **Linux: "Permission denied" in `Data-Pipeline/data`.** The stack ran
+  without `AIRFLOW_UID`, so `airflow-init` gave the folder to uid 50000. Set
+  `AIRFLOW_UID` (Start and check), then take it back:
+  `sudo chown -R "$(id -u):$(id -g)" Data-Pipeline/data`.
+
 ### Stop and reset
 
 ```bash

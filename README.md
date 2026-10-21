@@ -71,6 +71,7 @@ The run reaches `success` within a minute. You can also unpause and trigger it f
 **Where things live**
 - DAG files: `Data-Pipeline/dags/`. New files are picked up within 30 seconds.
 - Task logs: `Data-Pipeline/logs/` (gitignored).
+- Pipeline data: `Data-Pipeline/data/` (gitignored). The `daily_pipeline` DAG reads `raw/` and writes `interim/`, or `slices/<start>_<end>/` for a shorter date range. How to run it: the runbook, "Run the data pipeline DAG".
 
 **Stop**
 

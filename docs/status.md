@@ -10,6 +10,7 @@ Week 2: Processing (due 2026-10-18)
 |---|---|---|---|---|
 | #1 Harden repo and team workflow | Prit | 2026-10-10 | in progress | |
 | #2 Local dev environment and Python pin | Punith | 2026-10-13 | done | PR #55 merged. `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); ADR-013 pins Python 3.12 |
+| #22 Daily DAG skeleton | Punith | 2026-10-18 | in review | `daily_pipeline`: 19 tasks; 4 run scripts (static layers, legacy and new 311, combine), 14 are placeholders until #6, #7, #8, #14, #15, #16, #17, #35, #32; results below. The static step needs #69's image |
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
 | #11 Decision: live baselines for the new 311 format | Punith | 2026-10-13 | done | PR #63 merged; ADR-005: baseline = same weeks of the previous 3 years, both systems, by storm group |
@@ -76,6 +77,19 @@ Command: `python Data-Pipeline/scripts/static_layers.py` (add `--download` on a 
 | population_data_dictionary | | document | 286 variables |
 
 ACS demographics come from the city's 2025 population estimates (population on 2025-01-01, characteristics from ACS 2019 to 2023 5-year), so no Census API key is needed. They cover race and ethnicity (B03002), age (B01001), poverty (B17001), household income brackets (B19037), tenure (B25042), vehicles (B08201), language at home (C16001) and disability (S1810). There is no median household income column.
+
+## W2-10 results (2026-10-21)
+
+Commands: `docker compose up -d --wait`, then `airflow dags trigger daily_pipeline` as in the runbook ("Run the data pipeline DAG"). Laptop with Docker Desktop (16 GB); the geo packages were installed by hand in the running scheduler until #69. Raw files: legacy 2015 to 2026 and the new-system export of 2026-10-19.
+
+| run | range | result | wall time | rows written |
+|---|---|---|---|---|
+| slice-2025 | 2025-01-01 to 2025-12-31 | all 19 tasks succeed | 40 s | legacy 276,093; new 72,373; combined 348,287, in `data/slices/` |
+| full-build | the defaults (2015-01-01 to latest) | all 19 tasks succeed | 141 s | legacy 3,039,046; new 72,373; combined 3,110,129, the same as the manual run |
+| bad-start | start 2014-06-01 | fails at `check_range`, nothing else runs | 6 s | none |
+| bad-key | conf key `stat` | fails at `check_range`, nothing else runs | 7 s | none |
+
+A malformed date (2025-13-01) is rejected at trigger time, and the slice left `data/interim/` untouched. Of the 19 tasks, 4 run scripts and 14 are placeholders that log their issue. The slowest task is `parse_legacy_311` (103 s on all years), then `combine_311` (18 s) and `ingest_static_layers` (11 s). In the full build the scheduler container peaked at 3.44 GiB against 0.55 GiB idle (`docker stats` every few seconds), so the tasks added about 2.9 GiB, above the roughly 2.5 GB the VM leaves for tasks; #68 cuts `map_311.py` to about 2.1 GB.
 
 ## W1-11 results (2026-10-19)
 
