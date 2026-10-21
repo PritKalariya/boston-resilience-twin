@@ -10,7 +10,7 @@ files are replaced whole, so a rerun never appends or duplicates records.
 Files land byte for byte in the raw folder legacy_311.py reads (<year>.csv,
 new_system.csv). New-system records are also written to
 prepared/new_system.parquet with a source_system column; their timestamps keep
-the original UTC text. _manifest.json holds the schedule state, and _runs.jsonl
+the original timestamp text. _manifest.json holds the schedule state, and _runs.jsonl
 gets one line per run with every file's action and row count. With a bucket
 set, changed files are mirrored to gs://<bucket>/raw/311/.
 """
@@ -340,7 +340,7 @@ def refresh_source(
 def prepare_new_system(raw_path: Path, out_path: Path) -> dict:
     """Write the new-system records plus a source_system column to parquet.
 
-    The raw download is only read. Every value stays text, so the UTC timestamps
+    The raw download is only read. Every value stays text, so the timestamps
     keep their original form. A record whose field count differs from the header
     is left out of the parquet but counted, and stays in the raw file.
     """

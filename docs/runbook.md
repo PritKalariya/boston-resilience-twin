@@ -399,3 +399,58 @@ New DAGs start paused (`DAGS_ARE_PAUSED_AT_CREATION`), and a run triggered on a 
 - **SSH stalls after "Server accepts key".** Your laptop's ssh-agent has the key but it is locked. Run `ssh-add ~/.ssh/google_compute_engine` on the laptop, then retry.
 - **A task is OOM-killed or the scheduler restarts.** With the stack idle, the VM has about 2.5 GB free and no swap. Check `sudo docker inspect -f '{{.Name}} restarts={{.RestartCount}} oom={{.State.OOMKilled}}' $(sudo docker compose ps -aq)` and `free -m`.
 - **`gcloud compute ssh` offers to create an SSH key.** You ran it on the VM itself. The prompt shows where you are: `@airflow-vm` is the VM.
+
+## 311 ingestion (issue #6)
+
+Code: `Data-Pipeline/scripts/ingest_311.py`. DAG: `Data-Pipeline/dags/ingest_311_dag.py` (dag id `ingest_311`, daily at 00:00 UTC, which is the evening in Boston). Schedule: `Data-Pipeline/config/ingest_311_sources.csv`.
+
+### What a run does
+For each source, in order:
+1. Not due: skip, no request.
+2. Due: read the Analyze Boston catalog entry. If change detection is `catalog` and the hash, size, and last-modified time are unchanged, skip.
+3. Otherwise download to a temporary file, check it (not empty, required columns, at least one record), and only then replace the current file. A failed check keeps the current file, logs the source as `failed`, and leaves it due for the next run.
+
+| Files | Every | Change detection |
+|---|---|---|
+| 2015.csv to 2024.csv | 30 days | catalog |
+| 2025.csv | 7 days | catalog |
+| 2026.csv | 1 day | catalog |
+| new_system.csv | 1 day | none (catalog size is stale), always downloaded when due |
+
+Output in `Data-Pipeline/data/raw/311/` (mirrored to `gs://<bucket>/raw/311/`):
+- `<year>.csv`, `new_system.csv`: the downloads, byte for byte. `legacy_311.py` reads these.
+- `prepared/new_system.parquet`: new-system records as text, timestamps untouched (they end in `+00` but are Boston local time; see ADR-020), plus `source_system = new_system`. Rewritten only when `new_system.csv` changes.
+- `_manifest.json`: schedule state, fingerprints, sha256, row counts, what was last uploaded.
+- `_runs.jsonl`: one line per run: every file's action (`downloaded`, `updated`, `skipped`, `failed`), reason, rows, previous rows, malformed rows, uploads.
+
+The first run downloads everything: about 1.7 GB of legacy files plus about 25 MB for the new system.
+
+### Run by hand
+From the repo root:
+```
+python Data-Pipeline/scripts/ingest_311.py --dry-run
+python Data-Pipeline/scripts/ingest_311.py
+python Data-Pipeline/scripts/ingest_311.py --only legacy_2024 --force
+```
+`--dry-run` writes nothing. `--force` ignores the schedule for the selected sources. Exit code 1 means at least one file failed; the current files were kept.
+
+### Turn on GCS upload
+Set `BRT_GCS_BUCKET` to the bucket name from Terraform (#3). `BRT_GCS_PREFIX` defaults to `raw/311`. The machine needs the `google-cloud-storage` package and credentials (the VM service account). Only files whose content changed since the last upload are sent; a failed upload is retried on the next run.
+
+Cost: about 1.8 GB in Cloud Storage, roughly 0.04 dollars a month at Standard storage. If object versioning is on for the bucket, each daily replacement of `2026.csv` (about 100 MB) keeps the old version, about 3 GB a month, unless a lifecycle rule deletes noncurrent versions. Downloads into the VM and uploads within the same region are free.
+
+Remove the uploaded objects: `gcloud storage rm -r gs://<bucket>/raw/311/`
+
+### Airflow environment
+- `BRT_GCS_BUCKET`, `BRT_GCS_PREFIX`: as above. Unset bucket keeps files local.
+- `BRT_RAW_311_DIR`: local raw folder. Default `Data-Pipeline/data/raw/311` next to the DAG folder.
+
+The task retries twice, 15 minutes apart. `max_active_runs` is 1, so two runs never write the same files.
+
+### When something goes wrong
+- A source shows `failed`: read its `reason` in the task log or `_runs.jsonl`. The old file is still in place. Fix the cause, then clear the task or wait for the next run.
+- `_manifest.json is not valid JSON`: restore it from GCS (`raw/311/_manifest.json`), or delete it. Deleting makes the next run download every file again.
+- 403 `SignatureDoesNotMatch` from S3: the redirect handler in `ingest_311.py` strips the `:443` that Analyze Boston writes into its S3 links. If this comes back, check that `CkanClient` still uses `StripDefaultPortRedirect`.
+
+### Each January
+Add a row for the new year (for example `legacy_2027`) with its resource id from `https://data.boston.gov/api/3/action/package_show?id=311-service-requests`, `refresh_days` 1. Change the previous year to 7 and the one before it to 30. Change it by PR, like any config.
