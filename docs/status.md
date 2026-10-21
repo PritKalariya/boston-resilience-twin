@@ -21,6 +21,7 @@ Week 2: Processing (due 2026-10-18)
 | #48 Lifecycle rule for noncurrent versions on the data bucket | Prit | 2026-10-18 | done | PR #56 merged; noncurrent versions in the data bucket deleted after 30 days |
 | #9 Static layers | Alekhya | 2026-10-13 | done | PR #62 merged; results below |
 | #10 Decision: lock the modeling unit | Alekhya | 2026-10-13 | done | PR #66 merged; ADR-004 proposed (team sign-off pending): neighborhood x day, 24 tract-built neighborhoods, surge in any storm group |
+| #27 Write ADR-007 | Punith | 2026-10-18 | in review | ADR-007: the drift-threshold rule retrains from day one of the live run; the contextual bandit replaces it through CI/CD only if it beats the rule on replayed history; Q-learning is stretch |
 
 ## Blocked
 None.
