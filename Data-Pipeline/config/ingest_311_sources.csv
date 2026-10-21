@@ -1,0 +1,14 @@
+source,resource_id,filename,system,refresh_days,change_detection
+legacy_2015,c9509ab4-6f6d-4b97-979a-0cf2a10c922b,2015.csv,legacy,30,catalog
+legacy_2016,b7ea6b1b-3ca4-4c5b-9713-6dc1db52379a,2016.csv,legacy,30,catalog
+legacy_2017,30022137-709d-465e-baae-ca155b51927d,2017.csv,legacy,30,catalog
+legacy_2018,2be28d90-3a90-4af1-a3f6-f28c1e25880a,2018.csv,legacy,30,catalog
+legacy_2019,ea2e4696-4a2d-429c-9807-d02eb92e0222,2019.csv,legacy,30,catalog
+legacy_2020,6ff6a6fd-3141-4440-a880-6f60a37fe789,2020.csv,legacy,30,catalog
+legacy_2021,f53ebccd-bc61-49f9-83db-625f209c95f5,2021.csv,legacy,30,catalog
+legacy_2022,81a7b022-f8fc-4da5-80e4-b160058ca207,2022.csv,legacy,30,catalog
+legacy_2023,e6013a93-1321-4f2a-bf91-8d8a02f1e62f,2023.csv,legacy,30,catalog
+legacy_2024,dff4d804-5031-443a-8409-8344efd0e5c8,2024.csv,legacy,30,catalog
+legacy_2025,9d7c2214-4709-478a-a2e8-fb2020a5bb94,2025.csv,legacy,7,catalog
+legacy_2026,1a0b420d-99f1-4887-9851-990b2a5a6e17,2026.csv,legacy,1,catalog
+new_system,254adca6-64ab-4c5c-9fc0-a6da622be185,new_system.csv,new_system,1,none
