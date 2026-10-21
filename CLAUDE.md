@@ -31,6 +31,7 @@ Airflow executor and metadata DB (the local stack in `docker-compose.yaml` uses 
 - One issue per task, one assignee, due date, phase label, acceptance criteria.
 - The user creates the branch `<issue-number>-<slug>` and does every git write. Never run `git add`, `commit`, `push`, `merge`, `rebase`, `reset`, `stash`, or `tag`. Read-only git (`status`, `diff`, `log`) is fine. Leave all changes uncommitted.
 - Finish with a report: files changed, each acceptance-criteria command with its actual output, and anything skipped or uncertain. The user takes it to review before committing.
+- Out-of-scope findings: list them in your final report as “Maps to #n” or “Later”. Never propose or draft new issues.
 - Finish every task by updating `docs/status.md`. Update the runbook (`docs/runbook.md`, create if absent) when an operational step changes.
 - Do not write ADRs unless the task says so. Owners author them in `docs/decisions/` from the template.
 - `docs/` holds project docs only. No scoping PDF, no personal notes.
