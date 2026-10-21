@@ -1,35 +1,139 @@
 # Status
 
-Updated: 2026-10-15 by piyush1420. Edit this file in the PR that changes the state.
+Updated: 2026-10-21 by piyush1420. Edit this file in the PR that changes the state.
 
 ## Current milestone
-Week 1: Setup and ingestion (due 2026-10-12)
+Week 2: Processing (due 2026-10-18)
 
 ## Open work
 | Issue | Owner | Due | State | Note |
 |---|---|---|---|---|
 | #1 Harden repo and team workflow | Prit | 2026-10-10 | in progress | |
-| #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | in review | results below; unblocks #6, #10, #11 |
-| #6 311 ingestion DAG v1 | Piyush | 2026-10-13 | in review | code and tests done; GCS upload and the Airflow run wait on the items under Blocked |
+| #2 Local dev environment and Python pin | Punith | 2026-10-13 | done | PR #55 merged. `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); ADR-013 pins Python 3.12 |
+| #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
+| #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
+| #6 311 ingestion DAG v1 | Piyush | 2026-10-13 | in review | Code and tests done. All 13 files downloaded and uploaded to GCS. `airflow dags test` passed locally; a run in the team Airflow (#2, #20) is next |
+| #11 Decision: live baselines for the new 311 format | Punith | 2026-10-13 | done | PR #63 merged; ADR-005: baseline = same weeks of the previous 3 years, both systems, by storm group |
+| #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | done | PR #52 merged; results below; new-system clock in ADR-020; flooding gap needs a team call |
+| #20 Airflow on the VM | Prit | 2026-10-18 | in review | PR #59. Airflow stack on airflow-vm (LocalExecutor, Postgres 16; ADR-016); UI by SSH tunnel only; VM stopped. Runbook: "Airflow on the VM". After #58 merges, run the update step in the runbook on the VM |
+| #29 Verify teammate IAM | Prit | 2026-10-15 | done | PR #51 merged. All 6 members granted, plus `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start and SSH verified; VM stopped. |
+| #49 Decide who gets sudo on the Airflow VM | Prit | 2026-10-17 | in review | Owner call: owner plus Srikar get `roles/compute.osAdminLogin`, bound to the `airflow-vm` instance only, through the new `vm_admins` variable. Plan-only; apply from main after merge. |
+| #50 Let Kirtan add secret values | Prit | 2026-10-16 | done | PR #54 merged. secretVersionAdder for `secret_writers` on both secret slots (secret level); ADR-019. |
+| #48 Lifecycle rule for noncurrent versions on the data bucket | Prit | 2026-10-18 | done | PR #56 merged; noncurrent versions in the data bucket deleted after 30 days |
+| #9 Static layers | Alekhya | 2026-10-13 | done | PR #62 merged; results below |
+| #10 Decision: lock the modeling unit | Alekhya | 2026-10-13 | done | PR #66 merged; ADR-004 proposed (team sign-off pending): neighborhood x day, 24 tract-built neighborhoods, surge in any storm group |
 
 ## Blocked
-- #6 GCS upload is built and tested against a fake client only. A real upload needs the bucket from #3 (PR #30), IAM access (#29), and `google-cloud-storage` in the Airflow image.
-- #6 DAG is checked with stubbed Airflow only. A real run needs the shared Airflow environment (#2, #20).
+None.
 
 ## Risks raised
-- Legacy storm groups cover only 6.9% of legacy requests (210,049 of 3,037,969), against about 15% in the pre-scoping check. The group list in `Data-Pipeline/config/legacy_storm_groups.csv` may be narrower than the first run's. Worth a look before #10 locks the unit.
-- Tree requests leave the legacy files after Oct 2025 and flooding after Jul 2026 (moved to the new system). Legacy-only numbers for 2025 to 2026 undercount until #13 maps the new-system rows in.
+- Legacy storm groups cover only 6.9% of legacy requests (210,049 of 3,037,969), against about 15% in the pre-scoping check. The groups now live in `docs/data/category-map.csv` (`storm_group` column) and may be narrower than the first run's. Worth a look before #10 locks the unit.
+- **New-system times are Boston local, not UTC.** `open_date` ends in `+00`, but 1,283 cases resubmitted from the legacy system open a median 2.6 minutes before the legacy close time, in both EST and EDT. Real UTC would be 4 to 5 hours later. Converting from UTC would shift every new-system time 4 to 5 hours early and move 1,124 requests (1.6%) to the previous day. The pipeline treats them as local and re-checks this on every run (`map_311.check_clock`). Recorded in ADR-020, accepted by the team on 2026-10-16; CLAUDE.md is updated to match.
+- **Flooding has no new-system category.** Legacy flooding requests (mostly Catchbasin) stop after Jul 2026 and nothing in the new system replaces them, so live flooding counts are zero. Affects the target; ADR-005 escalates it, since no baseline can fix a missing source. Needs a team decision (#10, #16) before the target freeze.
+- **Snow has not been through the new system yet.** Snow Plowing and Emergency Responder Snow Plowing exist (2 requests), but all of winter 2025 to 2026 went to the legacy system. Unshoveled Sidewalk (48% of last winter's snow requests) has no new category so far. The first snow storm this winter is the real switch for snow_ice; ADR-005 sets a re-check for it (runbook).
+- Five new-system categories appeared after the W2-1 run (Illegal Parking 909, Abandoned Vehicles 51, Parking Meter Repairs 13, OPC Public Inquiry 2, Moving Permits 1; export of 2026-10-19). They are `unmapped` until `docs/data/category-map.csv` gets rows for them. None is storm related.
+- Neighborhood names differ between systems: 23 legacy and 25 new-system names, 16 shared (the new system splits Allston and Brighton, adds North End, Chinatown, West End and others). #15 needs one unit list, from the spatial join or a name map, before daily counts.
+- Animal requests are missing from 2025-06-12 (last legacy) to 2025-08-01 (first day of the new export).
+- The local Airflow stack idles at about 0.95 GB of memory (scheduler 397 MiB, API server 294 MiB, DAG processor 193 MiB, Postgres 67 MiB; `docker stats`, 2026-10-16). The e2-medium has 4 GB, so tasks get roughly 2.5 GB once Ubuntu is counted (estimate). #20 should confirm headroom on the VM, and pipeline tasks should avoid loading every legacy year into memory at once.
+- The Airflow 3.3.2 image ships pandas 3.0.5 and pyarrow 25.0.1, while `Data-Pipeline/requirements.txt` asks only for `pandas>=2.2`. The current 14 tests pass in the image (Python 3.12.14, pandas 3.0.5; 2026-10-16), but the requirements should be aligned with the Airflow constraints before the scripts move into DAGs (#22).
+- On all years (2015 to 2026), `map_311.py` peaks at about 3.5 GB, above the roughly 2.5 GB left for tasks on the e2-medium, and `legacy_311.py` at about 1.9 GB. #22 should split them per year or read fewer columns before they move into DAGs.
+- **Four neighborhood lists.** The BPDA boundaries have 26 neighborhoods, the tract-built boundaries and the 2025 population tables have 24, and 311 has 23 legacy and 25 new-system names. ADR-004 (proposed) uses the 24 tract-built neighborhoods and places requests by coordinates, so the 311 field is not used for the unit.
+- **Social vulnerability uses 2010 tracts** (180, `GEOID10`), while every other layer uses 2020 tracts (207). Joining it to 2020 tracts needs a crosswalk or an area overlay (#14).
+- **Climate Ready Boston flood layers are coastal only.** Most legacy flooding requests are catch basins (stormwater), which these maps do not cover. No stormwater flood layer is on Analyze Boston.
+- **geopandas is not in the Airflow constraints file.** `Data-Pipeline/requirements.txt` adds `geopandas>=1.1` (tested with 1.2.0, shapely 2.2.0, pyproj 3.8.0, pyogrio 0.13.0). Once PR #58 pins the other packages, this line needs an exact pin too, and the Airflow image needs it installed before #22 runs the step in a DAG.
+- The 2026-10-20 export moves the first new-system date of Broken Park Equipment (not storm related) from 2026-03-10 to 2026-01-09. `docs/data/change-points.csv` is not updated in #10; the next `map_311.py` run in a PR should refresh it.
 - The Analyze Boston catalog `size` for the new-system file is stale (488,098 bytes listed; the file is 24,763,502 bytes with 70,208 records on 2026-10-15). #6 treats the new-system file as having no reliable change detection and downloads it whenever it is due.
 - The 2026 file is refreshed daily by #6. In January 2027 someone must add a `legacy_2027` row to `Data-Pipeline/config/ingest_311_sources.csv` and slow 2026 down; see the runbook.
+
+## W1-10 results (2026-10-20)
+
+Commands: `legacy_311.py`, `new_311.py`, `map_311.py` (3,110,129 combined rows), `static_layers.py`, then `compare_units.py`. Data: Analyze Boston files downloaded 2026-10-20, days 2015-01-01 to 2026-10-18. 216,104 of 216,863 storm-related requests (99.7%) are placed by coordinates; 546 have none, 213 fall outside Boston's tracts, 13 are in tract 9815.02, which has no neighborhood.
+
+ADR-005 baseline, analysis grid only (k 2, m 3 shown; #16 freezes the rule):
+
+| unit | columns | empty, train | empty, 2024 to 2026 | surge, train | surge, 2024 to 2026 | columns with no surge |
+|---|---|---|---|---|---|---|
+| citywide x day x group | 3 | 37.1% | 37.5% | 5.38% | 5.58% | 0 |
+| neighborhood x day, pooled | 24 | 59.1% | 55.7% | 3.97% | 5.12% | 1 |
+| **neighborhood x day, any group** | 24 | 59.1% | 55.7% | 4.85% | 5.90% | 1 |
+| neighborhood x day x group | 72 | 84.7% | 83.4% | 1.65% | 1.99% | 9 |
+| tract x day, any group | 207 | 89.6% | 87.6% | 1.32% | 2.27% | 5 |
+| tract x day x group | 621 | 96.4% | 95.8% | 0.44% | 0.76% | 197 |
+
+Chosen in ADR-004 (proposed): neighborhood x day, any group. About 22 surges per neighborhood a year; Harbor Islands has none. Flooding alone drives 3.3% of training surges (4.1% in 2024 to 2026). The surge rate is above the spec's 1.3 to 2.9% pre-scoping range at every grid point (3.4% to 6.0% in training), which #16 should weigh when it sets k and m.
+
+## W1-9 results (2026-10-18)
+
+Command: `python Data-Pipeline/scripts/static_layers.py` (add `--download` on a fresh clone). Sources, vintages, licenses and SHA-256 hashes are in `docs/data/static-layers.csv`; the layer list is `Data-Pipeline/config/static_layers.csv`. All layers are PDDL. Vector layers are stored in EPSG:4326 as GeoParquet in `Data-Pipeline/data/interim/static/`.
+
+| layer | rows | source CRS | notes |
+|---|---|---|---|
+| neighborhoods_bpda | 26 | EPSG:4326 | 1 invalid polygon repaired; not official boundaries |
+| neighborhoods_by_tract20 | 24 | EPSG:4326 | whole 2020 tracts |
+| tracts_2020 | 207 | EPSG:4326 | |
+| crb_social_vulnerability | 180 | EPSG:4326 | 2010 tracts |
+| crb_flood_9in_10pct | 1 | EPSG:3857 | 9 inch sea level rise (2030s), 10 percent annual flood; repaired |
+| crb_flood_9in_1pct | 1 | EPSG:3857 | 9 inch sea level rise (2030s), 1 percent annual flood; repaired |
+| population_2025_neighborhood | 24 | table | 306 columns |
+| population_2025_tract | 207 | table | 308 columns; 1 blank export row dropped |
+| population_data_dictionary | | document | 286 variables |
+
+ACS demographics come from the city's 2025 population estimates (population on 2025-01-01, characteristics from ACS 2019 to 2023 5-year), so no Census API key is needed. They cover race and ethnicity (B03002), age (B01001), poverty (B17001), household income brackets (B19037), tenure (B25042), vehicles (B08201), language at home (C16001) and disability (S1810). There is no median household income column.
+
+## W1-11 results (2026-10-19)
+
+Command: `python Data-Pipeline/scripts/live_baselines.py` (plus `--window-days 84` and `--drop-after-switch`, same verdicts). Data: legacy files 2015 to 2026 and the new-system export downloaded 2026-10-19, combined with `map_311.py`; last full day 2026-10-17; Logan GHCN-D with WSF5 gusts.
+
+| series | switch | step after/before vs normal years | replay, method A (k 1.5) | verdict |
+|---|---|---|---|---|
+| tree | 2025-10-27 | 0.34 vs 0.37 to 0.70 (lower, -31%); monthly 0.82 of the previous 3 years | quiet days flagged 1.2% (normal 2.5%), weather days 15.2% (normal 16.3%) | pass |
+| Street Light Outage | 2025-10-22 | 1.23 vs 0.84 to 1.34 (no shift) | quiet days 5.6% (normal 4.8%) | pass; trailing methods B and C fail |
+| snow_ice | 2026-06-23 | not testable: no new-system winter; 50.4% of last winter's requests have a new category | | re-check at first snow |
+| flooding | none | no new-system source | | escalated |
+
+Decision in ADR-005: method A (same day plus or minus 14 days in each of the previous 3 years, both systems, broad storm groups).
+
+## W2-1 results (2026-10-16)
+
+Commands: `python Data-Pipeline/scripts/legacy_311.py`, `python Data-Pipeline/scripts/new_311.py`, then `python Data-Pipeline/scripts/map_311.py`. Data: legacy files 2015 to 2026 and the new-system export (2025-08-01 to 2026-10-12).
+
+### Category map
+
+`docs/data/category-map.csv` lists all 197 legacy types and 71 new-system categories. Each maps to a shared `category` (the new-system name where one exists) and a `storm_group`. A category not in the file maps to `unmapped` and is counted, so a new city category shows up in the run output instead of disappearing. New tree categories take the group of the legacy types that feed them, so `tree` means the same thing before and after the switch.
+
+| system | rows | same | renamed | merged | split | legacy or new only | unmapped | excluded |
+|---|---|---|---|---|---|---|---|---|
+| legacy | 3,036,686 | 126,864 | 1,169,732 | 220,374 | 179,661 | 1,340,054 | 0 | 1 |
+| new | 68,542 | 2,578 | 32,867 | 12,496 | 12,104 | 8,441 | 56 | 0 |
+
+The 56 unmapped new-system rows have a blank category in the export. The excluded legacy row is "Test Case A". 1,283 legacy rows that were resubmitted to the new system are dropped, so those cases count once. Another 342 legacy rows name a new case that is not in the export (56 predate it); they are kept, since the legacy row is the only copy.
+
+2,519 legacy rows were opened on or after their own category's switch date (27 categories, 20 with more than one row, up to 110 days after). Nothing links them to a new-system case, so they are kept and marked with the `after_switch` column. What to do with them is #53.
+
+| storm group | legacy | new |
+|---|---|---|
+| snow_ice | 123,167 | 2 |
+| tree | 80,227 | 6,727 |
+| flooding | 6,655 | 0 |
+
+Tree volumes carry over the Oct 2025 switch at a similar level (Mar 2025: 291 legacy, Mar 2026: 340 new; Feb 137 and 144).
+
+### Time zone
+
+Both systems are stored as naive Boston wall-clock time. Legacy times are already local. New-system times are kept as published (see Risks). Since Aug 2025 the median request hour is 12.7 in legacy and 13.5 in the new system; converting the new times from UTC would put it at 9.7, with 32% of requests before 7am.
+
+### Change points
+
+`docs/data/change-points.csv` has the first new-system date for each shared category and storm group. Departments switched in waves: animals by 2025-08-01, street lights 2025-10-14 to 22, trees 2025-10-27, parks 2025-11-21 and 2026-03-10, public works 2026-06-23, needles 2026-09-08, signs and signals 2026-09-29. Storm groups: tree 2025-10-27, snow_ice 2026-06-23 (no snow since), flooding none.
 
 ## W1-6 results (2026-10-15)
 
 Live checks against Analyze Boston, outside the repo data folder:
 - `python Data-Pipeline/scripts/ingest_311.py --dry-run`: all 13 resource ids resolve in the catalog.
-- `--only new_system`: downloaded 70,208 records, matching the DataStore total; the prepared parquet has 70,208 rows; every column is identical to the raw text; all `open_date` values end in `+00` (UTC). A second run skipped it as not due.
+- `--only new_system`: downloaded 70,208 records, matching the DataStore total; the prepared parquet has 70,208 rows; every column is identical to the raw text. `open_date` values end in `+00` and are kept as published (Boston local time, see ADR-020). A second run skipped it as not due.
 - Analyze Boston redirects downloads to presigned S3 URLs written with `:443`. Python's urllib sends that port in the Host header and S3 answers 403; the client strips default ports before following the redirect.
-
-Legacy files were not downloaded in full for this check (about 1.7 GB by catalog size).
+- Full run: all 13 files downloaded and uploaded to `gs://boston-resilience-twin-data/raw/311/` (1,739,455,041 bytes).
+- `airflow dags test ingest_311` in the `apache/airflow:3.1.0` image, with the files already local and no bucket set: `refresh_311_files` succeeded and skipped all 13 files as up to date. Not yet run on the team's Airflow 3.3.2 setup.
 
 ## W1-5 results (2026-10-13)
 

@@ -1,0 +1,147 @@
+# Local Airflow stack: Airflow 3.3.2 with LocalExecutor and a Postgres 16 metadata DB.
+# macOS and Windows: works on a clean clone with no .env. Linux: put AIRFLOW_UID in
+# .env first (README). Defaults are for local use only. The VM runs on them until
+# W4-3 (#64) moves its secrets to Secret Manager (ADR-016).
+# Adapted from the official Airflow 3.3.2 docker-compose.yaml (Apache License 2.0):
+# https://airflow.apache.org/docs/apache-airflow/3.3.2/docker-compose.yaml
+
+x-airflow-common:
+  &airflow-common
+  # Python 3.12 per ADR-013. The unsuffixed 3.3.2 tag is Python 3.13.
+  image: apache/airflow:3.3.2-python3.12
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${POSTGRES_PASSWORD:-airflow}@postgres/airflow
+    # Task processes call the Execution API on the API server.
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    # The next three must match in every container. There is no shared airflow.cfg,
+    # so unset values would differ per container. Empty Fernet key: no encryption (local, and the VM until W4-3).
+    AIRFLOW__CORE__FERNET_KEY: ${FERNET_KEY:-}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-dev-only-jwt-secret-do-not-use-on-the-vm-0123456789abcdef0123456789}
+    AIRFLOW__API__SECRET_KEY: ${AIRFLOW__API__SECRET_KEY:-dev-only-api-secret-key-do-not-use-on-the-vm-0123456789abcdef012345}
+    AIRFLOW__API_AUTH__JWT_ISSUER: airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    # Sized for the 4 GB VM: LocalExecutor pre-forks this many workers (default 32).
+    AIRFLOW__CORE__PARALLELISM: '4'
+    # 1 is the 3.3.2 default; pinned so an upgrade cannot raise it.
+    AIRFLOW__API__WORKERS: '1'
+    # Pick up new DAG files within 30 s (default 300).
+    AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: '30'
+    # Scheduler serves /health on port 8974 for its healthcheck.
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+  volumes:
+    - ./Data-Pipeline/dags:/opt/airflow/dags
+    - ./Data-Pipeline/logs:/opt/airflow/logs
+  # Linux: set AIRFLOW_UID to `id -u` in .env. The image requires group 0.
+  user: "${AIRFLOW_UID:-50000}:0"
+  # Cap container stdout logs (the VM disk is 30 GB).
+  logging:
+    &default-logging
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+  depends_on:
+    &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airflow}
+      POSTGRES_DB: airflow
+    # No ports: reachable only inside the compose network.
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow", "-d", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    logging: *default-logging
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    # One-shot. The image entrypoint migrates the DB and creates the UI admin
+    # (_AIRFLOW_* below) but ignores migrate errors, so check-migrations sets the exit code.
+    # chown fixes log ownership on Linux; Windows bind mounts ignore it.
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        /entrypoint airflow db check-migrations
+        status=$$?
+        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/logs || echo "chown skipped"
+        exit $$status
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+    user: "0:0"
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    # Localhost only. On the VM, reach it through an SSH tunnel.
+    ports:
+      - "127.0.0.1:${AIRFLOW_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+      start_interval: 5s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    # Also runs the tasks (LocalExecutor), so it waits for the Execution API.
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+      start_interval: 5s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-apiserver:
+        condition: service_healthy
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    healthcheck:
+      # A CLI check costs a few CPU seconds, so it runs once a minute.
+      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+      start_interval: 10s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-db-volume:

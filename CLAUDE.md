@@ -21,10 +21,10 @@ Data pipeline: Srikar. Fairness and data quality: Alekhya. Forecast model, respo
 - Cloud Run: forecast API, agent service, dashboard. Gemini on Vertex AI for the agent and critic.
 - GitHub Actions for CI/CD, Terraform for infrastructure
 - Cloud Monitoring and Evidently. Slack and email alerts. No Grafana, Prometheus, or W&B.
-- Python, Docker Compose for local development
+- Python 3.12 (ADR-013), Docker Compose for local development (Airflow 3.3.2, Postgres 16)
 
 ## Open: do not choose, ask the user
-Python version, Airflow executor and metadata DB, API framework (FastAPI is a candidate only), dashboard and map libraries, Gemini tier and per-event cap, alert thresholds.
+Airflow executor and metadata DB (the local stack in `docker-compose.yaml` uses LocalExecutor and Postgres 16; the ADR comes with #20), API framework (FastAPI is a candidate only), dashboard and map libraries, Gemini tier and per-event cap, alert thresholds.
 
 ## Workflow rules
 - One issue per task, one assignee, due date, phase label, acceptance criteria.
@@ -39,7 +39,7 @@ Python version, Airflow executor and metadata DB, API framework (FastAPI is a ca
 - Splits are time-based, never shuffled: train 2015 to 2023, validate 2024, test 2025 to mid-2026.
 - A feature is used only if its history covers the training years.
 - Observed weather in training makes backtests upper bounds. Validation and test use Open-Meteo archived forecasts (CC BY 4.0, keep attribution).
-- The 311 migration is a change point: new-system times are UTC, categories are not one-to-one. The old-to-new category mapping is a versioned file changed only by reviewed PR.
+- The 311 migration is a change point: new-system times carry a `+00` suffix but are Boston local (ADR-020), categories are not one-to-one. The old-to-new category mapping is a versioned file changed only by reviewed PR.
 - The target unit and surge rule are frozen by ADR before Model Development. Do not redefine them in code.
 
 ## Security
@@ -48,7 +48,7 @@ The repo is public. Never commit keys, tokens, `.env`, Terraform state, raw or v
 ## Cloud and cost
 - GCP resources come from Terraform only. No console click-ops.
 - Two projects (ADR-009). Project 1: VM, Cloud Storage, monitoring, Secret Manager. Project 2: Cloud Run, Artifact Registry, Vertex registry, Gemini. Never put a resource in the wrong project.
-- Budget is $50 credits per member, not pooled. The VM (about $24 a month) stays stopped when idle in October and runs 24/7 from Nov 1.
+- Budget is $50 credits per member, not pooled. The VM (about $31 a month running, about $3 stopped) stays stopped when idle in October and runs 24/7 from Nov 1.
 - Never run `terraform apply` or `terraform destroy`. Before any change that creates a resource, print its running cost and the command that tears it down.
 
 ## Deadlines that drive priority
@@ -60,6 +60,25 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `pip install -r Data-Pipeline/requirements.txt`
 - `python Data-Pipeline/scripts/legacy_311.py`: parse legacy 311 files in `Data-Pipeline/data/raw/311/` to `Data-Pipeline/data/interim/legacy_311.parquet`, with per-file drop counts
 - `python Data-Pipeline/scripts/measure_311.py`: reconciliation, sparsity, and storm ratio tables (markdown)
+- `python Data-Pipeline/scripts/new_311.py`: parse the new-system export to `Data-Pipeline/data/interim/new_311.parquet`, with drop counts
+- `python Data-Pipeline/scripts/map_311.py`: apply `docs/data/category-map.csv`, combine both systems into `Data-Pipeline/data/interim/311_combined.parquet`, write `docs/data/change-points.csv`
+- `python Data-Pipeline/scripts/live_baselines.py`: test the 311 switch dates as change points and replay surge baseline methods across them (markdown for ADR-005); `--window-days 84` and `--drop-after-switch` for sensitivity
+- `python Data-Pipeline/scripts/static_layers.py [--download|--refresh]`: load the layers in `Data-Pipeline/config/static_layers.csv` to `Data-Pipeline/data/interim/static/` (EPSG:4326) and write `docs/data/static-layers.csv`; `--download` fetches missing files, `--refresh` all of them
+- `python Data-Pipeline/scripts/compare_units.py`: compare candidate modeling units (empty-cell share, surge rate with the ADR-005 baseline) from `311_combined.parquet` and the static tracts and neighborhoods (markdown; about 4 minutes)
 - `python -m pytest Data-Pipeline/tests`
 - `python Data-Pipeline/scripts/ingest_311.py`: refresh the legacy and new-system 311 files in `Data-Pipeline/data/raw/311/` on the schedule in `Data-Pipeline/config/ingest_311_sources.csv`, and mirror changed files to `gs://$BRT_GCS_BUCKET/raw/311/` when that variable is set
 - `python Data-Pipeline/scripts/ingest_311.py --dry-run`: check the catalog and print what would be downloaded; writes nothing
+- `cd Deployment/terraform && terraform init`: configure the GCS state backend and providers (needs `gcloud auth application-default login`)
+- `terraform fmt -check && terraform validate`: format and syntax check, no cloud calls
+- `terraform plan -var-file=terraform.tfvars`: read-only dry run against project 1 (`terraform.tfvars` is gitignored; copy from `terraform.tfvars.example`)
+- `terraform apply -var-file=terraform.tfvars`: human only, never run by Claude Code
+- `gcloud compute instances start|stop airflow-vm --zone=us-east1-b`: VM power; Terraform does not manage run state
+- `read -rs VALUE && printf '%s' "$VALUE" | gcloud secrets versions add <secret> --data-file=-; unset VALUE`: add a secret value with no trailing newline and nothing in shell history (see runbook). Human only, never run by Claude Code
+- `docker compose config --quiet`: validate `docker-compose.yaml`; no output means valid
+- `docker compose up -d --wait`: start Airflow 3.3.2 (LocalExecutor) and Postgres 16 and wait until healthy; UI at http://localhost:8080, login airflow / airflow (local defaults)
+- `docker compose ps -a`: service state and health; `airflow-init` shows `Exited (0)` once the database is migrated
+- `docker compose logs <service>`: logs of one service, for example `airflow-scheduler`
+- `docker compose exec airflow-scheduler airflow dags list-import-errors`: DAG import errors; `No data found` when every DAG imports
+- `docker compose exec airflow-scheduler airflow dags unpause|trigger|list-runs hello`: run the hello smoke test (new DAGs start paused)
+- `docker compose exec airflow-scheduler python --version`: Python in the Airflow image (ADR-013 pins 3.12)
+- `docker compose down`: stop and remove the containers, keep the metadata DB; add `-v` to delete it too (full reset)

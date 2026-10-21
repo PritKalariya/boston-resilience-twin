@@ -30,10 +30,16 @@ KEEP_COLUMNS = [
     "source",
 ]
 REQUIRED_COLUMNS = {"case_enquiry_id", "open_dt", "type"}
+OUTPUT_COLUMNS = KEEP_COLUMNS + ["resubmitted_as"]
+
+# Cases moved to the new system are closed with "Resubmitted as BCS-...".
+# The new case is a copy, so the combined table drops the legacy one. A few
+# ids are typed with the wrong number of digits; real ids have 8.
+RESUBMITTED = r"BCS-(\d+)"
 
 # The legacy files mix "%Y-%m-%d %H:%M:%S" with 1 to 3 fractional digits.
 # Letting pandas infer the format from the first row turns every other
-# variant into NaT, which is how the first run lost about a third of rows.
+# variant into NaT, which is the likely cause of the first-run loss.
 TIMESTAMP_FORMAT = "ISO8601"
 
 
@@ -96,11 +102,11 @@ def read_legacy(path: Path | str, year: int | None = None) -> tuple[pd.DataFrame
     report = ParseReport(source=path.name)
 
     if path.stat().st_size == 0:
-        return pd.DataFrame(columns=KEEP_COLUMNS), report
+        return pd.DataFrame(columns=OUTPUT_COLUMNS), report
 
     raw = pd.read_csv(
         path,
-        usecols=lambda c: c in KEEP_COLUMNS,
+        usecols=lambda c: c in KEEP_COLUMNS or c == "closure_reason",
         dtype=str,
         keep_default_na=False,
         na_values=[""],
@@ -115,7 +121,7 @@ def read_legacy(path: Path | str, year: int | None = None) -> tuple[pd.DataFrame
     if missing:
         raise ValueError(f"{path.name} is missing columns: {sorted(missing)}")
 
-    df = raw.reindex(columns=KEEP_COLUMNS)
+    df = raw.reindex(columns=KEEP_COLUMNS + ["closure_reason"])
 
     no_id = df["case_enquiry_id"].isna()
     report.drop("missing_case_id", no_id.sum())
@@ -136,6 +142,8 @@ def read_legacy(path: Path | str, year: int | None = None) -> tuple[pd.DataFrame
     report.drop("duplicate_case_id", dupes.sum())
     df = df[~dupes]
 
+    digits = df.pop("closure_reason").astype("string").str.extract(RESUBMITTED)[0]
+    df["resubmitted_as"] = "BCS-" + digits.str.lstrip("0").str.zfill(8)
     df["latitude"] = pd.to_numeric(df["latitude"], errors="coerce")
     df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce")
 

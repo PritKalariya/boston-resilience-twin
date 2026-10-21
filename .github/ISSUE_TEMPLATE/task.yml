@@ -1,5 +1,5 @@
 name: Task
-description: One task, one owner, one due date
+description: One task, one owner, one reviewer, one due date
 title: "[W<n>-<m>] "
 body:
   - type: input
@@ -7,6 +7,14 @@ body:
     attributes:
       label: Owner
       description: One GitHub handle. Also set the Assignee and the phase label in the sidebar.
+    validations:
+      required: true
+  - type: input
+    id: reviewer
+    attributes:
+      label: Reviewer
+      description: The person whose next issue depends on this one. Not the owner.
+      placeholder: "@username"
     validations:
       required: true
   - type: input
@@ -22,7 +30,10 @@ body:
       label: Phase
       options:
         - setup
-        - data
+        - ingestion
+        - processing
+        - decision
+        - quality
         - model
         - deploy
     validations:
