@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-13 by Srikarmk. Edit this file in the PR that changes the state.
+Updated: 2026-10-15 by piyush1420. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 1: Setup and ingestion (due 2026-10-12)
@@ -10,13 +10,26 @@ Week 1: Setup and ingestion (due 2026-10-12)
 |---|---|---|---|---|
 | #1 Harden repo and team workflow | Prit | 2026-10-10 | in progress | |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | in review | results below; unblocks #6, #10, #11 |
+| #6 311 ingestion DAG v1 | Piyush | 2026-10-13 | in review | code and tests done; GCS upload and the Airflow run wait on the items under Blocked |
 
 ## Blocked
-None.
+- #6 GCS upload is built and tested against a fake client only. A real upload needs the bucket from #3 (PR #30), IAM access (#29), and `google-cloud-storage` in the Airflow image.
+- #6 DAG is checked with stubbed Airflow only. A real run needs the shared Airflow environment (#2, #20).
 
 ## Risks raised
 - Legacy storm groups cover only 6.9% of legacy requests (210,049 of 3,037,969), against about 15% in the pre-scoping check. The group list in `Data-Pipeline/config/legacy_storm_groups.csv` may be narrower than the first run's. Worth a look before #10 locks the unit.
 - Tree requests leave the legacy files after Oct 2025 and flooding after Jul 2026 (moved to the new system). Legacy-only numbers for 2025 to 2026 undercount until #13 maps the new-system rows in.
+- The Analyze Boston catalog `size` for the new-system file is stale (488,098 bytes listed; the file is 24,763,502 bytes with 70,208 records on 2026-10-15). #6 treats the new-system file as having no reliable change detection and downloads it whenever it is due.
+- The 2026 file is refreshed daily by #6. In January 2027 someone must add a `legacy_2027` row to `Data-Pipeline/config/ingest_311_sources.csv` and slow 2026 down; see the runbook.
+
+## W1-6 results (2026-10-15)
+
+Live checks against Analyze Boston, outside the repo data folder:
+- `python Data-Pipeline/scripts/ingest_311.py --dry-run`: all 13 resource ids resolve in the catalog.
+- `--only new_system`: downloaded 70,208 records, matching the DataStore total; the prepared parquet has 70,208 rows; every column is identical to the raw text; all `open_date` values end in `+00` (UTC). A second run skipped it as not due.
+- Analyze Boston redirects downloads to presigned S3 URLs written with `:443`. Python's urllib sends that port in the Host header and S3 answers 403; the client strips default ports before following the redirect.
+
+Legacy files were not downloaded in full for this check (about 1.7 GB by catalog size).
 
 ## W1-5 results (2026-10-13)
 

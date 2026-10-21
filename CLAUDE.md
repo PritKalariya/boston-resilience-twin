@@ -61,3 +61,5 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `python Data-Pipeline/scripts/legacy_311.py`: parse legacy 311 files in `Data-Pipeline/data/raw/311/` to `Data-Pipeline/data/interim/legacy_311.parquet`, with per-file drop counts
 - `python Data-Pipeline/scripts/measure_311.py`: reconciliation, sparsity, and storm ratio tables (markdown)
 - `python -m pytest Data-Pipeline/tests`
+- `python Data-Pipeline/scripts/ingest_311.py`: refresh the legacy and new-system 311 files in `Data-Pipeline/data/raw/311/` on the schedule in `Data-Pipeline/config/ingest_311_sources.csv`, and mirror changed files to `gs://$BRT_GCS_BUCKET/raw/311/` when that variable is set
+- `python Data-Pipeline/scripts/ingest_311.py --dry-run`: check the catalog and print what would be downloaded; writes nothing
