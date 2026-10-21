@@ -1,6 +1,6 @@
 # ADR-015: Project 1 infrastructure provisioned by Terraform
 
-- Status: accepted
+- Status: accepted, partially superseded by ADR-018 (who may operate the VM)
 - Date: 2026-10-11
 - Owner: kalariya.p
 - Phase: setup

@@ -18,3 +18,9 @@ team_members = [
 secret_writers = [
   "user:member-five@northeastern.edu",
 ]
+
+# Members with sudo on the Airflow VM (osAdminLogin on that instance only).
+vm_admins = [
+  "user:member-one@northeastern.edu",
+  "user:member-two@northeastern.edu",
+]
