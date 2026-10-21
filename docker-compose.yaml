@@ -35,6 +35,9 @@ x-airflow-common:
   volumes:
     - ./Data-Pipeline/dags:/opt/airflow/dags
     - ./Data-Pipeline/logs:/opt/airflow/logs
+    - ./Data-Pipeline/scripts:/opt/airflow/scripts
+    - ./Data-Pipeline/config:/opt/airflow/config
+    - ./Data-Pipeline/data:/opt/airflow/data
   # Linux: set AIRFLOW_UID to `id -u` in .env. The image requires group 0.
   user: "${AIRFLOW_UID:-50000}:0"
   # Cap container stdout logs (the VM disk is 30 GB).
@@ -78,7 +81,7 @@ services:
       - |
         /entrypoint airflow db check-migrations
         status=$$?
-        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/logs || echo "chown skipped"
+        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/logs /opt/airflow/data || echo "chown skipped"
         exit $$status
     environment:
       <<: *airflow-common-env

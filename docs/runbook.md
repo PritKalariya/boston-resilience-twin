@@ -442,6 +442,8 @@ Cost: about 1.8 GB in Cloud Storage, roughly 0.04 dollars a month at Standard st
 Remove the uploaded objects: `gcloud storage rm -r gs://<bucket>/raw/311/`
 
 ### Airflow environment
+
+In the team's Docker Compose stack, `docker-compose.yaml` mounts `Data-Pipeline/scripts`, `config` and `data` at `/opt/airflow/scripts`, `/opt/airflow/config` and `/opt/airflow/data`, next to `dags`. The DAG builds `--raw-dir` (`/opt/airflow/data/raw/311`) and `--sources` from its own location, so `BRT_RAW_311_DIR` can stay unset. Do not put `.py` files in `Data-Pipeline/config`: Airflow adds that folder to its import path.
 - `BRT_GCS_BUCKET`, `BRT_GCS_PREFIX`: as above. Unset bucket keeps files local.
 - `BRT_RAW_311_DIR`: local raw folder. Default `Data-Pipeline/data/raw/311` next to the DAG folder.
 

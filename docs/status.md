@@ -12,7 +12,7 @@ Week 2: Processing (due 2026-10-18)
 | #2 Local dev environment and Python pin | Punith | 2026-10-13 | done | PR #55 merged. `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); ADR-013 pins Python 3.12 |
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
-| #6 311 ingestion DAG v1 | Piyush | 2026-10-13 | in review | Code and tests done. All 13 files downloaded and uploaded to GCS. `airflow dags test` passed locally; a run in the team Airflow (#2, #20) is next |
+| #6 311 ingestion DAG v1 | Piyush | 2026-10-13 | in review | Code and tests done. All 13 files downloaded and uploaded to GCS. `airflow dags test ingest_311` passed in the team's local Airflow 3.3.2 on 2026-10-21; this PR adds the `scripts`, `config` and `data` mounts it needs |
 | #11 Decision: live baselines for the new 311 format | Punith | 2026-10-13 | done | PR #63 merged; ADR-005: baseline = same weeks of the previous 3 years, both systems, by storm group |
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | done | PR #52 merged; results below; new-system clock in ADR-020; flooding gap needs a team call |
 | #20 Airflow on the VM | Prit | 2026-10-18 | in review | PR #59. Airflow stack on airflow-vm (LocalExecutor, Postgres 16; ADR-016); UI by SSH tunnel only; VM stopped. Runbook: "Airflow on the VM". After #58 merges, run the update step in the runbook on the VM |
@@ -133,7 +133,8 @@ Live checks against Analyze Boston, outside the repo data folder:
 - `--only new_system`: downloaded 70,208 records, matching the DataStore total; the prepared parquet has 70,208 rows; every column is identical to the raw text. `open_date` values end in `+00` and are kept as published (Boston local time, see ADR-020). A second run skipped it as not due.
 - Analyze Boston redirects downloads to presigned S3 URLs written with `:443`. Python's urllib sends that port in the Host header and S3 answers 403; the client strips default ports before following the redirect.
 - Full run: all 13 files downloaded and uploaded to `gs://boston-resilience-twin-data/raw/311/` (1,739,455,041 bytes).
-- `airflow dags test ingest_311` in the `apache/airflow:3.1.0` image, with the files already local and no bucket set: `refresh_311_files` succeeded and skipped all 13 files as up to date. Not yet run on the team's Airflow 3.3.2 setup.
+- `airflow dags test ingest_311` in the `apache/airflow:3.1.0` image, with the files already local and no bucket set: `refresh_311_files` succeeded and skipped all 13 files as up to date. Not yet run on the team's Airflow 3.3.2 setup at that point.
+- `airflow dags test ingest_311 2026-10-21` in the team's local Airflow 3.3.2 (Python 3.12), with `scripts`, `config` and `data` mounted: `refresh_311_files` succeeded; `legacy_2026` refreshed to 190,414 rows and `new_system` to 73,809, and the prepared parquet was rewritten.
 
 ## W1-5 results (2026-10-13)
 
