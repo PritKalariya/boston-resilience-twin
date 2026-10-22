@@ -1,7 +1,7 @@
 # Local Airflow stack: Airflow 3.3.2 with LocalExecutor and a Postgres 16 metadata DB.
 # macOS and Windows: works on a clean clone with no .env. Linux: put AIRFLOW_UID in
-# .env first (README). Defaults are for local use only; on the VM the secrets come
-# from Secret Manager (ADR-015, #20).
+# .env first (README). Defaults are for local use only. The VM runs on them until
+# W4-3 (#64) moves its secrets to Secret Manager (ADR-016).
 # Adapted from the official Airflow 3.3.2 docker-compose.yaml (Apache License 2.0):
 # https://airflow.apache.org/docs/apache-airflow/3.3.2/docker-compose.yaml
 
@@ -17,7 +17,7 @@ x-airflow-common:
     # Task processes call the Execution API on the API server.
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
     # The next three must match in every container. There is no shared airflow.cfg,
-    # so unset values would differ per container. Empty Fernet key: no encryption (local only).
+    # so unset values would differ per container. Empty Fernet key: no encryption (local, and the VM until W4-3).
     AIRFLOW__CORE__FERNET_KEY: ${FERNET_KEY:-}
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-dev-only-jwt-secret-do-not-use-on-the-vm-0123456789abcdef0123456789}
     AIRFLOW__API__SECRET_KEY: ${AIRFLOW__API__SECRET_KEY:-dev-only-api-secret-key-do-not-use-on-the-vm-0123456789abcdef012345}
