@@ -90,6 +90,10 @@ environment block in `docker-compose.yaml` passes one value to all of them.
   volume line for its `dags/` folder in `docker-compose.yaml`, mounted at
   `/opt/airflow/dags/<component>` in snake_case (ADR-017); without it, Airflow
   never sees the folder.
+- **DAGs still load from the old path after a pull.** A running stack keeps
+  its old mounts until its containers are recreated. After pulling a change
+  to `docker-compose.yaml`, such as the ADR-017 DAG mount, run
+  `docker compose down`, then `docker compose up -d --wait`.
 
 ## Surge baseline re-check (ADR-005)
 
