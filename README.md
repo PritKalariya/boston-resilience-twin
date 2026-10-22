@@ -22,7 +22,9 @@ boston-resilience-twin/
 ├── Monitoring/             drift jobs, dashboards, alert rules
 ├── Frontend/               digital twin map and dashboards
 ├── .github/workflows/      CI/CD pipelines
-└── docs/                   project status, decision records, runbook
+├── docs/                   project status, decision records, runbook
+├── docker-compose.yaml     shared Airflow stack for every component (ADR-017)
+└── .env.example            local dev overrides only
 ```
 
 ## Setup
@@ -92,7 +94,7 @@ pip install -r Data-Pipeline/requirements.txt
 python -m pytest Data-Pipeline/tests
 ```
 
-These run on whatever Python your machine has. A test command pinned to Python 3.12 comes with W3-7 (#38).
+Use Python 3.12 (ADR-013): the pins come from the Airflow constraints for 3.12, and on other versions the install can fail or build packages from source. Without a system 3.12, `uv venv --python 3.12 --seed .venv && source .venv/bin/activate` creates one (`.venv/` is gitignored). A test command pinned to Python 3.12 comes with W3-7 (#38).
 
 ## Data and licenses
 

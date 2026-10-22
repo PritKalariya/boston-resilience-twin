@@ -1,4 +1,17 @@
-pandas>=2.2
-pyarrow>=15
-pytest>=8
-geopandas>=1.1
+# Pins for Data-Pipeline's host-side scripts and tests (ADR-013, ADR-017).
+# The -c line applies Airflow's constraints for the image in docker-compose.yaml
+# to every package that file lists, transitive ones included.
+# airflow and pendulum come from the Airflow image, not this file.
+-c https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt
+numpy==2.5.3
+pandas==3.0.5
+pyarrow==25.0.1
+
+# Not in the constraints file: pinned to the versions the tests passed on.
+# pyproj comes in through geopandas, iniconfig through pytest.
+geopandas==1.2.0
+iniconfig==2.3.1
+pyogrio==0.13.0
+pyproj==3.8.0
+pytest==9.1.1
+shapely==2.2.0
