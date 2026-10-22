@@ -66,7 +66,7 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `python Data-Pipeline/scripts/static_layers.py [--download|--refresh]`: load the layers in `Data-Pipeline/config/static_layers.csv` to `Data-Pipeline/data/interim/static/` (EPSG:4326) and write `docs/data/static-layers.csv`; `--download` fetches missing files, `--refresh` all of them
 - `python Data-Pipeline/scripts/compare_units.py`: compare candidate modeling units (empty-cell share, surge rate with the ADR-005 baseline) from `311_combined.parquet` and the static tracts and neighborhoods (markdown; about 4 minutes)
 - `python -m pytest Data-Pipeline/tests`
-- `python Data-Pipeline/scripts/ingest_311.py`: refresh the legacy and new-system 311 files in `Data-Pipeline/data/raw/311/` on the schedule in `Data-Pipeline/config/ingest_311_sources.csv`, and mirror changed files to `gs://$BRT_GCS_BUCKET/raw/311/` when that variable is set
+- `python Data-Pipeline/scripts/ingest_311.py`: refresh the legacy and new-system 311 files in `Data-Pipeline/data/raw/311/` on the schedule in `Data-Pipeline/config/ingest_311_sources.csv`; writes the local folder only
 - `python Data-Pipeline/scripts/ingest_311.py --dry-run`: check the catalog and print what would be downloaded; writes nothing
 - `cd Deployment/terraform && terraform init`: configure the GCS state backend and providers (needs `gcloud auth application-default login`)
 - `terraform fmt -check && terraform validate`: format and syntax check, no cloud calls

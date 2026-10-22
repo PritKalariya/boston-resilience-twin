@@ -12,7 +12,7 @@ Week 2: Processing (due 2026-10-18)
 | #2 Local dev environment and Python pin | Punith | 2026-10-13 | done | PR #55 merged. `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); ADR-013 pins Python 3.12 |
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
-| #6 311 ingestion DAG v1 | Piyush | 2026-10-13 | in review | Code and tests done. All 13 files downloaded and uploaded to GCS. `airflow dags test ingest_311` passed in the team's local Airflow 3.3.2 on 2026-10-21; this PR adds the `scripts`, `config` and `data` mounts it needs |
+| #6 311 ingestion DAG v1 | Piyush | 2026-10-13 | in review | Code and tests done. The direct GCS upload was removed to meet "GCS only through DVC": the script and DAG write `Data-Pipeline/data/raw/311/` only. `airflow dags test ingest_311` passed in the team's local Airflow 3.3.2 on 2026-10-21; this PR adds the `scripts`, `config` and `data` mounts it needs. Versioning to GCS waits on DVC (see Blocked) |
 | #11 Decision: live baselines for the new 311 format | Punith | 2026-10-13 | done | PR #63 merged; ADR-005: baseline = same weeks of the previous 3 years, both systems, by storm group |
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | done | PR #52 merged; results below; new-system clock in ADR-020; flooding gap needs a team call |
 | #20 Airflow on the VM | Prit | 2026-10-18 | in review | PR #59. Airflow stack on airflow-vm (LocalExecutor, Postgres 16; ADR-016); UI by SSH tunnel only; VM stopped. Runbook: "Airflow on the VM". After #58 merges, run the update step in the runbook on the VM |
@@ -24,7 +24,7 @@ Week 2: Processing (due 2026-10-18)
 | #10 Decision: lock the modeling unit | Alekhya | 2026-10-13 | done | PR #66 merged; ADR-004 proposed (team sign-off pending): neighborhood x day, 24 tract-built neighborhoods, surge in any storm group |
 
 ## Blocked
-None.
+- #6: versioning raw 311 to GCS waits on DVC setup. The repo has no `.dvc/` folder, no DVC remote and an empty `Data-Pipeline/dvc.yaml`, and DVC is in neither `Data-Pipeline/requirements.txt` nor the Airflow image. The docs do not name the issue that sets it up; on GitHub, #19 (DVC remote on GCS) and #18 (DVC stages), both Kirtan, cover it. Until then the raw 311 files exist only on the machine that ran the DAG.
 
 ## Risks raised
 - Legacy storm groups cover only 6.9% of legacy requests (210,049 of 3,037,969), against about 15% in the pre-scoping check. The groups now live in `docs/data/category-map.csv` (`storm_group` column) and may be narrower than the first run's. Worth a look before #10 locks the unit.
@@ -132,9 +132,11 @@ Live checks against Analyze Boston, outside the repo data folder:
 - `python Data-Pipeline/scripts/ingest_311.py --dry-run`: all 13 resource ids resolve in the catalog.
 - `--only new_system`: downloaded 70,208 records, matching the DataStore total; the prepared parquet has 70,208 rows; every column is identical to the raw text. `open_date` values end in `+00` and are kept as published (Boston local time, see ADR-020). A second run skipped it as not due.
 - Analyze Boston redirects downloads to presigned S3 URLs written with `:443`. Python's urllib sends that port in the Host header and S3 answers 403; the client strips default ports before following the redirect.
-- Full run: all 13 files downloaded and uploaded to `gs://boston-resilience-twin-data/raw/311/` (1,739,455,041 bytes).
+- Full run, before the upload was removed: all 13 files downloaded and uploaded to `gs://boston-resilience-twin-data/raw/311/` (1,739,455,041 bytes).
 - `airflow dags test ingest_311` in the `apache/airflow:3.1.0` image, with the files already local and no bucket set: `refresh_311_files` succeeded and skipped all 13 files as up to date. Not yet run on the team's Airflow 3.3.2 setup at that point.
 - `airflow dags test ingest_311 2026-10-21` in the team's local Airflow 3.3.2 (Python 3.12), with `scripts`, `config` and `data` mounted: `refresh_311_files` succeeded; `legacy_2026` refreshed to 190,414 rows and `new_system` to 73,809, and the prepared parquet was rewritten.
+- 2026-10-21: the direct upload (`GcsUploader`, `BRT_GCS_BUCKET`) was removed to meet the #6 criterion "GCS only through DVC". `gs://boston-resilience-twin-data/raw/311/` still holds those 1,739,455,041 bytes, outside DVC, for the team to decide on. They were not deleted.
+- After the removal, `airflow dags test ingest_311 2026-10-21` in the local Airflow 3.3.2: `refresh_311_files` succeeded, all 13 files skipped as not due with their row counts logged, nothing uploaded. The full test suite passed in the Airflow image (165 passed).
 
 ## W1-5 results (2026-10-13)
 

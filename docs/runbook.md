@@ -417,11 +417,11 @@ For each source, in order:
 | 2026.csv | 1 day | catalog |
 | new_system.csv | 1 day | none (catalog size is stale), always downloaded when due |
 
-Output in `Data-Pipeline/data/raw/311/` (mirrored to `gs://<bucket>/raw/311/`):
+Output in `Data-Pipeline/data/raw/311/` (gitignored). The script writes this folder only and never uploads anything; raw data reaches Cloud Storage only through DVC (see Versioning to Cloud Storage below).
 - `<year>.csv`, `new_system.csv`: the downloads, byte for byte. `legacy_311.py` reads these.
 - `prepared/new_system.parquet`: new-system records as text, timestamps untouched (they end in `+00` but are Boston local time; see ADR-020), plus `source_system = new_system`. Rewritten only when `new_system.csv` changes.
-- `_manifest.json`: schedule state, fingerprints, sha256, row counts, what was last uploaded.
-- `_runs.jsonl`: one line per run: every file's action (`downloaded`, `updated`, `skipped`, `failed`), reason, rows, previous rows, malformed rows, uploads.
+- `_manifest.json`: schedule state, fingerprints, sha256, row counts. A manifest written before the direct upload was removed may still hold an `uploaded` section; it is ignored.
+- `_runs.jsonl`: one line per run: every file's action (`downloaded`, `updated`, `skipped`, `failed`), reason, rows, previous rows, malformed rows.
 
 The first run downloads everything: about 1.7 GB of legacy files plus about 25 MB for the new system.
 
@@ -434,24 +434,21 @@ python Data-Pipeline/scripts/ingest_311.py --only legacy_2024 --force
 ```
 `--dry-run` writes nothing. `--force` ignores the schedule for the selected sources. Exit code 1 means at least one file failed; the current files were kept.
 
-### Turn on GCS upload
-Set `BRT_GCS_BUCKET` to the bucket name from Terraform (#3). `BRT_GCS_PREFIX` defaults to `raw/311`. The machine needs the `google-cloud-storage` package and credentials (the VM service account). Only files whose content changed since the last upload are sent; a failed upload is retried on the next run.
+### Versioning to Cloud Storage
+There is no direct upload: issue #6 requires raw data to reach GCS only through DVC. DVC is not set up in the repo yet (no `.dvc/`, no remote, empty `dvc.yaml`; see Blocked in `docs/status.md`), so for now the files stay on the machine that ran the DAG. The `dvc add` and `dvc push` steps for this folder, and who runs them, come with the DVC setup.
 
-Cost: about 1.8 GB in Cloud Storage, roughly 0.04 dollars a month at Standard storage. If object versioning is on for the bucket, each daily replacement of `2026.csv` (about 100 MB) keeps the old version, about 3 GB a month, unless a lifecycle rule deletes noncurrent versions. Downloads into the VM and uploads within the same region are free.
-
-Remove the uploaded objects: `gcloud storage rm -r gs://<bucket>/raw/311/`
+`gs://boston-resilience-twin-data/raw/311/` still holds 1,739,455,041 bytes from an earlier direct upload by this script, outside DVC. The team decides whether to keep or delete them; do not delete them before that.
 
 ### Airflow environment
 
 In the team's Docker Compose stack, `docker-compose.yaml` mounts `Data-Pipeline/scripts`, `config` and `data` at `/opt/airflow/scripts`, `/opt/airflow/config` and `/opt/airflow/data`, next to `dags`. The DAG builds `--raw-dir` (`/opt/airflow/data/raw/311`) and `--sources` from its own location, so `BRT_RAW_311_DIR` can stay unset. Do not put `.py` files in `Data-Pipeline/config`: Airflow adds that folder to its import path.
-- `BRT_GCS_BUCKET`, `BRT_GCS_PREFIX`: as above. Unset bucket keeps files local.
 - `BRT_RAW_311_DIR`: local raw folder. Default `Data-Pipeline/data/raw/311` next to the DAG folder.
 
 The task retries twice, 15 minutes apart. `max_active_runs` is 1, so two runs never write the same files.
 
 ### When something goes wrong
 - A source shows `failed`: read its `reason` in the task log or `_runs.jsonl`. The old file is still in place. Fix the cause, then clear the task or wait for the next run.
-- `_manifest.json is not valid JSON`: restore it from GCS (`raw/311/_manifest.json`), or delete it. Deleting makes the next run download every file again.
+- `_manifest.json is not valid JSON`: restore it from a DVC version of `Data-Pipeline/data/raw/311` (once DVC is set up), or delete it. Deleting makes the next run download every file again.
 - 403 `SignatureDoesNotMatch` from S3: the redirect handler in `ingest_311.py` strips the `:443` that Analyze Boston writes into its S3 links. If this comes back, check that `CkanClient` still uses `StripDefaultPortRedirect`.
 
 ### Each January

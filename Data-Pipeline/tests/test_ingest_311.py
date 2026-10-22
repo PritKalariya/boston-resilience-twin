@@ -1,5 +1,4 @@
 import json
-import sys
 import threading
 import urllib.error
 import urllib.parse
@@ -71,30 +70,6 @@ class FakeCatalog:
             Path(dest).write_bytes(body[: len(body) // 2])
             raise self.download_errors[rid]
         Path(dest).write_bytes(body)
-
-
-class FakeStorage:
-    """Stands in for google.cloud.storage.Client."""
-
-    def __init__(self, fail_keys=()):
-        self.objects, self.uploads, self.fail_keys = {}, [], set(fail_keys)
-
-    def bucket(self, name):
-        self.bucket_name = name
-        return self
-
-    def blob(self, key):
-        storage = self
-
-        class Blob:
-            def upload_from_filename(self, filename):
-                if key in storage.fail_keys:
-                    storage.fail_keys.discard(key)
-                    raise ConnectionError("simulated outage")
-                storage.objects[key] = Path(filename).read_bytes()
-                storage.uploads.append(key)
-
-        return Blob()
 
 
 @pytest.fixture
@@ -528,79 +503,15 @@ def test_failed_run_is_logged_too(raw, catalog):
     assert entry["failed"] == ["legacy_2015"]
 
 
-# Google Cloud Storage
+# Cloud Storage: raw data goes there through DVC only, never from this script
 
 
-def test_upload_goes_to_raw_311_and_skips_unchanged_files(raw, catalog):
-    storage = FakeStorage()
-    uploader = ing.GcsUploader("gs://brt-test-bucket/", client=storage)
-    first = run(raw, catalog, uploader=uploader)
-    assert storage.bucket_name == "brt-test-bucket"
-    assert set(storage.objects) == {
-        "raw/311/2015.csv",
-        "raw/311/2025.csv",
-        "raw/311/2026.csv",
-        "raw/311/new_system.csv",
-        "raw/311/prepared/new_system.parquet",
-        "raw/311/_manifest.json",
-        "raw/311/_runs.jsonl",
-    }
-    assert storage.objects["raw/311/2015.csv"] == catalog.files["r2015"]
-    assert first["gcs_prefix"] == "gs://brt-test-bucket/raw/311/"
-
-    storage.uploads.clear()
-    run(raw, catalog, uploader=uploader, when=DAY0 + timedelta(days=1))
-    assert storage.uploads == ["raw/311/_manifest.json", "raw/311/_runs.jsonl"]
-
-    storage.uploads.clear()
-    catalog.change("r2026", legacy_csv(2026, 6))
-    run(raw, catalog, uploader=uploader, when=DAY0 + timedelta(days=2))
-    assert "raw/311/2026.csv" in storage.uploads
-    assert storage.objects["raw/311/2026.csv"] == legacy_csv(2026, 6)
-
-
-def test_failed_upload_is_retried_on_the_next_run(raw, catalog):
-    storage = FakeStorage(fail_keys={"raw/311/2015.csv"})
-    uploader = ing.GcsUploader("brt-test-bucket", client=storage)
-    first = run(raw, catalog, uploader=uploader)
-    assert first["failed"] == ["2015.csv"]
-    assert "raw/311/2015.csv" not in storage.objects
-
-    second = run(raw, catalog, uploader=uploader, when=DAY0 + timedelta(hours=1))
-    assert second["failed"] == []
-    assert storage.objects["raw/311/2015.csv"] == catalog.files["r2015"]
-
-
-def test_custom_prefix(raw, catalog):
-    storage = FakeStorage()
-    run(raw, catalog, uploader=ing.GcsUploader("b", prefix="/test/311/", client=storage), only=["legacy_2015"])
-    assert "test/311/2015.csv" in storage.objects
-
-
-@pytest.mark.parametrize("bucket", ["brt-bucket", "gs://brt-bucket", "gs://brt-bucket/", " brt-bucket "])
-def test_bucket_name_forms(bucket):
-    assert ing.GcsUploader(bucket, client=FakeStorage()).bucket_name == "brt-bucket"
-
-
-@pytest.mark.parametrize("bucket", ["", "gs://", "gs://brt-bucket/raw/311"])
-def test_bad_bucket_name_is_rejected(bucket):
-    with pytest.raises(ValueError, match="bucket"):
-        ing.GcsUploader(bucket, client=FakeStorage())
-
-
-def test_uploader_without_google_library_explains(monkeypatch):
-    import builtins
-
-    real_import = builtins.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name == "google" or name.startswith("google."):
-            raise ImportError(f"No module named {name!r}")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-    with pytest.raises(RuntimeError, match="google-cloud-storage"):
-        ing.GcsUploader("brt-bucket")
+@pytest.mark.parametrize("option", ["--gcs-bucket", "--gcs-prefix"])
+def test_cli_has_no_cloud_upload_option(option, capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        ing.main([option, "brt-test-bucket"])
+    assert exit_info.value.code == 2
+    assert "unrecognized arguments" in capsys.readouterr().err
 
 
 # End to end: real HTTP through a local stand-in for Analyze Boston
@@ -661,9 +572,8 @@ def write_sources(tmp_path, sources=SOURCES):
     return path
 
 
-def test_end_to_end_cli(tmp_path, raw, catalog_server, monkeypatch, capsys):
-    monkeypatch.delenv("BRT_GCS_BUCKET", raising=False)
-    args = ["--raw-dir", str(raw), "--sources", str(write_sources(tmp_path)), "--base-url", catalog_server.base]
+def test_end_to_end_cli(tmp_path, raw, catalog_server, capsys):
+    args =["--raw-dir", str(raw), "--sources", str(write_sources(tmp_path)), "--base-url", catalog_server.base]
 
     assert ing.main(args) == 0
     out = capsys.readouterr().out
@@ -735,13 +645,3 @@ def test_end_to_end_redirect_sends_host_from_location(raw, catalog_server):
     result = ing.run_ingestion(raw, SOURCES[:1], ing.CkanClient(catalog_server.base), now=DAY0)
     assert actions(result) == {"legacy_2015": "downloaded"}
     assert catalog_server.hosts[-1] == urllib.parse.urlsplit(catalog_server.base).netloc
-
-
-def test_cli_with_bucket_uses_uploader(tmp_path, raw, catalog_server, monkeypatch):
-    storage = FakeStorage()
-    original = ing.GcsUploader.__init__
-    monkeypatch.setattr(ing.GcsUploader, "__init__", lambda self, bucket, prefix: original(self, bucket, prefix, client=storage))
-    monkeypatch.setenv("BRT_GCS_BUCKET", "brt-test-bucket")
-    args = ["--raw-dir", str(raw), "--sources", str(write_sources(tmp_path)), "--base-url", catalog_server.base]
-    assert ing.main(args) == 0
-    assert "raw/311/2026.csv" in storage.objects

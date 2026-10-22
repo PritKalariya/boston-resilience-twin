@@ -3,11 +3,10 @@
 The work lives in scripts/ingest_311.py so it is tested without Airflow. The
 DAG runs daily, and each file follows its own interval from
 config/ingest_311_sources.csv, so most runs download only the 2026 and
-new-system files and skip the rest.
+new-system files and skip the rest. It writes the local raw folder only; raw
+data reaches Cloud Storage through DVC, not from this DAG.
 
 Environment, read when the task runs:
-  BRT_GCS_BUCKET   bucket for gs://<bucket>/raw/311/; unset keeps files local
-  BRT_GCS_PREFIX   object prefix, default raw/311
   BRT_RAW_311_DIR  local raw folder, default Data-Pipeline/data/raw/311
 """
 

@@ -11,8 +11,8 @@ Files land byte for byte in the raw folder legacy_311.py reads (<year>.csv,
 new_system.csv). New-system records are also written to
 prepared/new_system.parquet with a source_system column; their timestamps keep
 the original timestamp text. _manifest.json holds the schedule state, and _runs.jsonl
-gets one line per run with every file's action and row count. With a bucket
-set, changed files are mirrored to gs://<bucket>/raw/311/.
+gets one line per run with every file's action and row count. The script
+writes this local folder only; raw data reaches Cloud Storage through DVC.
 """
 
 from __future__ import annotations
@@ -167,34 +167,6 @@ class CkanClient:
             raise OSError(f"download truncated: got {written} of {expected} bytes")
 
 
-class GcsUploader:
-    """Copies files to gs://<bucket>/<prefix>/. Needs google-cloud-storage and GCP credentials."""
-
-    def __init__(self, bucket: str, prefix: str = "raw/311", client=None):
-        name = bucket.strip()
-        name = name[len("gs://"):] if name.startswith("gs://") else name
-        name = name.strip("/")
-        if not name or "/" in name:
-            raise ValueError(f"bad bucket {bucket!r}: give the bucket name only, like my-bucket")
-        if client is None:
-            try:
-                from google.cloud import storage
-            except ImportError as exc:
-                raise RuntimeError("GCS upload needs the google-cloud-storage package, which is not installed") from exc
-            client = storage.Client()
-        self.bucket_name = name
-        self.prefix = prefix.strip("/")
-        self._bucket = client.bucket(name)
-
-    def key(self, rel: str) -> str:
-        return f"{self.prefix}/{rel}" if self.prefix else rel
-
-    def upload(self, local: Path, rel: str) -> str:
-        key = self.key(rel)
-        self._bucket.blob(key).upload_from_filename(str(local))
-        return f"gs://{self.bucket_name}/{key}"
-
-
 def catalog_fingerprint(resource: dict) -> dict[str, str]:
     return {k: "" if resource.get(k) is None else str(resource[k]) for k in CATALOG_FIELDS}
 
@@ -223,7 +195,7 @@ def load_manifest(raw_dir: Path) -> dict:
             raise ValueError(
                 f"{path} is not valid JSON ({exc}). Fix it, or delete it to re-download every file."
             ) from exc
-    for section in ("sources", "prepared", "uploaded"):
+    for section in ("sources", "prepared"):
         manifest.setdefault(section, {})
     return manifest
 
@@ -404,30 +376,10 @@ def prepare_all(raw_dir: Path, sources: list[Source], manifest: dict) -> list[di
     return results
 
 
-def sync_to_gcs(raw_dir: Path, manifest: dict, uploader: GcsUploader) -> list[dict]:
-    """Upload every data file whose content differs from what was last uploaded."""
-    files = {st["file"]: st["sha256"] for st in manifest["sources"].values() if st.get("sha256") and st.get("file")}
-    files.update({name: p["sha256"] for name, p in manifest["prepared"].items() if p.get("sha256")})
-    uploads = []
-    for rel, digest in sorted(files.items()):
-        if manifest["uploaded"].get(rel) == digest:
-            continue
-        try:
-            uri = uploader.upload(raw_dir / rel, rel)
-        except Exception as exc:
-            log.error("upload %s failed: %s", rel, exc)
-            uploads.append({"file": rel, "status": "failed", "error": f"{type(exc).__name__}: {exc}"})
-            continue
-        manifest["uploaded"][rel] = digest
-        uploads.append({"file": rel, "status": "uploaded", "uri": uri})
-    return uploads
-
-
 def run_ingestion(
     raw_dir: Path | str,
     sources: list[Source],
     client,
-    uploader: GcsUploader | None = None,
     now: datetime | None = None,
     force: bool = False,
     only: list[str] | None = None,
@@ -478,22 +430,12 @@ def run_ingestion(
         return run
 
     run["prepared"] = prepare_all(raw_dir, sources, manifest)
-    run["uploads"] = sync_to_gcs(raw_dir, manifest, uploader) if uploader else []
-    run["gcs_prefix"] = f"gs://{uploader.bucket_name}/{uploader.key('')}" if uploader else None
     failed += [p["file"] for p in run["prepared"] if p["action"] == "failed"]
-    failed += [u["file"] for u in run["uploads"] if u["status"] == "failed"]
     run["failed"] = failed
 
     write_json_atomic(raw_dir / MANIFEST, manifest)
     with open(raw_dir / RUN_LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps(run, default=str) + "\n")
-    if uploader:
-        for rel in (MANIFEST, RUN_LOG):
-            try:
-                uploader.upload(raw_dir / rel, rel)
-            except Exception as exc:
-                log.error("upload %s failed: %s", rel, exc)
-                run["failed"].append(rel)
     return run
 
 
@@ -502,25 +444,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--raw-dir", default="Data-Pipeline/data/raw/311")
     parser.add_argument("--sources", default="Data-Pipeline/config/ingest_311_sources.csv")
     parser.add_argument("--base-url", default=CKAN_BASE_URL)
-    parser.add_argument("--gcs-bucket", default=os.environ.get("BRT_GCS_BUCKET", ""), help="unset: no upload")
-    parser.add_argument("--gcs-prefix", default=os.environ.get("BRT_GCS_PREFIX", "raw/311"))
     parser.add_argument("--only", nargs="+", metavar="SOURCE", help="limit the run to these sources")
     parser.add_argument("--force", action="store_true", help="download every selected source, ignoring the schedule")
     parser.add_argument("--dry-run", action="store_true", help="check the catalog and print the plan; write nothing")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    uploader = None
-    if args.gcs_bucket and not args.dry_run:
-        uploader = GcsUploader(args.gcs_bucket, args.gcs_prefix)
-    elif not args.dry_run:
-        log.info("no GCS bucket set (BRT_GCS_BUCKET or --gcs-bucket): files stay local")
-
     run = run_ingestion(
         args.raw_dir,
         load_sources(args.sources),
         CkanClient(args.base_url),
-        uploader=uploader,
         force=args.force,
         only=args.only,
         dry_run=args.dry_run,
@@ -529,8 +462,6 @@ def main(argv: list[str] | None = None) -> int:
     print(table.astype({"rows": "Int64", "previous_rows": "Int64"}).to_string(index=False))
     for p in run.get("prepared", []):
         print(f"{p['file']}: {p['action']} ({p['reason']}), rows={p.get('rows')}")
-    for u in run.get("uploads", []):
-        print(f"{u['file']}: {u['status']} {u.get('uri') or u.get('error')}")
     if run["failed"]:
         print(f"FAILED: {', '.join(run['failed'])}", file=sys.stderr)
         return 1
