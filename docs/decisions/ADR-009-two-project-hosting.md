@@ -28,7 +28,7 @@ The split follows the load: steady cost in project 1, per-request cost in projec
 ## Consequences
 
 - Cloud Run, CI/CD, and the Nov 16 live run depend on project 2 being set up first.
-- Project 1 has budget alerts at 50%, 90%, and 100% of its $50.
+- Project 1's billing account has a $50 budget for Sep 1 to Dec 7, 2026 (`brt-50-cap`), with alerts at 50%, 90%, and 100%. It was set up by hand in the console, not in Terraform.
 
 ## Revisit when
 
