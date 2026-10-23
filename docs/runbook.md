@@ -222,6 +222,34 @@ The VM does not use `.env` for secrets: they come from Secret Manager
 secret key and Fernet key must be identical in every container; the shared
 environment block in `docker-compose.yaml` passes one value to all of them.
 
+### API keys in .env
+
+Pipeline tasks read `NOAA_CDO_TOKEN`, `CENSUS_API_KEY` and `NWS_USER_AGENT`
+from the environment (docs/data-access.md). Locally they come from `.env`.
+A team member fills them from Secret Manager (needs `gcloud auth login` with
+project 1 set). It replaces any existing lines for the three keys and keeps
+the rest of `.env`:
+
+```bash
+touch .env && grep -vE "^(NOAA_CDO_TOKEN|CENSUS_API_KEY|NWS_USER_AGENT)=" .env > .env.tmp; mv .env.tmp .env
+for s in noaa-cdo-token census-api-key nws-user-agent; do
+  printf "%s='%s'\n" "$(echo "$s" | tr a-z- A-Z_)" "$(gcloud secrets versions access latest --secret="$s")" >> .env
+done
+docker compose up -d --wait
+```
+
+The values never print to the terminal. Do not `cat .env` in a shared
+screen. To check that the containers see each key without printing it:
+
+```bash
+docker compose exec airflow-scheduler sh -c 'for k in NOAA_CDO_TOKEN CENSUS_API_KEY NWS_USER_AGENT; do [ -n "$(printenv $k)" ] && echo "$k set" || echo "$k empty"; done'
+```
+
+A secret slot with no version yet (for example `nws-user-agent` before its
+value is added) writes an empty value and gcloud prints `NOT_FOUND`; the task
+that needs it then fails naming the key. On Linux, write `AIRFLOW_UID` first:
+the README's `echo "AIRFLOW_UID=$(id -u)" > .env` overwrites the file.
+
 ### Troubleshooting
 
 - **Docker Desktop quits a few seconds after it starts (Windows).** Podman
@@ -421,8 +449,9 @@ Terraform creates the secret slots empty. Values are added by hand and never
 go into a `.tf` file, a tfvars file, chat, the repo, or a ticket.
 
 Who can: the members listed in the `secret_writers` tfvars variable. They hold
-`roles/secretmanager.secretVersionAdder` on `noaa-cdo-token` and
-`census-api-key` only, which is the permission to add a new version. It is not
+`roles/secretmanager.secretVersionAdder` on `noaa-cdo-token`,
+`census-api-key` and `nws-user-agent` only, which is the permission to add a
+new version. It is not
 project wide and it does not let them read the values back; reading is
 `roles/secretmanager.secretAccessor`, which every team member already has.
 

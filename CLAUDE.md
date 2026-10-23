@@ -79,6 +79,8 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `terraform apply -var-file=terraform.tfvars`: human only, never run by Claude Code
 - `gcloud compute instances start|stop airflow-vm --zone=us-east1-b`: VM power; Terraform does not manage run state
 - `read -rs VALUE && printf '%s' "$VALUE" | gcloud secrets versions add <secret> --data-file=-; unset VALUE`: add a secret value with no trailing newline and nothing in shell history (see runbook). Human only, never run by Claude Code
+- runbook "API keys in .env": fill `NOAA_CDO_TOKEN`, `CENSUS_API_KEY` and `NWS_USER_AGENT` in `.env` from Secret Manager. Human only (writes secret values), never run by Claude Code
+- `docker compose exec airflow-scheduler sh -c 'for k in NOAA_CDO_TOKEN CENSUS_API_KEY NWS_USER_AGENT; do [ -n "$(printenv $k)" ] && echo "$k set" || echo "$k empty"; done'`: check the API keys reached the containers without printing them
 - `docker compose config --quiet`: validate `docker-compose.yaml`; no output means valid
 - `docker compose up -d --build --wait`: start Airflow 3.3.2 (LocalExecutor) and Postgres 16 and wait until healthy, rebuilding the Airflow image first (fully cached, about 1 s, unless `Data-Pipeline/requirements.txt` changed; ADR-022); UI at http://localhost:8080, login airflow / airflow (local defaults)
 - `docker compose ps -a`: service state and health; `airflow-init` shows `Exited (0)` once the database is migrated
