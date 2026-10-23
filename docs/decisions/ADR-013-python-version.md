@@ -1,6 +1,6 @@
 # ADR-013: Python 3.12 for all project code and images
 
-- Status: accepted
+- Status: accepted. Its open item on aligning `Data-Pipeline/requirements.txt` with the Airflow constraints is closed by ADR-017.
 - Date: 2026-10-16
 - Owner: Pu1ni2
 - Phase: setup
