@@ -122,6 +122,36 @@ python Data-Pipeline/scripts/static_layers.py --refresh    # fetch every file ag
 
 Raw files go to `Data-Pipeline/data/raw/static/` and the loaded layers to `Data-Pipeline/data/interim/static/` (vectors as GeoParquet in EPSG:4326), both gitignored. The run rewrites `docs/data/static-layers.csv` with the source CRS, row count, retrieval date and SHA-256 of each file; commit it with the change. A changed hash after `--refresh` means the city published a new version, so check the row counts before using it. The run stops on a missing, empty or unreadable file, a missing or duplicate key, or a layer that falls outside Boston after reprojection (usually a wrong CRS).
 
+## Weather download (Open-Meteo, issue #8)
+
+`Data-Pipeline/scripts/open_meteo.py` downloads hourly Open-Meteo weather at Boston Logan for each set in `Data-Pipeline/config/open_meteo.csv`. What each set is, and which one validation and test may use: the table in [docs/data/README.md](data/README.md#open-meteo-weather). To change a model, start date, value or the place, change the config in a reviewed PR.
+
+```bash
+python Data-Pipeline/scripts/open_meteo.py --dry-run                              # what a run would download; writes nothing
+python Data-Pipeline/scripts/open_meteo.py                                        # download what is missing or newly finished
+python Data-Pipeline/scripts/open_meteo.py --only first_hours_ecmwf_ifs --force   # download one set again, every year
+```
+
+What a run does, for each set:
+1. Finds the last day to store. `end = yesterday`: yesterday in UTC, so no hour after the download is stored. `end = latest_values` (ERA5, about 5 days behind): one small request finds the last full day with values.
+2. Splits the dates into calendar years. A year already stored through that day is skipped without a request.
+3. Downloads each other year whole and checks the answer: not empty, valid JSON, no Open-Meteo error, in UTC, every hour and value present, numbers only, grid point within 0.5 degrees of Logan. Only then does it replace the year file. A failed check keeps the stored file, logs the year as `failed`, and the run exits with code 1.
+4. Updates the set's `_manifest.json` (download time, last hour stored, grid point, hours with data per value) and adds a line to `_runs.jsonl`.
+5. Rewrites `docs/data/open-meteo.csv` with the attribution, coverage, download time and SHA-256 of every file. Commit it with the change; a DAG run should write it under `Data-Pipeline/data/` with `--attribution`.
+
+Output: `Data-Pipeline/data/raw/open_meteo/<set>/<year>.json`, `_manifest.json` and `_runs.jsonl`, gitignored and local only. Nothing is uploaded; raw data reaches Cloud Storage only through DVC (#18, #19). No API key is needed.
+
+Rate limits: the free API allows 600 calls a minute and 10,000 a day, and a request counts as one call per 2 weeks of data for up to 10 values. A year of one set is about 26 calls. The first full download was 13 requests, about 300 calls, 5 seconds apart (`--pause`). A daily rerun sends 1 to 3 requests: the ERA5 check and the years with new days.
+
+Run it after about 01:00 UTC, when the model run that covers yesterday's last hours has been published (4 to 6 hours after it starts). An earlier run is still valid, and the next day's run replaces that year whole.
+
+When something goes wrong:
+- A year shows `failed`: the reason is in the output and in `_runs.jsonl`. The stored file is unchanged; fix the cause and rerun.
+- `its files were downloaded with other settings`: the config's model, place or values changed under an existing set name. Give the set a new name (a new folder), or rerun with `--force` to replace its files.
+- `_manifest.json is not valid JSON`: delete it; the next run downloads the set again.
+- `no full day with values in the 14 days up to ...`: ERA5 is late or the API is down. Try again later.
+- HTTP 429: the rate limit was hit. Wait an hour and rerun; finished years are not downloaded again.
+
 ## Project 1 infrastructure (Terraform)
 
 Config lives in `Deployment/terraform/`. It covers project 1 only (ADR-009):
