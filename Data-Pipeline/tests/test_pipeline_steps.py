@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import subprocess
 import sys
@@ -295,7 +296,15 @@ def test_trim_an_empty_file(tmp_path):
     assert pd.read_parquet(path).empty
 
 
-def test_slices_trim_legacy_and_combined_but_not_the_new_export(tmp_path, monkeypatch):
+@pytest.fixture
+def skip_file_checks(monkeypatch):
+    """Run run_step's control flow without real input or output files."""
+    monkeypatch.setattr(steps, "check_inputs", lambda step, files: None)
+    monkeypatch.setattr(steps, "check_outputs", lambda step, files: None)
+    monkeypatch.setattr(steps, "count_rows", lambda path: 0)
+
+
+def test_slices_trim_legacy_and_combined_but_not_the_new_export(tmp_path, monkeypatch, skip_file_checks):
     calls = []
     monkeypatch.setattr(steps, "run_script", lambda module, args: calls.append(module))
     monkeypatch.setattr(steps, "trim_to_range", lambda path, column, days: calls.append((path.name, column)) or (1, 1))
@@ -309,11 +318,136 @@ def test_slices_trim_legacy_and_combined_but_not_the_new_export(tmp_path, monkey
     ]
 
 
-def test_the_full_build_is_never_trimmed(tmp_path, monkeypatch):
+def test_the_full_build_is_never_trimmed(tmp_path, monkeypatch, skip_file_checks):
     monkeypatch.setattr(steps, "run_script", lambda module, args: None)
     monkeypatch.setattr(steps, "trim_to_range", lambda *args: pytest.fail("the full build keeps every row"))
     for step in steps.SCRIPTS:
         run_step(step, FULL, tmp_path)
+
+
+def test_only_the_ingest_tasks_retry():
+    assert steps.NETWORK == {
+        "ingest_static_layers", "ingest_legacy_311", "ingest_new_311", "ingest_noaa_logan",
+        "ingest_nws_forecasts", "ingest_nws_alerts", "ingest_tides", "ingest_open_meteo",
+    }
+    assert steps.RETRIES == 2
+    assert steps.RETRY_DELAY.total_seconds() == 300 and steps.RETRY_BACKOFF == 2.0
+    assert steps.MAX_RETRY_DELAY.total_seconds() == 900
+
+
+@pytest.mark.parametrize("step", sorted(steps.SCRIPTS))
+def test_step_files_are_the_files_in_the_arguments(tmp_path, step):
+    args = script_args(step, SLICE, tmp_path)
+    folders = [Path(v) for flag, v in flag_values(args).items() if flag in {"--raw-dir", "--out-dir"}]
+    files = steps.step_files(step, SLICE, tmp_path)
+    for path in files.data_in + files.config_in + files.data_out:
+        assert str(path) in args or any(path.is_relative_to(folder) for folder in folders), path
+    assert step in steps.HINTS
+
+
+def test_count_rows_of_csv_parquet_and_folder(tmp_path):
+    (tmp_path / "rows.csv").write_text("a,b\n1,2\n3,4\n")
+    (tmp_path / "no_final_break.csv").write_text("a,b\n1,2")
+    (tmp_path / "header_only.csv").write_text("a,b\n")
+    (tmp_path / "empty.csv").write_bytes(b"")
+    folder = tmp_path / "layers"
+    folder.mkdir()
+    pd.DataFrame({"x": [1, 2, 3]}).to_parquet(folder / "one.parquet")
+    pd.DataFrame({"x": [1]}).to_parquet(folder / "two.parquet")
+    (folder / "notes.txt").write_text("not counted")
+    names = ["rows.csv", "no_final_break.csv", "header_only.csv", "empty.csv"]
+    assert [steps.count_rows(tmp_path / name) for name in names] == [2, 1, 0, 0]
+    assert steps.count_rows(folder / "one.parquet") == 3
+    assert steps.count_rows(folder) == 4
+
+
+def test_every_task_logs_run_id_rows_in_and_rows_out(caplog):
+    with caplog.at_level(logging.INFO, logger="pipeline_steps"):
+        steps.log_task("r1", "daily_counts", 0, 0)
+        steps.log_task("r1", "check_range", None, None)
+        steps.log_task("r1", "combine_311", 348466, 280044, 2.31)
+    assert caplog.messages == [
+        "run r1 task daily_counts: rows in 0, rows out 0",
+        "run r1 task check_range: rows in n/a, rows out n/a",
+        "run r1 task combine_311: rows in 348,466, rows out 280,044 in 2.3 s",
+    ]
+
+
+def test_run_step_logs_its_rows(tmp_path, monkeypatch, caplog):
+    root = tmp_path / "repo"
+    make_repo(root, {2025: LEGACY_2025}, NEW_SYSTEM)
+    monkeypatch.chdir(tmp_path)
+    with caplog.at_level(logging.INFO, logger="pipeline_steps"):
+        assert run_step("parse_legacy_311", SLICE, root, run_id="test-run") == (2, 2)
+        assert run_step("parse_new_311", SLICE, root, run_id="test-run") == (1, 1)
+    assert caplog.messages[0] == "run test-run task parse_legacy_311: kept 2 of 2 rows of legacy_311.parquet in 2025-01-01_2025-12-31"
+    assert re.fullmatch(r"run test-run task parse_legacy_311: rows in 2, rows out 2 in \d+\.\d s", caplog.messages[1])
+    assert re.fullmatch(r"run test-run task parse_new_311: rows in 1, rows out 1 in \d+\.\d s", caplog.messages[2])
+
+
+# The three failure cases of #36: missing source, corrupt file, empty download.
+
+def test_missing_source_fails_before_the_script_runs(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    make_repo(root, {}, NEW_SYSTEM)  # no 2025.csv
+    monkeypatch.setattr(steps, "run_script", lambda *args: pytest.fail("the script must not run"))
+    with pytest.raises(steps.InputError, match=r"parse_legacy_311 cannot start: missing .*2025\.csv\. Put the yearly legacy 311 files"):
+        run_step("parse_legacy_311", SLICE, root, run_id="test-run")
+
+
+def test_corrupt_csv_fails_with_the_run_and_task_in_the_log(tmp_path, monkeypatch, caplog):
+    root = tmp_path / "repo"
+    make_repo(root, {2025: LEGACY_2025}, NEW_SYSTEM)
+    (root / "Data-Pipeline" / "data" / "raw" / "311" / "new_system.csv").write_bytes(bytes(range(256)) * 4)
+    monkeypatch.chdir(tmp_path)
+    with caplog.at_level(logging.ERROR, logger="pipeline_steps"), pytest.raises(ValueError):
+        run_step("parse_new_311", SLICE, root, run_id="test-run")
+    assert caplog.messages[-1].startswith("run test-run task parse_new_311 failed: ")
+
+
+def test_corrupt_parquet_fails_with_the_run_and_task_in_the_log(tmp_path, monkeypatch, caplog):
+    root = tmp_path / "repo"
+    make_repo(root, {2025: LEGACY_2025}, NEW_SYSTEM)
+    interim = run_paths(SLICE, root).interim
+    interim.mkdir(parents=True)
+    for name in ("legacy_311.parquet", "new_311.parquet"):
+        (interim / name).write_bytes(b"not a parquet file")
+    monkeypatch.chdir(tmp_path)
+    with caplog.at_level(logging.ERROR, logger="pipeline_steps"), pytest.raises(ValueError):
+        run_step("combine_311", SLICE, root, run_id="test-run")
+    assert caplog.messages[-1].startswith("run test-run task combine_311 failed: ")
+
+
+def test_empty_download_fails_before_the_script_runs(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    make_repo(root, {2025: LEGACY_2025}, "")  # a 0-byte new-system export
+    monkeypatch.setattr(steps, "run_script", lambda *args: pytest.fail("the script must not run"))
+    with pytest.raises(steps.InputError, match=r"parse_new_311 cannot start: empty .*new_system\.csv"):
+        run_step("parse_new_311", SLICE, root, run_id="test-run")
+
+
+def test_empty_static_download_fails_clearly(tmp_path, monkeypatch, caplog):
+    import static_layers
+
+    monkeypatch.setattr(static_layers, "download", lambda *a, **k: pytest.fail("the file is present; nothing to download"))
+    root = tmp_path / "repo"
+    (root / "Data-Pipeline" / "config").mkdir(parents=True)
+    (root / "Data-Pipeline" / "config" / "static_layers.csv").write_text(STATIC_CONFIG)
+    raw = root / "Data-Pipeline" / "data" / "raw" / "static"
+    raw.mkdir(parents=True)
+    (raw / "population.csv").write_bytes(b"")  # what an empty download leaves behind
+    monkeypatch.chdir(tmp_path)
+    with caplog.at_level(logging.ERROR, logger="pipeline_steps"), pytest.raises(ValueError, match="population.csv is empty"):
+        run_step("ingest_static_layers", SLICE, root, run_id="test-run")
+    assert caplog.messages[-1] == "run test-run task ingest_static_layers failed: ValueError: population.csv is empty"
+
+
+def test_a_step_that_writes_nothing_fails(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    make_repo(root, {2025: LEGACY_2025}, NEW_SYSTEM)
+    monkeypatch.setattr(steps, "run_script", lambda module, args: None)
+    with pytest.raises(RuntimeError, match=r"parse_new_311 finished but wrote no .*new_311\.parquet"):
+        run_step("parse_new_311", SLICE, root, run_id="test-run")
 
 
 STATIC_CONFIG = (
@@ -353,7 +487,7 @@ def test_real_steps_are_scripts():
 
 def test_import_is_light():
     # The DAG imports pipeline_steps at parse time, so it must not pull in pandas or geopandas.
-    code = "import sys, pipeline_steps; print(sorted({'pandas', 'geopandas', 'numpy'} & set(sys.modules)))"
+    code = "import sys, alerts, pipeline_steps; print(sorted({'pandas', 'geopandas', 'numpy', 'pyarrow'} & set(sys.modules)))"
     out = subprocess.run([sys.executable, "-c", code], cwd=SCRIPTS_DIR, capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "[]"
 
