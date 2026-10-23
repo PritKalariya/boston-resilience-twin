@@ -4,6 +4,7 @@ locals {
   secret_ids = [
     "noaa-cdo-token",
     "census-api-key",
+    "nws-user-agent",
   ]
 }
 

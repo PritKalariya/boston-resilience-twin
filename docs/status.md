@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-20 by Alekhya. Edit this file in the PR that changes the state.
+Updated: 2026-10-23 by Kirtan. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -11,6 +11,7 @@ Week 2: Processing (due 2026-10-18)
 | #1 Harden repo and team workflow | Prit | 2026-10-10 | in progress | |
 | #2 Local dev environment and Python pin | Punith | 2026-10-13 | done | PR #55 merged. `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); ADR-013 pins Python 3.12 |
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
+| #4 API access and secrets | Kirtan | 2026-10-11 | in progress | `docs/data-access.md` has one check per API (NOAA CDO, Census, NWS). NOAA and Census keys stored and checked (200, 2026-10-20); `nws-user-agent` slot added in `secrets.tf`, waiting on Prit's review and apply, then its value and NWS check. Keys reach the Airflow containers from `.env` (`NOAA_CDO_TOKEN`, `CENSUS_API_KEY`, `NWS_USER_AGENT`); `credentials.require` fails a task naming a missing key (checked in the scheduler container, 2026-10-23). The pipeline needs no Census key so far (W1-9) |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
 | #11 Decision: live baselines for the new 311 format | Punith | 2026-10-13 | done | PR #63 merged; ADR-005: baseline = same weeks of the previous 3 years, both systems, by storm group |
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | done | PR #52 merged; results below; new-system clock in ADR-020; flooding gap needs a team call |
