@@ -76,7 +76,7 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `gcloud compute instances start|stop airflow-vm --zone=us-east1-b`: VM power; Terraform does not manage run state
 - `read -rs VALUE && printf '%s' "$VALUE" | gcloud secrets versions add <secret> --data-file=-; unset VALUE`: add a secret value with no trailing newline and nothing in shell history (see runbook). Human only, never run by Claude Code
 - `docker compose config --quiet`: validate `docker-compose.yaml`; no output means valid
-- `docker compose up -d --wait`: start Airflow 3.3.2 (LocalExecutor) and Postgres 16 and wait until healthy; UI at http://localhost:8080, login airflow / airflow (local defaults)
+- `docker compose up -d --build --wait`: start Airflow 3.3.2 (LocalExecutor) and Postgres 16 and wait until healthy, rebuilding the Airflow image first (fully cached, about 1 s, unless `Data-Pipeline/requirements.txt` changed; ADR-022); UI at http://localhost:8080, login airflow / airflow (local defaults)
 - `docker compose ps -a`: service state and health; `airflow-init` shows `Exited (0)` once the database is migrated
 - `docker compose logs <service>`: logs of one service, for example `airflow-scheduler`
 - `docker compose exec airflow-scheduler airflow dags list-import-errors`: DAG import errors; `No data found` when every DAG imports
