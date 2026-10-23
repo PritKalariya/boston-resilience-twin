@@ -124,7 +124,7 @@ Raw files go to `Data-Pipeline/data/raw/static/` and the loaded layers to `Data-
 
 ## Weather download (Open-Meteo, issue #8)
 
-`Data-Pipeline/scripts/open_meteo.py` downloads hourly Open-Meteo weather at Boston Logan for each set in `Data-Pipeline/config/open_meteo.csv`. What each set is, and which one validation and test may use: the table in [docs/data/README.md](data/README.md#open-meteo-weather). To change a model, start date, value or the place, change the config in a reviewed PR.
+`Data-Pipeline/scripts/open_meteo.py` downloads hourly Open-Meteo weather at Boston Logan for each set in `Data-Pipeline/config/open_meteo.csv`. What each set is, and which one validation and test may use: the table in [docs/data/README.md](data/README.md#open-meteo-weather). To change a model, start date, value or the place, change the config in a reviewed PR. Set c (day-before forecasts) starts 2024-01-21, GFS's first full day of day-before values, and has no rain or snowfall before early December 2024 (README table).
 
 ```bash
 python Data-Pipeline/scripts/open_meteo.py --dry-run                              # what a run would download; writes nothing
@@ -141,7 +141,7 @@ What a run does, for each set:
 
 Output: `Data-Pipeline/data/raw/open_meteo/<set>/<year>.json`, `_manifest.json` and `_runs.jsonl`, gitignored and local only. Nothing is uploaded; raw data reaches Cloud Storage only through DVC (#18, #19). No API key is needed.
 
-Rate limits: the free API allows 600 calls a minute and 10,000 a day, and a request counts as one call per 2 weeks of data for up to 10 values. A year of one set is about 26 calls. The first full download was 13 requests, about 300 calls, 5 seconds apart (`--pause`). A daily rerun sends 1 to 3 requests: the ERA5 check and the years with new days.
+Rate limits: the free API allows 600 calls a minute and 10,000 a day, and a request counts as one call per 2 weeks of data for up to 10 values. A year of one set is about 26 calls, about 31 for set c, which asks for 12 values. The first full downloads were 13 requests for sets a and b (about 300 calls) and 3 requests for set c (about 85 calls), 5 seconds apart (`--pause`). A daily rerun sends 1 to 4 requests: the ERA5 check and the latest year of each set that has new days.
 
 Run it after about 01:00 UTC, when the model run that covers yesterday's last hours has been published (4 to 6 hours after it starts). An earlier run is still valid, and the next day's run replaces that year whole.
 

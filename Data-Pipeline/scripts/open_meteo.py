@@ -463,6 +463,13 @@ def run_download(sets, raw_root, client, now=None, only=None, force=False, dry_r
     return {"run_at": now.isoformat(timespec="seconds"), "sets": runs, "failed": [f for r in runs for f in r["failed"]]}
 
 
+def describe(value: str, found: dict, hours: int) -> str:
+    """`value (unit)`, plus its hours and first and last hour when it does not fill the file."""
+    if found["hours_with_data"] == hours:
+        return f"{value} ({found['unit']})"
+    return f"{value} ({found['unit']}, {found['hours_with_data']} of {hours} hours, {found['first']} to {found['last']})"
+
+
 def attribution_rows(sets, raw_root) -> list[dict]:
     """One row per stored file: what it is, where it came from, and how to credit it."""
     rows = []
@@ -475,7 +482,7 @@ def attribution_rows(sets, raw_root) -> list[dict]:
         for name in sorted(files):
             entry = files[name]
             values = entry.get("values", {})
-            with_data = [f"{v} ({values[v]['unit']})" for v in ws.hourly if values.get(v, {}).get("hours_with_data")]
+            with_data = [describe(v, values[v], entry["hours"]) for v in ws.hourly if values.get(v, {}).get("hours_with_data")]
             without_data = [v for v in ws.hourly if not values.get(v, {}).get("hours_with_data")]
             grid = entry.get("grid", {})
             rows.append({

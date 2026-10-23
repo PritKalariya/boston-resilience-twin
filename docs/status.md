@@ -21,7 +21,7 @@ Week 2: Processing (due 2026-10-18)
 | #48 Lifecycle rule for noncurrent versions on the data bucket | Prit | 2026-10-18 | done | PR #56 merged; noncurrent versions in the data bucket deleted after 30 days |
 | #9 Static layers | Alekhya | 2026-10-13 | done | PR #62 merged; results below |
 | #10 Decision: lock the modeling unit | Alekhya | 2026-10-13 | done | PR #66 merged; ADR-004 proposed (team sign-off pending): neighborhood x day, 24 tract-built neighborhoods, surge in any storm group |
-| #8 Open-Meteo history and archived forecasts | Piyush | 2026-10-13 | in progress | Part 1 done: set a (ERA5 history) and set b (ECMWF IFS first-hours data) from 2021-01-01; results below. Set c (day-before forecasts) waits for its start date |
+| #8 Open-Meteo history and archived forecasts | Piyush | 2026-10-13 | in progress | Set a (ERA5 history) and set b (ECMWF IFS first-hours data) from 2021-01-01; set c (GFS day-before forecasts, for validation and test) from 2024-01-21; results below |
 
 ## Blocked
 None.
@@ -43,8 +43,9 @@ None.
 - **geopandas is not in the Airflow constraints file.** `Data-Pipeline/requirements.txt` adds `geopandas>=1.1` (tested with 1.2.0, shapely 2.2.0, pyproj 3.8.0, pyogrio 0.13.0). Once PR #58 pins the other packages, this line needs an exact pin too, and the Airflow image needs it installed before #22 runs the step in a DAG.
 - The 2026-10-20 export moves the first new-system date of Broken Park Equipment (not storm related) from 2026-03-10 to 2026-01-09. `docs/data/change-points.csv` is not updated in #10; the next `map_311.py` run in a PR should refresh it.
 - **Open-Meteo's archived forecasts for 2021 to 2023 are first-hours data.** The Historical Forecast API joins the first hours of each model run, so its values are almost the real weather, not what was forecast the evening before. ADR-003 (Srikar, PR #67) uses Open-Meteo archived forecasts from 2021 for validation and test, but only day-before forecasts (Previous Runs API) are safe there. This changes what ADR-003 means by archived forecasts, and the team must confirm it. #8 keeps them as set b, labeled not for validation or test (`docs/data/README.md`).
-- **Open-Meteo's Previous Runs data does not reach January 2024, although its docs say most models start then.** ECMWF IFS, HRRR and GFS return no values for 2024-01-01 to 2024-01-07 (requests of 2026-10-21 and 22). Set c's start date, and so the first validation day with day-before forecasts, is still to be found.
-- **Boston-local days and the cutoff rule moved to #16.** #8 stores hourly UTC values only; set c will hold the 1-day and 2-day forecasts side by side. Note for #16: cutoff 00:00 UTC, 6-hour publish delay. A 1-day value for hour H comes from a run that started about 24 hours before H and is published about 6 hours later, so it is known at the cutoff only up to 18:00 UTC on the target day. Use the 1-day value up to 18:00 UTC and the 2-day value for the evening hours.
+- **Open-Meteo's Previous Runs data does not reach January 2024, although its docs say most models start then.** ECMWF IFS, HRRR and GFS return no values for 2024-01-01 to 2024-01-07 (requests of 2026-10-21 and 22). Set c (GFS) starts 2024-01-21, its first full day of 1-day and 2-day values, so validation loses January 2024 before it: no day-before forecasts for 2024-01-01 to 2024-01-20. ECMWF has none even on 2025-01-01.
+- **Early set c has no rain or snowfall.** In GFS day-before data, precipitation, showers, temperature and gusts are complete from 2024-01-21, but rain and snowfall start 2024-12-06 18:00 for 1 day ahead (first full day 2024-12-07) and 2024-12-07 18:00 for 2 days ahead (first full day 2024-12-08). #16 must decide how to handle snow in set c before then, for example from precipitation and temperature.
+- **Boston-local days and the cutoff rule moved to #16.** #8 stores hourly UTC values only; set c holds the 1-day and 2-day forecasts side by side. Note for #16: cutoff 00:00 UTC, 6-hour publish delay; set c holds both values from 2024-01-21. A 1-day value for hour H comes from a run that started about 24 hours before H and is published about 6 hours later, so it is known at the cutoff only up to 18:00 UTC on the target day. Use the 1-day value up to 18:00 UTC and the 2-day value for the evening hours.
 - **ECMWF's `rain` changes meaning in 2025.** Until 2024 shower rain is inside `rain` and `showers` is empty; from 2025 ECMWF fills `showers` (2,232 of 8,760 hours in 2025, every hour in 2026). Rain plus showers plus snow adds up to precipitation in every year, so #16 should use `precipitation`, or rain plus showers.
 
 ## W1-8 results (2026-10-22)
@@ -55,8 +56,9 @@ Command: `python Data-Pipeline/scripts/open_meteo.py`. Data: Open-Meteo at Bosto
 |---|---|---|---|---|---|
 | a `history_era5` | `era5` | 2021-01-01 00:00 to 2026-10-16 23:00, ERA5's last full day | 50,760 | 42.25, -71.0 (about 12 km south of the station) | precipitation, rain, snowfall, temperature_2m, wind_gusts_10m in every hour; the history API has no showers |
 | b `first_hours_ecmwf_ifs` | `ecmwf_ifs` | 2021-01-01 00:00 to 2026-10-21 23:00, the day before the download | 50,880 | 42.28471, -71.0249 (about 8.5 km south) | the same 5 in every hour; showers none 2021 to 2024, 2,232 of 8,760 hours in 2025, every hour in 2026 |
+| c `day_before_ncep_gfs_global` | `ncep_gfs_global` | 2024-01-21 00:00 to 2026-10-22 23:00, the day before the download | 24,144 | 42.349503, -71.015625 (about 1.3 km) | all 6 values, 1 and 2 days ahead, in every hour, except rain and snowfall before 2024-12-06 18:00 (1 day) and 2024-12-07 18:00 (2 days) |
 
-Set c (day-before forecasts) is not built yet; its start date is open (Risks).
+Set c: `python Data-Pipeline/scripts/open_meteo.py --only day_before_ncep_gfs_global`, downloaded 2026-10-23 03:09 UTC in 3 requests (about 85 API calls); a rerun sent no request and skipped all 3 files. Its start came from one-day and two-week checks on 2026-10-22 (10 requests).
 
 ## W1-10 results (2026-10-20)
 

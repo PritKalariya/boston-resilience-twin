@@ -32,15 +32,24 @@ FORECAST_ROW = (
     "first_hours_ecmwf_ifs,https://historical-forecast-api.open-meteo.com/v1/forecast,ecmwf_ifs,2024-11-01,"
     "yesterday,precipitation;rain;showers,Logan,42.36057,-71.00975,no,First hours,ECMWF,https://example.org/e\n"
 )
+DAY_BEFORE_ROW = (
+    "day_before_ncep_gfs_global,https://previous-runs-api.open-meteo.com/v1/forecast,ncep_gfs_global,2024-11-15,"
+    "yesterday,temperature_2m_previous_day1;temperature_2m_previous_day2;snowfall_previous_day1;snowfall_previous_day2,"
+    "Logan,42.36057,-71.00975,yes,Day before,NOAA NCEP,https://example.org/n\n"
+)
+# GFS day-before snowfall (and rain) start partway through, after the other values.
+SNOW_STARTS = {"snowfall_previous_day1": "2024-12-06T18:00", "snowfall_previous_day2": "2024-12-07T18:00"}
 
 
 class FakeOpenMeteo:
     """Answers like the API: every hour from start_date to end_date, with data up to
-    `data_until` per host (ERA5 runs behind) and none for the values in `without`."""
+    `data_until` per host (ERA5 runs behind), from `value_starts` per value, and none
+    for the values in `without`."""
 
-    def __init__(self, data_until=None, without=("showers",)):
+    def __init__(self, data_until=None, without=("showers",), value_starts=None):
         self.data_until = data_until or {"archive-api.open-meteo.com": "2026-10-16T23:00"}
         self.without = set(without)
+        self.value_starts = value_starts or {}
         self.answer_with = None  # bytes or an exception to give instead of an answer
         self.urls = []
         self.bodies = {}
@@ -58,7 +67,8 @@ class FakeOpenMeteo:
         values = query["hourly"].split(",")
         hourly = {"time": times}
         for value in values:
-            hourly[value] = [None if value in self.without or t > until else 0.5 for t in times]
+            starts = self.value_starts.get(value, "")
+            hourly[value] = [None if value in self.without or t > until or t < starts else 0.5 for t in times]
         body = json.dumps({
             "latitude": 42.25,
             "longitude": -71.0,
@@ -181,13 +191,20 @@ def test_config_repeated_name(tmp_path):
 
 def test_repo_config():
     sets = {s.name: s for s in read_config(REPO_CONFIG)}
-    assert set(sets) == {"history_era5", "first_hours_ecmwf_ifs"}
+    assert set(sets) == {"history_era5", "first_hours_ecmwf_ifs", "day_before_ncep_gfs_global"}
     history, first_hours = sets["history_era5"], sets["first_hours_ecmwf_ifs"]
+    day_before = sets["day_before_ncep_gfs_global"]
     assert (history.model, history.start, history.end) == ("era5", date(2021, 1, 1), "latest_values")
     assert (first_hours.model, first_hours.start, first_hours.end) == ("ecmwf_ifs", date(2021, 1, 1), "yesterday")
+    assert (day_before.model, day_before.start, day_before.end) == ("ncep_gfs_global", date(2024, 1, 21), "yesterday")
     assert "showers" not in history.hourly  # the history API has no showers value
     assert "showers" in first_hours.hourly
-    assert {s.validation_test for s in sets.values()} == {"no"}
+    values = ("precipitation", "rain", "showers", "snowfall", "temperature_2m", "wind_gusts_10m")
+    assert set(day_before.hourly) == {f"{v}_previous_day{n}" for v in values for n in (1, 2)}
+    # Only the day-before forecasts were known in advance, so only they may be used in validation and test.
+    assert {name: s.validation_test for name, s in sets.items()} == {
+        "history_era5": "no", "first_hours_ecmwf_ifs": "no", "day_before_ncep_gfs_global": "yes",
+    }
 
 
 # Planning
@@ -463,3 +480,70 @@ def test_main_writes_the_attribution_file_and_exits_1_on_failure(tmp_path, monke
         open_meteo.main(["--config", str(config), "--raw-dir", str(tmp_path / "raw"), "--attribution", str(out)])
     assert stop.value.code == 1
     assert out.read_text() == ",".join(ATTRIBUTION_COLUMNS) + "\n"
+
+
+# Day-before forecasts (set c)
+
+def day_before(tmp_path):
+    return read_config(write_config(tmp_path, DAY_BEFORE_ROW), today=NOW.date())
+
+
+def test_day_before_set_stores_both_offsets_through_yesterday(tmp_path):
+    client = FakeOpenMeteo(value_starts=SNOW_STARTS)
+    result = run_download(day_before(tmp_path), tmp_path / "raw", client, now=NOW)
+    assert result["failed"] == []
+    assert len(client.urls) == 3  # 2024, 2025 and 2026; `yesterday` needs no end check
+    stored = year_files(tmp_path / "raw")
+    url = next(u for u in client.urls if "start_date=2026-01-01" in u)
+    assert stored["day_before_ncep_gfs_global/2026.json"] == client.bodies[url]
+
+    m = manifest(tmp_path, "day_before_ncep_gfs_global")
+    assert (m["first_hour"], m["last_hour"]) == ("2024-11-15T00:00", "2026-10-21T23:00")
+    values = m["files"]["2024.json"]["values"]
+    assert values["temperature_2m_previous_day2"]["hours_with_data"] == 47 * 24
+    assert values["snowfall_previous_day1"] == {
+        "unit": "mm", "hours_with_data": 606, "first": "2024-12-06T18:00", "last": "2024-12-31T23:00",
+    }
+    assert values["snowfall_previous_day2"]["first"] == "2024-12-07T18:00"
+
+
+def test_day_before_rerun_on_the_same_day_sends_no_request(tmp_path):
+    client = FakeOpenMeteo(value_starts=SNOW_STARTS)
+    sets = day_before(tmp_path)
+    run_download(sets, tmp_path / "raw", client, now=NOW)
+    before = year_files(tmp_path / "raw")
+    client.urls.clear()
+    result = run_download(sets, tmp_path / "raw", client, now=NOW)
+    assert client.urls == [] and result["failed"] == []
+    assert year_files(tmp_path / "raw") == before
+
+
+@pytest.mark.parametrize(
+    "broken, message",
+    [
+        (b"", "answer is empty"),
+        (b'{"hourly": {"time": [', "not valid JSON"),
+        ("no 2-day temperature", r"missing values \['temperature_2m_previous_day2'\]"),
+    ],
+)
+def test_day_before_answer_empty_malformed_or_missing_a_value(tmp_path, broken, message):
+    ws = day_before(tmp_path)[0]
+    body = FakeOpenMeteo().get(request_url(ws, date(2025, 1, 1), date(2025, 1, 2)))
+    if isinstance(broken, bytes):
+        body = broken
+    else:
+        data = json.loads(body)
+        del data["hourly"]["temperature_2m_previous_day2"]
+        body = json.dumps(data).encode()
+    with pytest.raises(ValueError, match=message):
+        check_answer(body, ws, date(2025, 1, 1), date(2025, 1, 2))
+
+
+def test_day_before_attribution_marks_validation_and_where_values_start(tmp_path):
+    sets = day_before(tmp_path)
+    run_download(sets, tmp_path / "raw", FakeOpenMeteo(value_starts=SNOW_STARTS), now=NOW)
+    rows = attribution_rows(sets, tmp_path / "raw")
+    assert [r["validation_test"] for r in rows] == ["yes"] * 3
+    assert (rows[0]["credit"], rows[0]["credit_url"]) == ("NOAA NCEP", "https://example.org/n")
+    assert "snowfall_previous_day1 (mm, 606 of 1128 hours, 2024-12-06T18:00 to 2024-12-31T23:00)" in rows[0]["values_with_data"]
+    assert rows[1]["values_with_data"].startswith("temperature_2m_previous_day1 (mm); temperature_2m_previous_day2 (mm); ")
