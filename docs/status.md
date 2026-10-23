@@ -23,6 +23,7 @@ Week 2: Processing (due 2026-10-18)
 | #9 Static layers | Alekhya | 2026-10-13 | done | PR #62 merged; results below |
 | #10 Decision: lock the modeling unit | Alekhya | 2026-10-13 | done | PR #66 merged; ADR-004 proposed (team sign-off pending): neighborhood x day, 24 tract-built neighborhoods, surge in any storm group |
 | #31 Repo layout and pipeline pins | Prit | 2026-10-16 | done | PR #58 merged; ADR-017: one shared Airflow stack at the root, each component mounts its `dags/` at `/opt/airflow/dags/<component>` in snake_case; `Data-Pipeline/requirements.txt` pinned, 94 tests pass in a clean Python 3.12 venv |
+| #27 Write ADR-007 | Punith | 2026-10-18 | in review | ADR-007: the drift-threshold rule retrains from day one of the live run; the contextual bandit replaces it through CI/CD only if it beats the rule on replayed history; Q-learning is stretch |
 
 ## Blocked
 None.
