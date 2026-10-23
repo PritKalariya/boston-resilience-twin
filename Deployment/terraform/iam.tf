@@ -74,6 +74,21 @@ resource "google_service_account_iam_member" "team_act_as_vm_sa" {
   member             = each.value
 }
 
+# --- VM admins (sudo) -------------------------------------------------------
+
+# roles/compute.osLogin above is SSH without sudo. osAdminLogin is SSH with
+# sudo, and it is bound to the airflow-vm instance rather than the project, so
+# a future VM in project 1 does not inherit it.
+resource "google_compute_instance_iam_member" "vm_admins" {
+  for_each = toset(var.vm_admins)
+
+  project       = google_compute_instance.airflow.project
+  zone          = google_compute_instance.airflow.zone
+  instance_name = google_compute_instance.airflow.name
+  role          = "roles/compute.osAdminLogin"
+  member        = each.value
+}
+
 # --- Secret writers ---------------------------------------------------------
 
 # Adding a secret value needs more than accessor. The grant is per secret, so a
