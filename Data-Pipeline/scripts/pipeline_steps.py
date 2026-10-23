@@ -16,21 +16,31 @@ table after combining (TRIM). The new-system export stays whole, because
 map_311 needs every new case to set the switch dates and to drop legacy
 copies resubmitted to the new system. So a slice's combined table holds the
 same rows as the full build has for those days.
+
+Logging and failures (#36): every task logs one line with its run id, rows
+in and rows out (log_task). A real step fails before its script runs when an
+input file is missing or empty (InputError), and a script error is logged with
+the run and the task before it is raised again unchanged. Tasks in NETWORK
+retry; the others fail at once, and their failure alert comes from alerts.py.
 """
 
 from __future__ import annotations
 
 import importlib
+import logging
 import sys
+import time
 from collections.abc import Mapping
-from dataclasses import dataclass
-from datetime import date, datetime
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]  # /opt/airflow/repo in the Airflow containers
 FIRST_DAY = date(2015, 1, 1)  # first day of the training years (train 2015 to 2023)
 LEGACY_YEARS = range(2015, 2027)  # yearly legacy 311 files, as in legacy_311.py
 PARAMS = ("start", "end")
+
+log = logging.getLogger(__name__)
 
 # Task id -> pipeline script in Data-Pipeline/scripts.
 SCRIPTS = {
@@ -61,6 +71,26 @@ TRIM = {
     "parse_legacy_311": [("legacy_311.parquet", "open_dt")],
     "combine_311": [("311_combined.parquet", "open_dt")],
 }
+
+# Tasks that fetch from the network retry: 5 minutes, then 10. The placeholders
+# are listed too, so #6, #7 and #8 get the same retries when they fill them.
+NETWORK = {task for task in (*SCRIPTS, *PLANNED) if task.startswith("ingest_")}
+RETRIES = 2
+RETRY_DELAY = timedelta(minutes=5)
+RETRY_BACKOFF = 2.0  # each retry waits twice as long as the one before
+MAX_RETRY_DELAY = timedelta(minutes=15)
+
+# What to do when a real step's input is missing or empty.
+HINTS = {
+    "ingest_static_layers": "Restore Data-Pipeline/config/static_layers.csv from git.",
+    "parse_legacy_311": "Put the yearly legacy 311 files in Data-Pipeline/data/raw/311/ (by hand until #6 lands).",
+    "parse_new_311": "Put the new-system export in Data-Pipeline/data/raw/311/ (by hand until #6 lands).",
+    "combine_311": "Run parse_legacy_311 and parse_new_311 for the same range first.",
+}
+
+
+class InputError(Exception):
+    """A step's input file is missing or empty, so the step stops before its script runs."""
 
 
 def parse_day(value, name: str) -> date | None:
@@ -169,6 +199,90 @@ def script_args(step: str, days: DateRange, root: Path = REPO) -> list[str]:
     return [str(arg) for arg in args]
 
 
+@dataclass(frozen=True)
+class StepFiles:
+    """A real step's files: data in and out are counted as rows in and out;
+    config in is required but not counted."""
+
+    data_in: list[Path] = field(default_factory=list)
+    config_in: list[Path] = field(default_factory=list)
+    data_out: list[Path] = field(default_factory=list)
+
+
+def step_files(step: str, days: DateRange, root: Path = REPO) -> StepFiles:
+    """The files behind script_args. The static layers' raw files are not inputs:
+    the step downloads the ones that are missing."""
+    paths = run_paths(days, root)
+    raw, interim = paths.raw, paths.interim
+    return {
+        "ingest_static_layers": StepFiles(
+            config_in=[root / "Data-Pipeline" / "config" / "static_layers.csv"],
+            data_out=[interim / "static"],
+        ),
+        "parse_legacy_311": StepFiles(
+            data_in=[raw / "311" / f"{year}.csv" for year in days.legacy_years],
+            data_out=[interim / "legacy_311.parquet"],
+        ),
+        "parse_new_311": StepFiles(
+            data_in=[raw / "311" / "new_system.csv"],
+            data_out=[interim / "new_311.parquet"],
+        ),
+        "combine_311": StepFiles(
+            data_in=[interim / "legacy_311.parquet", interim / "new_311.parquet"],
+            config_in=[root / "docs" / "data" / "category-map.csv"],
+            data_out=[interim / "311_combined.parquet"],
+        ),
+    }[step]
+
+
+def check_inputs(step: str, files: StepFiles) -> None:
+    """Stop before the script runs when an input is missing or empty (an empty download)."""
+    needed = files.data_in + files.config_in
+    missing = [path for path in needed if not path.exists()]
+    empty = [path for path in needed if path.is_file() and path.stat().st_size == 0]
+    problems = []
+    if missing:
+        problems.append("missing " + ", ".join(str(path) for path in missing))
+    if empty:
+        problems.append("empty " + ", ".join(str(path) for path in empty))
+    if problems:
+        raise InputError(f"{step} cannot start: {'; '.join(problems)}. {HINTS[step]}")
+
+
+def check_outputs(step: str, files: StepFiles) -> None:
+    missing = [path for path in files.data_out if not path.exists()]
+    if missing:
+        raise RuntimeError(f"{step} finished but wrote no {', '.join(str(path) for path in missing)}")
+
+
+def count_rows(path: Path) -> int:
+    """Rows in a data file: a parquet file's row count from its metadata, a CSV's
+    data lines (its records, unless a field holds a line break), or the total
+    over the parquet files in a folder."""
+    if path.is_dir():
+        return sum(count_rows(part) for part in sorted(path.glob("*.parquet")))
+    if path.suffix == ".parquet":
+        import pyarrow.parquet as pq  # here, so importing this module stays light for the DAG
+
+        return pq.ParquetFile(path).metadata.num_rows
+    newlines, last = 0, b"\n"
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 24), b""):
+            newlines += chunk.count(b"\n")
+            last = chunk[-1:]
+    lines = newlines + (last != b"\n")  # a last line without a line break still counts
+    return max(lines - 1, 0)  # not the header
+
+
+def log_task(run_id: str, task: str, rows_in: int | None, rows_out: int | None, seconds: float | None = None) -> None:
+    """The line every task logs (#36): run id, rows in and rows out; n/a when a task has none."""
+    def show(rows):
+        return "n/a" if rows is None else f"{rows:,}"
+
+    took = "" if seconds is None else f" in {seconds:.1f} s"
+    log.info("run %s task %s: rows in %s, rows out %s%s", run_id, task, show(rows_in), show(rows_out), took)
+
+
 def run_script(module: str, args: list[str]) -> None:
     """Run <module>.main() as `python <module>.py <args>` would.
 
@@ -203,11 +317,23 @@ def trim_to_range(path: Path, column: str, days: DateRange) -> tuple[int, int]:
     return len(df), int(keep.sum())
 
 
-def run_step(step: str, days: DateRange, root: Path = REPO) -> None:
-    run_script(SCRIPTS[step], script_args(step, days, root))
-    if days.is_full:
-        return
-    interim = run_paths(days, root).interim
-    for name, column in TRIM.get(step, []):
-        before, kept = trim_to_range(interim / name, column, days)
-        print(f"kept {kept:,} of {before:,} rows of {name} in {days.label}")
+def run_step(step: str, days: DateRange, root: Path = REPO, run_id: str = "manual") -> tuple[int | None, int]:
+    """Run one real step and log its run id, rows in and rows out. Returns (rows in, rows out)."""
+    files = step_files(step, days, root)
+    check_inputs(step, files)
+    started = time.monotonic()
+    try:
+        run_script(SCRIPTS[step], script_args(step, days, root))
+        check_outputs(step, files)
+        if not days.is_full:
+            interim = run_paths(days, root).interim
+            for name, column in TRIM.get(step, []):
+                before, kept = trim_to_range(interim / name, column, days)
+                log.info("run %s task %s: kept %s of %s rows of %s in %s", run_id, step, f"{kept:,}", f"{before:,}", name, days.label)
+    except Exception as e:
+        log.error("run %s task %s failed: %s: %s", run_id, step, type(e).__name__, e)
+        raise
+    rows_in = sum(count_rows(path) for path in files.data_in) if files.data_in else None
+    rows_out = sum(count_rows(path) for path in files.data_out)
+    log_task(run_id, step, rows_in, rows_out, time.monotonic() - started)
+    return rows_in, rows_out

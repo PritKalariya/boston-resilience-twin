@@ -85,6 +85,23 @@ On a laptop (2026-10-21), a one-year slice took 40 seconds and the full
 build about 2.5 minutes. The full build peaked at 3.4 GiB in the scheduler
 container, with `map_311.py` before #68.
 
+Logging and failures (#36):
+
+- Every task logs one line with its run id, rows in and rows out, for example
+  `run slice-2025 task combine_311: rows in 348,466, rows out 280,044 in 3.1 s`.
+  Placeholders log 0 and 0, and `check_range` logs n/a. CSV inputs are
+  counted as data lines and parquet files from their metadata. Counting reads
+  each raw CSV once more: about 1.2 s per yearly file in the container on a
+  Windows laptop, so about 15 s on a full build.
+- The `ingest_*` tasks retry twice, 5 and then 10 minutes apart. Every other
+  task fails at once.
+- A real step whose input file is missing or empty fails before its script
+  runs (`InputError`), naming the file and how to get it. A script error is
+  logged as `run <id> task <task> failed: <error>` and keeps its own type.
+- A task that fails for good writes `ALERT <dag>.<task> failed in run <id>
+  (try <n>): <error>` to its own log (`Data-Pipeline/scripts/alerts.py`).
+  Slack or email delivery comes with #34.
+
 - **`ingest_static_layers` fails with `No module named 'geopandas'`.** The
   image gets the geo packages in #69. Until then, for a local run, install
   them in the running scheduler; they are gone when the container is
