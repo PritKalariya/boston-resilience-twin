@@ -71,7 +71,13 @@ docker compose exec airflow-scheduler airflow tasks states-for-dag-run daily_pip
 
 In the UI, Trigger opens a form with the two dates. A slice never overwrites
 the full-build files that other scripts read; delete its folder in
-`Data-Pipeline/data/slices/` when you are done. A run fails at `check_range`
+`Data-Pipeline/data/slices/` when you are done. A slice keeps only its days,
+in Boston local time (new-system times are already local, ADR-020): legacy
+rows are cut right after parsing, and the combined table after combining.
+The parsed new-system export stays whole, because combining needs every new
+case to set the switch dates and to drop resubmitted legacy copies. So a
+slice's `311_combined.parquet` holds the same rows as the full build has for
+those days. A run fails at `check_range`
 on a start before 2015, an end before the start, or an unknown conf key.
 Each task's log, with everything its script printed, is in
 `Data-Pipeline/logs/dag_id=daily_pipeline/run_id=<run>/task_id=<task>/`.

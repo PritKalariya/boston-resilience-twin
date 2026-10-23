@@ -192,14 +192,21 @@ CATEGORY_MAP = (
 )
 
 
-def test_311_steps_run_end_to_end_on_a_slice(tmp_path, monkeypatch):
-    root = tmp_path / "repo"
-    data = root / "Data-Pipeline" / "data"
-    (data / "raw" / "311").mkdir(parents=True)
-    (data / "raw" / "311" / "2025.csv").write_text(LEGACY_2025)
-    (data / "raw" / "311" / "new_system.csv").write_text(NEW_SYSTEM)
+def make_repo(root, legacy_by_year, new_system):
+    """Raw 311 files and the category map, laid out as in the repo."""
+    raw = root / "Data-Pipeline" / "data" / "raw" / "311"
+    raw.mkdir(parents=True)
+    for year, body in legacy_by_year.items():
+        (raw / f"{year}.csv").write_text(body)
+    (raw / "new_system.csv").write_text(new_system)
     (root / "docs" / "data").mkdir(parents=True)
     (root / "docs" / "data" / "category-map.csv").write_text(CATEGORY_MAP)
+    return root / "Data-Pipeline" / "data"
+
+
+def test_311_steps_run_end_to_end_on_a_slice(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    data = make_repo(root, {2025: LEGACY_2025}, NEW_SYSTEM)
     workdir = tmp_path / "cwd"
     workdir.mkdir()
     monkeypatch.chdir(workdir)  # the scripts' relative defaults must never be used
@@ -215,6 +222,98 @@ def test_311_steps_run_end_to_end_on_a_slice(tmp_path, monkeypatch):
     assert combined["source_system"].value_counts().to_dict() == {"legacy": 2, "new": 1}
     assert not (data / "interim").exists()  # the full-build folder is untouched
     assert list(workdir.iterdir()) == []
+
+
+LEGACY_HEADER = "case_enquiry_id,open_dt,closed_dt,type,neighborhood,latitude,longitude,closure_reason\n"
+TREE = "Tree Emergencies,Roxbury,42.31,-71.09"
+NEW_HEADER = "case_id,open_date,close_date,service_name,neighborhood,latitude,longitude\n"
+FALLEN = "Fallen Tree or Branches,Roxbury,42.31,-71.09"
+
+
+def test_slice_matches_a_wider_run_for_its_days(tmp_path, monkeypatch):
+    # The tree switch (first new case) is before the slice, and legacy case 302
+    # was resubmitted as a new case opened after it: both must come out the same
+    # as in the wider run, which is why the new-system export is never cut.
+    root = tmp_path / "repo"
+    make_repo(
+        root,
+        {
+            2025: LEGACY_HEADER
+            + f"201,2025-03-01 08:00:00,,{TREE},\n"
+            + f"202,2025-12-31 23:30:00,,{TREE},\n",
+            2026: LEGACY_HEADER
+            + f"301,2026-01-01 00:00:00,,{TREE},\n"  # first second of the slice
+            + f"302,2026-01-15 09:00:00,2026-02-03 10:00:00,{TREE},Resubmitted as BCS-42\n"
+            + f"303,2026-01-31 23:59:59,,{TREE},\n"  # last second of the slice
+            + f"304,2026-02-01 00:00:00,,{TREE},\n",  # first second after it
+        },
+        NEW_HEADER
+        + f"BCS-00000041,2025-10-27 10:00:00+00,,{FALLEN}\n"  # the switch
+        + f"BCS-00000043,2026-01-10 10:00:00+00,,{FALLEN}\n"
+        + f"BCS-00000042,2026-02-03 10:00:00+00,,{FALLEN}\n",  # 302's new case
+    )
+    monkeypatch.chdir(tmp_path)
+    wide, narrow = DateRange(date(2025, 1, 1)), DateRange(date(2026, 1, 1), date(2026, 1, 31))
+    for days in (wide, narrow):
+        for step in ("parse_legacy_311", "parse_new_311", "combine_311"):
+            run_step(step, days, root)
+
+    def read(days, name):
+        return pd.read_parquet(run_paths(days, root).interim / name)
+
+    full = read(wide, "311_combined.parquet")
+    january = (full["open_dt"] >= pd.Timestamp("2026-01-01")) & (full["open_dt"] < pd.Timestamp("2026-02-01"))
+    sliced = read(narrow, "311_combined.parquet")
+    pd.testing.assert_frame_equal(sliced, full[january].reset_index(drop=True))
+    assert sliced["case_id"].astype(str).tolist() == ["301", "303", "BCS-00000043"]
+    assert sliced["after_switch"].tolist() == [True, True, False]
+    assert read(narrow, "legacy_311.parquet")["case_enquiry_id"].astype(str).tolist() == ["301", "302", "303"]
+    assert len(read(narrow, "new_311.parquet")) == 3  # the whole export, on purpose
+
+
+def write_times(path, times):
+    pd.DataFrame({"open_dt": pd.to_datetime(times), "case": range(len(times))}).to_parquet(path, index=False)
+
+
+def test_trim_keeps_whole_days_at_both_ends(tmp_path):
+    path = tmp_path / "rows.parquet"
+    write_times(path, ["2024-12-31 23:59:59", "2025-01-01 00:00:00", "2025-06-30 23:59:59", "2025-07-01 00:00:00"])
+    assert steps.trim_to_range(path, "open_dt", DateRange(date(2025, 1, 1), date(2025, 6, 30))) == (4, 2)
+    assert pd.read_parquet(path)["case"].tolist() == [1, 2]
+
+
+def test_trim_with_an_open_end_keeps_everything_after_the_start(tmp_path):
+    path = tmp_path / "rows.parquet"
+    write_times(path, ["2024-12-31 23:59:59", "2025-01-01 00:00:00", "2031-01-01 12:00:00"])
+    assert steps.trim_to_range(path, "open_dt", DateRange(date(2025, 1, 1))) == (3, 2)
+
+
+def test_trim_an_empty_file(tmp_path):
+    path = tmp_path / "rows.parquet"
+    write_times(path, [])
+    assert steps.trim_to_range(path, "open_dt", SLICE) == (0, 0)
+    assert pd.read_parquet(path).empty
+
+
+def test_slices_trim_legacy_and_combined_but_not_the_new_export(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(steps, "run_script", lambda module, args: calls.append(module))
+    monkeypatch.setattr(steps, "trim_to_range", lambda path, column, days: calls.append((path.name, column)) or (1, 1))
+    for step in ("parse_legacy_311", "parse_new_311", "combine_311", "ingest_static_layers"):
+        run_step(step, SLICE, tmp_path)
+    assert calls == [
+        "legacy_311", ("legacy_311.parquet", "open_dt"),
+        "new_311",
+        "map_311", ("311_combined.parquet", "open_dt"),
+        "static_layers",
+    ]
+
+
+def test_the_full_build_is_never_trimmed(tmp_path, monkeypatch):
+    monkeypatch.setattr(steps, "run_script", lambda module, args: None)
+    monkeypatch.setattr(steps, "trim_to_range", lambda *args: pytest.fail("the full build keeps every row"))
+    for step in steps.SCRIPTS:
+        run_step(step, FULL, tmp_path)
 
 
 STATIC_CONFIG = (

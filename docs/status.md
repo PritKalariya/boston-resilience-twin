@@ -84,7 +84,7 @@ Commands: `docker compose up -d --wait`, then `airflow dags trigger daily_pipeli
 
 | run | range | result | wall time | rows written |
 |---|---|---|---|---|
-| slice-2025 | 2025-01-01 to 2025-12-31 | all 19 tasks succeed | 40 s | legacy 276,093; new 72,373; combined 348,287, in `data/slices/` |
+| slice-2025b | 2025-01-01 to 2025-12-31 | all 19 tasks succeed | 33 s | combined 280,044 (legacy 275,914, new 4,130), exactly the full build's 2025 rows (pandas `assert_frame_equal`), in `data/slices/` |
 | full-build | the defaults (2015-01-01 to latest) | all 19 tasks succeed | 141 s | legacy 3,039,046; new 72,373; combined 3,110,129, the same as the manual run |
 | bad-start | start 2014-06-01 | fails at `check_range`, nothing else runs | 6 s | none |
 | bad-key | conf key `stat` | fails at `check_range`, nothing else runs | 7 s | none |

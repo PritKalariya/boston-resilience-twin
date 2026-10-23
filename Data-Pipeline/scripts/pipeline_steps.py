@@ -9,6 +9,13 @@ A real step calls a pipeline script's own main() with the arguments it would
 get on the command line (run_script), so the scripts stay unchanged and the
 DAG and the dvc.yaml stages (#18) share one entry point per script. Every
 other task is a placeholder until the issue in PLANNED builds it.
+
+A slice keeps only its days, in Boston local time (new-system times are
+already local, ADR-020): legacy rows right after parsing, and the combined
+table after combining (TRIM). The new-system export stays whole, because
+map_311 needs every new case to set the switch dates and to drop legacy
+copies resubmitted to the new system. So a slice's combined table holds the
+same rows as the full build has for those days.
 """
 
 from __future__ import annotations
@@ -48,6 +55,11 @@ PLANNED = {
     "validate_processed": "#17",
     "schema_and_statistics": "#35",
     "bias_slicing": "#32",
+}
+# Task id -> the outputs a slice cuts to its days afterwards, with their time column.
+TRIM = {
+    "parse_legacy_311": [("legacy_311.parquet", "open_dt")],
+    "combine_311": [("311_combined.parquet", "open_dt")],
 }
 
 
@@ -176,5 +188,26 @@ def run_script(module: str, args: list[str]) -> None:
         sys.stdout.flush()
 
 
+def trim_to_range(path: Path, column: str, days: DateRange) -> tuple[int, int]:
+    """Keep the rows of a parquet file whose time falls in the range, both ends inclusive.
+
+    Times are Boston local wall-clock times. Returns (rows before, rows kept).
+    """
+    import pandas as pd  # here, so importing this module stays light for the DAG
+
+    df = pd.read_parquet(path)
+    keep = df[column] >= pd.Timestamp(days.start)
+    if days.end is not None:
+        keep &= df[column] < pd.Timestamp(days.end) + pd.Timedelta(days=1)
+    df[keep].reset_index(drop=True).to_parquet(path, index=False)
+    return len(df), int(keep.sum())
+
+
 def run_step(step: str, days: DateRange, root: Path = REPO) -> None:
     run_script(SCRIPTS[step], script_args(step, days, root))
+    if days.is_full:
+        return
+    interim = run_paths(days, root).interim
+    for name, column in TRIM.get(step, []):
+        before, kept = trim_to_range(interim / name, column, days)
+        print(f"kept {kept:,} of {before:,} rows of {name} in {days.label}")
