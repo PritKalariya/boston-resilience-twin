@@ -108,14 +108,41 @@ both 311 systems combined. Rerun the check when any of these happens:
 python Data-Pipeline/scripts/legacy_311.py
 python Data-Pipeline/scripts/new_311.py
 python Data-Pipeline/scripts/map_311.py --change-points Data-Pipeline/data/interim/change-points.csv
-python Data-Pipeline/scripts/live_baselines.py
+python Data-Pipeline/scripts/live_baselines.py --change-points Data-Pipeline/data/interim/change-points.csv
 ```
 
-`map_311.py` writes the switch dates to the gitignored data folder here, so
-the committed `docs/data/change-points.csv` only changes in a reviewed PR.
+`map_311.py` writes the switch dates to the gitignored data folder here and
+`live_baselines.py` reads them from there, so the committed
+`docs/data/change-points.csv` only changes in a reviewed PR.
 For snow, compare snow-day counts with the legacy range and look for
 unmapped or non-snow categories that jump on snow days; open a category-map
 PR if so, and update ADR-005.
+
+## After-switch policy (ADR-021)
+
+`map_311.py` flags legacy requests opened on or after their category's
+first new-system day (`after_switch`). ADR-021 keeps them. The setting is
+`after_switch_policy` in `Data-Pipeline/config/processing.csv`: `keep`
+(default), `drop`, or `exclude_from_baselines` (counted on their day, left
+out of baselines). Change it only in a reviewed PR that updates ADR-021,
+regenerates counts and labels, and reports the change in totals.
+
+Rerun the check after a new 311 export, after a category-map PR, and at the
+first snow of the winter:
+
+```bash
+python Data-Pipeline/scripts/legacy_311.py
+python Data-Pipeline/scripts/new_311.py
+python Data-Pipeline/scripts/map_311.py --change-points Data-Pipeline/data/interim/change-points.csv
+python Data-Pipeline/scripts/static_layers.py --download --manifest Data-Pipeline/data/interim/static-layers.csv
+python Data-Pipeline/scripts/after_switch.py
+```
+
+The `--manifest` path keeps the committed `docs/data/static-layers.csv` as
+it is. `after_switch.py` takes about 1.5 minutes and writes no files. Look
+for a window where both systems logged many rows and the ratio under keep is
+well above 1 (requests entered twice), and in winter for Snow Plowing rows
+flagged `after_switch`.
 
 ## Static layers
 

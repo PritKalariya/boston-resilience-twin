@@ -1,0 +1,2 @@
+setting,value,options,note
+after_switch_policy,keep,keep|drop|exclude_from_baselines,legacy rows opened on or after their category's switch date (ADR-021)

@@ -13,6 +13,7 @@ Week 2: Processing (due 2026-10-18)
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
 | #11 Decision: live baselines for the new 311 format | Punith | 2026-10-13 | done | PR #63 merged; ADR-005: baseline = same weeks of the previous 3 years, both systems, by storm group |
+| #53 Policy for legacy rows after their category's switch date | Punith | 2026-10-20 | in review | ADR-021: keep. Setting `after_switch_policy` in `Data-Pipeline/config/processing.csv`, for #15 to apply; results below |
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | done | PR #52 merged; results below; new-system clock in ADR-020; flooding gap needs a team call |
 | #20 Airflow on the VM | Prit | 2026-10-18 | done | PR #59 merged. Airflow stack on airflow-vm (LocalExecutor, Postgres 16; ADR-016); UI by SSH tunnel only; VM stopped. Runbook: "Airflow on the VM". After #58 merges, run the update step in the runbook on the VM |
 | #23 Write ADRs 001, 009, 010, 011, 012 | Prit | 2026-10-18 | done | PR #65 merged; ADRs in docs/decisions/ |
@@ -90,6 +91,21 @@ Command: `python Data-Pipeline/scripts/live_baselines.py` (plus `--window-days 8
 | flooding | none | no new-system source | | escalated |
 
 Decision in ADR-005: method A (same day plus or minus 14 days in each of the previous 3 years, both systems, broad storm groups).
+
+## W3-14 results (2026-10-21)
+
+Command: `python Data-Pipeline/scripts/after_switch.py`. Data: legacy files 2015 to 2026 and the new-system export of 2026-10-19, combined with `map_311.py`; last full day 2026-10-17; static layers downloaded 2026-10-21.
+
+2,640 legacy rows (0.087%) were opened on or after their category's first new-system day, in 27 categories (20 with more than one row), with windows of up to 111 days. 27 are storm-related (Pruning Request); snow_ice and flooding have none so far. Each cell is the per-neighborhood daily count over the same weeks of the previous 3 years, with the surge rate (k 2, m 3) in brackets.
+
+| category (window) | legacy / new-system rows in window | before | after, keep | after, drop |
+|---|---|---|---|---|
+| Improper Trash Storage (48 days) | 919 / 1,096 | 1.13 (5.21%) | 0.66 (3.56%) | 0.36 (0.78%) |
+| Illegal Graffiti (32 days) | 595 / 7 | 1.24 (4.17%) | 1.68 (4.56%) | 0.02 (0%) |
+| Park Groundskeeping (111 days) | 445 / 10 | 0.88 (1.80%) | 0.78 (0.90%) | 0.02 (0%) |
+| Pruning Request, tree (109 days) | 27 / 179 | 0.80 (1.57%) | 0.17 (0%) | 0.14 (0%) |
+
+Storm labels (ADR-004 unit, 94,512 labeled cells): drop changes 1, exclude_from_baselines none. Snow Plowing and Emergency Responder Snow Plowing switched on 2026-06-23 with 2 test requests and held 50.5% of last winter's legacy snow requests, so drop could delete half of this winter's snow signal. Decision in ADR-021: keep.
 
 ## W2-1 results (2026-10-16)
 
