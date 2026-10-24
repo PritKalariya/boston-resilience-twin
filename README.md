@@ -96,6 +96,21 @@ python -m pytest Data-Pipeline/tests
 
 Use Python 3.12 (ADR-013): the pins come from the Airflow constraints for 3.12, and on other versions the install can fail or build packages from source. Without a system 3.12, `uv venv --python 3.12 --seed .venv && source .venv/bin/activate` creates one (`.venv/` is gitignored). A test command pinned to Python 3.12 comes with W3-7 (#38).
 
+### Versioned data (DVC)
+
+DVC is installed by `Data-Pipeline/requirements.txt`. The remote is **`gs://boston-resilience-twin-data/dvc`**, a private bucket in project 1 (`.dvc/config`).
+
+**Team members** have read and write access. Log in once per machine, then pull from the repo root:
+
+```bash
+gcloud auth application-default login
+dvc pull
+```
+
+**Without access**, for example a grader, skip `dvc pull` and rebuild the data from the public sources with `dvc repro` (stages come with #18). Pushing is skipped too: `python Data-Pipeline/scripts/dvc_push.py` logs `dvc push skipped: ...` and exits 0, and the data stays in the local DVC cache.
+
+The runbook ("Versioned data (DVC)") has the checks and fixes.
+
 ## Data and licenses
 
 Boston 311 data is published on Analyze Boston under the PDDL. NWS, NOAA, and Census data are U.S. government works. Weather data by [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0).

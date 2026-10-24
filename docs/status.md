@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-22 by PritKalariya. Edit this file in the PR that changes the state.
+Updated: 2026-10-23 by Kirtan. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -23,11 +23,13 @@ Week 2: Processing (due 2026-10-18)
 | #9 Static layers | Alekhya | 2026-10-13 | done | PR #62 merged; results below |
 | #10 Decision: lock the modeling unit | Alekhya | 2026-10-13 | done | PR #66 merged; ADR-004 proposed (team sign-off pending): neighborhood x day, 24 tract-built neighborhoods, surge in any storm group |
 | #31 Repo layout and pipeline pins | Prit | 2026-10-16 | done | PR #58 merged; ADR-017: one shared Airflow stack at the root, each component mounts its `dags/` at `/opt/airflow/dags/<component>` in snake_case; `Data-Pipeline/requirements.txt` pinned, 94 tests pass in a clean Python 3.12 venv |
+| #19 DVC remote on GCS | Kirtan | 2026-10-15 | in progress | Remote `gs://boston-resilience-twin-data/dvc` set in `.dvc/config` (repo root); dvc 3.67.1 and dvc-gs 3.1.0 pinned. `dvc_push.py` skips with a log line and exits 0 without bucket access (checked with no credentials, 2026-10-23). Round trip with team credentials checked in a scratch repo (push, `dvc pull` in a fresh clone, files match; test objects removed, 2026-10-23). No data tracked yet: stages come with #18 |
 
 ## Blocked
 None.
 
 ## Risks raised
+- **DVC inside the Airflow containers.** `dvc_push.py` runs from the repo root, but the containers mount only `Data-Pipeline/dags` and `Data-Pipeline/logs`. A DAG task that pushes (#22, #39) needs the repo, or at least `.dvc/` and the tracked outputs, mounted, and dvc in the image (#69 builds it from `Data-Pipeline/requirements.txt`, which now pins dvc).
 - Legacy storm groups cover only 6.9% of legacy requests (210,049 of 3,037,969), against about 15% in the pre-scoping check. The groups now live in `docs/data/category-map.csv` (`storm_group` column) and may be narrower than the first run's. Worth a look before #10 locks the unit.
 - **New-system times are Boston local, not UTC.** `open_date` ends in `+00`, but 1,283 cases resubmitted from the legacy system open a median 2.6 minutes before the legacy close time, in both EST and EDT. Real UTC would be 4 to 5 hours later. Converting from UTC would shift every new-system time 4 to 5 hours early and move 1,124 requests (1.6%) to the previous day. The pipeline treats them as local and re-checks this on every run (`map_311.check_clock`). Recorded in ADR-020, accepted by the team on 2026-10-16; CLAUDE.md is updated to match.
 - **Flooding has no new-system category.** Legacy flooding requests (mostly Catchbasin) stop after Jul 2026 and nothing in the new system replaces them, so live flooding counts are zero. Affects the target; ADR-005 escalates it, since no baseline can fix a missing source. Needs a team decision (#10, #16) before the target freeze.
