@@ -227,7 +227,11 @@ def main() -> None:
     combined, stats = combine(
         pd.read_parquet(args.legacy, columns=LEGACY_COLUMNS), pd.read_parquet(args.new), cmap
     )
-    print(f"clock check: median offset {stats['clock_offset_hours']:+.2f}h over {stats['linked_cases']} resubmitted cases")
+    if stats["linked_cases"] < MIN_LINKED_CASES:
+        # A date slice can hold few resubmitted pairs; the full build checks them all.
+        print(f"clock check skipped: {stats['linked_cases']} resubmitted cases, need {MIN_LINKED_CASES}")
+    else:
+        print(f"clock check: median offset {stats['clock_offset_hours']:+.2f}h over {stats['linked_cases']} resubmitted cases")
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     combined.to_parquet(out, index=False)

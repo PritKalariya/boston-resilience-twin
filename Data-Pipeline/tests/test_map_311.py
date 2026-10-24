@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -176,3 +177,22 @@ def test_combine_runs_the_clock_check(tmp_path):
     assert stats["linked_cases"] == 25 and abs(stats["clock_offset_hours"]) < 0.1
     with pytest.raises(ValueError, match="clock"):
         combine(*linked(5), cmap)
+
+
+def test_main_says_when_the_clock_check_is_skipped(tmp_path, monkeypatch, capsys):
+    import map_311
+
+    legacy, new = linked(-0.02, n=3)
+    legacy.to_parquet(tmp_path / "legacy.parquet", index=False)
+    new.to_parquet(tmp_path / "new.parquet", index=False)
+    monkeypatch.setattr(map_311, "LEGACY_COLUMNS", list(legacy.columns))
+    monkeypatch.setattr(sys, "argv", [
+        "map_311.py",
+        "--legacy", str(tmp_path / "legacy.parquet"),
+        "--new", str(tmp_path / "new.parquet"),
+        "--map", str(write_map(tmp_path)),
+        "--out", str(tmp_path / "combined.parquet"),
+        "--change-points", str(tmp_path / "change-points.csv"),
+    ])
+    map_311.main()
+    assert "clock check skipped: 3 resubmitted cases, need 20" in capsys.readouterr().out
