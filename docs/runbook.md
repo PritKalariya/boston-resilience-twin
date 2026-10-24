@@ -102,16 +102,8 @@ build about 2.5 minutes. The full build peaked at 3.4 GiB in the scheduler
 container, with `map_311.py` before #68.
 
 - **`ingest_static_layers` fails with `No module named 'geopandas'`.** The
-  image gets the geo packages in #69. Until then, for a local run, install
-  them in the running scheduler; they are gone when the container is
-  recreated:
-
-  ```bash
-  docker compose exec airflow-scheduler python -m pip install geopandas==1.2.0 shapely==2.2.0 pyogrio==0.13.0 pyproj==3.8.0 --constraint https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt
-  ```
-
-  Or skip the step in a one-off run, with the DAG paused:
-  `airflow dags test daily_pipeline -c '<conf>' --mark-success-pattern ingest_static_layers`.
+  containers run an image built before the geo packages were added (ADR-022).
+  Rebuild with `docker compose up -d --build --wait`.
 - **Linux: "Permission denied" in `Data-Pipeline/data`.** The stack ran
   without `AIRFLOW_UID`, so `airflow-init` gave the folder to uid 50000. Set
   `AIRFLOW_UID` (Start and check), then take it back:

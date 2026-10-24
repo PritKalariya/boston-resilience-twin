@@ -249,7 +249,11 @@ def test_slice_matches_a_wider_run_for_its_days(tmp_path, monkeypatch):
         },
         NEW_HEADER
         + f"BCS-00000041,2025-10-27 10:00:00+00,,{FALLEN}\n"  # the switch
+        # Near midnight at both edges: Boston local times (ADR-020), so 44 is in the
+        # slice and 45 is not. Read as UTC, both would move across the edges.
+        + f"BCS-00000044,2026-01-01 02:00:00+00,,{FALLEN}\n"
         + f"BCS-00000043,2026-01-10 10:00:00+00,,{FALLEN}\n"
+        + f"BCS-00000045,2026-02-01 03:00:00+00,,{FALLEN}\n"
         + f"BCS-00000042,2026-02-03 10:00:00+00,,{FALLEN}\n",  # 302's new case
     )
     monkeypatch.chdir(tmp_path)
@@ -265,10 +269,10 @@ def test_slice_matches_a_wider_run_for_its_days(tmp_path, monkeypatch):
     january = (full["open_dt"] >= pd.Timestamp("2026-01-01")) & (full["open_dt"] < pd.Timestamp("2026-02-01"))
     sliced = read(narrow, "311_combined.parquet")
     pd.testing.assert_frame_equal(sliced, full[january].reset_index(drop=True))
-    assert sliced["case_id"].astype(str).tolist() == ["301", "303", "BCS-00000043"]
-    assert sliced["after_switch"].tolist() == [True, True, False]
+    assert sliced["case_id"].astype(str).tolist() == ["301", "303", "BCS-00000044", "BCS-00000043"]
+    assert sliced["after_switch"].tolist() == [True, True, False, False]
     assert read(narrow, "legacy_311.parquet")["case_enquiry_id"].astype(str).tolist() == ["301", "302", "303"]
-    assert len(read(narrow, "new_311.parquet")) == 3  # the whole export, on purpose
+    assert len(read(narrow, "new_311.parquet")) == 5  # the whole export, on purpose
 
 
 def write_times(path, times):
