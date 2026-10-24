@@ -355,6 +355,53 @@ python Data-Pipeline/scripts/spatial_join.py
 
 The run adds `geoid20`, `unit` (the neighborhood a request is counted in) and `location`, and prints the share with no unit by year and system. `location` is `placed` or the reason there is no unit: `no_coordinates` (missing or not a number), `placeholder` (a default point listed in `Data-Pipeline/config/placeholder_locations.csv`, matched within about a metre), `outside_boston` (no 2020 tract) or `no_neighborhood` (tract 9815.02, which the city leaves out of every neighborhood). A latitude and longitude entered the wrong way round are swapped back and counted. If a new default point turns up (one spot holding thousands of requests with no neighborhood), add it to the placeholder file in a reviewed PR.
 
+## Versioned data (DVC)
+
+The DVC remote is `gs://boston-resilience-twin-data/dvc` (`.dvc/config`), a
+folder of its own in the data bucket, apart from the raw pulls under `raw/`.
+Every team member and `airflow-vm-sa` hold `roles/storage.objectAdmin` on the
+bucket (ADR-015), so all of them can pull and push. Storage is about $0.02
+per GB a month; noncurrent versions are deleted after 30 days (#48).
+
+DVC reads Google Application Default Credentials, not the `gcloud` login.
+On a laptop, log in once:
+
+```bash
+gcloud auth application-default login
+```
+
+On `airflow-vm` the attached service account is picked up with no login.
+
+Check the remote from the repo root:
+
+```bash
+dvc remote list     # gcs  gs://boston-resilience-twin-data/dvc  (default)
+dvc status -c       # compares the local cache with the remote; fails without access
+dvc pull            # fetch the data the current commit points to
+```
+
+Push through the helper, not bare `dvc push`, in anything automated:
+
+```bash
+python Data-Pipeline/scripts/dvc_push.py
+```
+
+It skips the push, logs one line and exits 0 when there is no access:
+`dvc push skipped: no Google credentials ...` when no credentials are found,
+or `dvc push skipped: these credentials have no access ...` when the bucket
+refuses them (a grader's own Google account). Any other failure, such as a
+full disk or a network error, fails the run.
+
+- **`dvc pull` fails with `Anonymous caller does not have storage.objects.get`.**
+  No Application Default Credentials. Run the login above.
+- **`does not have storage.objects.get` with your email.** Your account lacks
+  bucket access. Ask the project 1 owner to check `team_members` in tfvars.
+- **`UserWarning: ... without a quota project`** or the login's warning that it
+  cannot add `boston-resilience-twin` as the quota project. Harmless: Cloud
+  Storage does not need a quota project.
+- **`dvc: command not found`.** Run `pip install -r Data-Pipeline/requirements.txt`
+  in the Python 3.12 venv.
+
 ## Project 1 infrastructure (Terraform)
 
 Config lives in `Deployment/terraform/`. It covers project 1 only (ADR-009):
