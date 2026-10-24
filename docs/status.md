@@ -12,6 +12,7 @@ Week 2: Processing (due 2026-10-18)
 | #2 Local dev environment and Python pin | Punith | 2026-10-13 | done | PR #55 merged. `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); ADR-013 pins Python 3.12 |
 | #22 Daily DAG skeleton | Punith | 2026-10-18 | in review | `daily_pipeline`: 19 tasks; 4 run scripts (static layers, legacy and new 311, combine), 14 are placeholders until #6, #7, #8, #14, #15, #16, #17, #35, #32; results below. Runs on the #69 image (ADR-022), no manual installs |
 | #36 Logging and error handling across tasks | Punith | 2026-10-22 | in review | Builds on #72. Every task logs run id, rows in and rows out; `ingest_*` tasks retry twice; missing or empty inputs fail before the script runs; a failed task writes the W3-3 alert to its log until #34 delivers it; results below |
+| #37 Gantt analysis and optimization | Punith | 2026-10-24 | in review | Builds on #78. Legacy years parsed side by side (4 at a time) and merged: full build 124 s to 73 s, same outputs, peak 3.11 GiB for the whole stack, under the README's 4 GB; Gantt charts in the README; results below |
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
 | #11 Decision: live baselines for the new 311 format | Punith | 2026-10-13 | done | PR #63 merged; ADR-005: baseline = same weeks of the previous 3 years, both systems, by storm group |
@@ -106,6 +107,17 @@ Runs of `daily_pipeline` on a laptop (the geo packages installed by hand until #
 | missing-new-36 | a missing source fails clearly, with no retry | with `new_system.csv` renamed for the test, `parse_new_311` fails on try 1: `InputError: parse_new_311 cannot start: missing .../raw/311/new_system.csv. Put the new-system export in Data-Pipeline/data/raw/311/ (by hand until #6 lands).`, followed by the alert |
 
 From the DAG in the container: the eight `ingest_*` tasks have 2 retries, 5 minutes apart with backoff 2.0 and at most 15 minutes; the other tasks have none, and every task has the failure callback. A corrupt file (a garbage CSV, a non-parquet file) and an empty download (a 0-byte export, a 0-byte static layer) are covered by tests. Counting rows reads each raw CSV once more, about 1.2 s per yearly file in the container.
+
+## W3-6 results (2026-10-24)
+
+Two full builds on a laptop (Docker Desktop with 16 GB, `brt-airflow:local`, #68 in, raw files of 2026-10-19), `docker stats` sampled about every 2.5 s. Gantt charts and the full table are in the README ("Pipeline performance").
+
+| run | whole run | legacy 311 | slowest tasks | peak `docker stats`, scheduler / whole stack |
+|---|---|---|---|---|
+| full-before | 124 s | 95.1 s in one task | `parse_legacy_311` 95.1 s, `ingest_static_layers` 12.1 s, `combine_311` 9.4 s | 1.93 / 2.52 GiB |
+| full-after | 73 s | 45.1 s: 12 year tasks, 4 at a time, in 40.1 s, then the merge 5.0 s | year tasks up to 16.8 s, `ingest_static_layers` 10.4 s, `combine_311` 8.4 s | 2.49 / 3.11 GiB |
+
+The two runs write identical `legacy_311.parquet`, `new_311.parquet` and `311_combined.parquet` (3,110,129 rows). The scheduler cgroup's `memory.peak` was 2.52 GiB after the first run and 2.59 GiB after both, so the stack stayed under 3.3 GiB, below the README's 4 GB. At the peak, 1.95 GiB was the tasks' own memory and 0.1 GiB file cache. This also settles the earlier 3.44 GiB against 958 MiB question: before #68, `map_311.py` itself needed about 3.7 GB.
 
 ## W1-11 results (2026-10-19)
 
