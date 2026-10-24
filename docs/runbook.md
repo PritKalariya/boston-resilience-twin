@@ -33,7 +33,7 @@ so it is safe to use `--build` on every start.
 
 ```bash
 echo "AIRFLOW_UID=$(id -u)" > .env   # Linux only (the VM too), once per clone
-docker compose up -d --wait
+docker compose up -d --build --wait
 docker compose ps -a
 curl -fsS http://127.0.0.1:8080/api/v2/monitor/health
 ```
@@ -113,7 +113,7 @@ environment block in `docker-compose.yaml` passes one value to all of them.
 - **DAGs still load from the old path after a pull.** A running stack keeps
   its old mounts until its containers are recreated. After pulling a change
   to `docker-compose.yaml`, such as the ADR-017 DAG mount, run
-  `docker compose down`, then `docker compose up -d --wait`.
+  `docker compose down`, then `docker compose up -d --build --wait`.
 
 ## Surge baseline re-check (ADR-005)
 
@@ -374,7 +374,7 @@ EOF
 Start the stack:
 
 ```bash
-cd /opt/boston-resilience-twin && sudo docker compose up -d --wait
+cd /opt/boston-resilience-twin && sudo docker compose up -d --build --wait
 ```
 
 The first start takes about 10 minutes on an e2-medium, half of it pulling the Airflow image. It is not hung.
@@ -389,7 +389,7 @@ cd /opt/boston-resilience-twin && sudo docker compose ps
 
 All four services (postgres, airflow-apiserver, airflow-scheduler, airflow-dag-processor) should show `(healthy)`.
 
-**Stop the VM, never the containers.** Running `docker compose stop` or `down` before a VM stop marks the containers as stopped by hand, and they stay down after the next start. If that happens, run `sudo docker compose up -d --wait`.
+**Stop the VM, never the containers.** Running `docker compose stop` or `down` before a VM stop marks the containers as stopped by hand, and they stay down after the next start. If that happens, run `sudo docker compose up -d --build --wait`.
 
 ### Open the UI (laptop)
 
@@ -404,7 +404,7 @@ Then browse to `http://localhost:18080` and log in with the compose defaults, `a
 ### Update after a merge to main
 
 ```bash
-cd /opt/boston-resilience-twin && sudo git pull --ff-only && sudo docker compose up -d --wait
+cd /opt/boston-resilience-twin && sudo git pull --ff-only && sudo docker compose up -d --build --wait
 ```
 
 The VM runs `main` only. Test branches on your laptop.

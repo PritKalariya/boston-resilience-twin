@@ -13,7 +13,8 @@ does not list (geopandas, iniconfig, pyogrio, pyproj, pytest, shapely) at the
 versions the tests passed on. The stock Airflow image ships none of those six,
 so a DAG task that runs a script importing geopandas, shapely, pyogrio or
 pyproj fails on import until the image has them (ADR-017 Consequences, issue
-#69). The daily DAG in #22 is blocked on this, and so is the event DAG in #37.
+#69). The daily DAG in #22 is blocked on this, and so is #37, the Gantt
+analysis of that DAG.
 
 Three more tools are planned against the same interpreter: Great Expectations
 (#17, #35), Fairlearn (#32) and DVC with a Cloud Storage remote (#18). Whether
@@ -25,13 +26,16 @@ not been measured.
 - One image, `brt-airflow:local`, built from `airflow.Dockerfile` at the repo
   root, runs on every Airflow service in `docker-compose.yaml`. It is
   `apache/airflow:3.3.2-python3.12` (ADR-013) plus `Data-Pipeline/requirements.txt`.
-- The install runs as the `airflow` user, never root. Both the constraints file
-  and the Airflow pin are derived from `AIRFLOW_VERSION`, which the base image
-  sets, so bumping the `FROM` tag cannot leave a stale pin or point the install
-  at the wrong constraints; the build fails outright if that variable is
-  missing. The Python version in the constraints file name stays literal at
-  3.12 (ADR-013), because the base image does not expose it. For this tag that
-  resolves to `constraints-3.3.2/constraints-3.12.txt` and
+- The install runs as the `airflow` user, never root. The constraints URL and
+  the Airflow pin on the Dockerfile's pip command line are both derived from
+  `AIRFLOW_VERSION`, which the base image sets, so bumping the `FROM` tag
+  cannot leave either of those two stale or point them at the wrong
+  constraints; the build fails outright if that variable is missing. It does
+  not cover `Data-Pipeline/requirements.txt`: that file's `-c` line and its
+  pins are edited by hand (see Revisit when). The Python version in the
+  constraints file name stays literal at 3.12 (ADR-013), because the base image
+  does not expose it. For this tag that resolves to
+  `constraints-3.3.2/constraints-3.12.txt` and
   `apache-airflow==3.3.2`, passed on the pip command line as well as on the
   requirements file's own `-c` line. Airflow is pinned because the constraints
   file pins every provider but not Airflow itself, so without it the resolver
@@ -104,6 +108,10 @@ not been measured.
 - CI/CD starts building images: decide whether the stack runs a tag from
   Artifact Registry (project 2, ADR-009) instead of building locally.
 - A tool conflicts with the constraints and needs its own virtual environment.
-- The Airflow tag in ADR-013 changes: only the `FROM` line needs editing, since
-  the constraints URL and the Airflow pin follow `AIRFLOW_VERSION`. A change to
-  the Python minor version does need an edit, because 3.12 is literal there.
+- The Airflow tag in ADR-013 changes: the `FROM` line is not the only edit.
+  `Data-Pipeline/requirements.txt` has to move with it, both its own `-c` line
+  and the numpy, pandas and pyarrow pins taken from the new constraints file
+  (ADR-017); otherwise pip gets two constraint files that disagree. Inside the
+  Dockerfile the Airflow pin and the constraints URL still follow
+  `AIRFLOW_VERSION` and need no edit. A change to the Python minor version does
+  need one, because 3.12 is literal there.

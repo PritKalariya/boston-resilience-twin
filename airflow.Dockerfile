@@ -12,10 +12,13 @@ USER airflow
 
 COPY --chown=airflow:0 Data-Pipeline/requirements.txt /opt/airflow/requirements.txt
 
-# Both the Airflow pin and the constraints file come from AIRFLOW_VERSION, which
-# the base image sets, so bumping the FROM tag cannot leave a stale pin or point
-# at the wrong constraints. The Python version stays literal: ADR-013 pins 3.12,
-# and the base image does not carry it in an environment variable.
+# The Airflow pin and the constraints URL below both come from AIRFLOW_VERSION,
+# which the base image sets, so bumping the FROM tag cannot leave either of them
+# stale or point them at the wrong constraints. It does not carry over to
+# Data-Pipeline/requirements.txt: that file's own -c line and its pins are
+# edited by hand when the tag changes (ADR-022, Revisit when). The Python
+# version stays literal: ADR-013 pins 3.12, and the base image does not carry it
+# in an environment variable.
 #
 # apache-airflow is pinned because the constraints file pins every provider but
 # not Airflow itself, so without the pin the resolver is free to move it. The

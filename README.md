@@ -53,7 +53,7 @@ echo "AIRFLOW_UID=$(id -u)" > .env
 Then, on every system:
 
 ```bash
-docker compose up -d --wait
+docker compose up -d --build --wait
 ```
 
 The first start downloads the base images, builds the Airflow image and sets up the database. With the base image already pulled that took 1m37s on a laptop; allow a few minutes when Docker has to download it too. Later starts take under a minute. `docker compose ps -a` should show four services as `(healthy)` and `airflow-init` as `Exited (0)`.
