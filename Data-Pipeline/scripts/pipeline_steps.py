@@ -38,6 +38,7 @@ SCRIPTS = {
     "parse_legacy_311": "legacy_311",
     "parse_new_311": "new_311",
     "combine_311": "map_311",
+    "spatial_join": "spatial_join",
 }
 # Task id -> the issue that builds it; a placeholder in the DAG until then.
 PLANNED = {
@@ -49,7 +50,6 @@ PLANNED = {
     "ingest_tides": "#7",
     "ingest_open_meteo": "#8",
     "validate_raw": "#17",
-    "spatial_join": "#14",
     "daily_counts": "#15",
     "labels_and_features": "#16",
     "validate_processed": "#17",
@@ -164,6 +164,13 @@ def script_args(step: str, days: DateRange, root: Path = REPO) -> list[str]:
             "--map", root / "docs" / "data" / "category-map.csv",
             "--out", interim / "311_combined.parquet",
             "--change-points", interim / "change-points.csv",
+        ],
+        "spatial_join": [
+            "--combined", interim / "311_combined.parquet",
+            "--tracts", interim / "static" / "tracts_2020.parquet",
+            "--neighborhoods", interim / "static" / "neighborhoods_by_tract20.parquet",
+            "--placeholders", root / "Data-Pipeline" / "config" / "placeholder_locations.csv",
+            "--out", interim / "311_located.parquet",
         ],
     }[step]
     return [str(arg) for arg in args]
