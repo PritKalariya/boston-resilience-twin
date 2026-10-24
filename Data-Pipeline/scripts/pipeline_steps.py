@@ -305,7 +305,9 @@ def run_script(module: str, args: list[str]) -> None:
 def trim_to_range(path: Path, column: str, days: DateRange) -> tuple[int, int]:
     """Keep the rows of a parquet file whose time falls in the range, both ends inclusive.
 
-    Times are Boston local wall-clock times. Returns (rows before, rows kept).
+    Times are Boston local wall-clock times. A row without a time is dropped;
+    there are none, since the parsers already drop rows without an open time.
+    Returns (rows before, rows kept).
     """
     import pandas as pd  # here, so importing this module stays light for the DAG
 

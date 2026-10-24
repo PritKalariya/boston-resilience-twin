@@ -1,0 +1,4 @@
+# Build context for airflow.Dockerfile: the pins and nothing else. BuildKit uses
+# this file in place of any root .dockerignore, so other builds are unaffected.
+*
+!Data-Pipeline/requirements.txt

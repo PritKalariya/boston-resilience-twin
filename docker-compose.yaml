@@ -7,8 +7,14 @@
 
 x-airflow-common:
   &airflow-common
-  # Python 3.12 per ADR-013. The unsuffixed 3.3.2 tag is Python 3.13.
-  image: apache/airflow:3.3.2-python3.12
+  # Built from airflow.Dockerfile (ADR-022): the apache/airflow:3.3.2-python3.12
+  # base image (Python 3.12 per ADR-013; the unsuffixed 3.3.2 tag is Python 3.13)
+  # plus Data-Pipeline/requirements.txt. Rebuild with `docker compose up -d --build --wait`
+  # after changing that file; DAG and script changes need no rebuild.
+  image: brt-airflow:local
+  build:
+    context: .
+    dockerfile: airflow.Dockerfile
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
@@ -35,7 +41,7 @@ x-airflow-common:
     # Pipeline DAGs import Data-Pipeline/scripts by module name (ADR-017, #22).
     PYTHONPATH: /opt/airflow/repo/Data-Pipeline/scripts
   volumes:
-    - ./Data-Pipeline/dags:/opt/airflow/dags
+    - ./Data-Pipeline/dags:/opt/airflow/dags/data_pipeline
     - ./Data-Pipeline/logs:/opt/airflow/logs
     # The repo layout under /opt/airflow/repo, so tasks build the same paths as on
     # the host. Code, config and the category map are read-only; only data is written.
