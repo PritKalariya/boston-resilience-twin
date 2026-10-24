@@ -8,7 +8,10 @@ pandas==3.0.5
 pyarrow==25.0.1
 
 # Not in the constraints file: pinned to the versions the tests passed on.
-# pyproj comes in through geopandas, iniconfig through pytest.
+# pyproj comes in through geopandas, iniconfig through pytest. dvc-gs brings
+# gcsfs and google-auth, which the constraints file pins.
+dvc==3.67.1
+dvc-gs==3.1.0
 geopandas==1.2.0
 iniconfig==2.3.1
 pyogrio==0.13.0

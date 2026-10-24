@@ -69,6 +69,9 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `python Data-Pipeline/scripts/static_layers.py [--download|--refresh]`: load the layers in `Data-Pipeline/config/static_layers.csv` to `Data-Pipeline/data/interim/static/` (EPSG:4326) and write `docs/data/static-layers.csv`; `--download` fetches missing files, `--refresh` all of them
 - `python Data-Pipeline/scripts/compare_units.py`: compare candidate modeling units (empty-cell share, surge rate with the ADR-005 baseline) from `311_combined.parquet` and the static tracts and neighborhoods (markdown; about 4 minutes)
 - `python -m pytest Data-Pipeline/tests`
+- `gcloud auth application-default login`: Google credentials for DVC, once per machine. Human only (opens a browser)
+- `dvc remote list`, `dvc status -c`, `dvc pull`: show the remote (`gs://boston-resilience-twin-data/dvc`), compare the cache with it, fetch the data for the current commit
+- `python Data-Pipeline/scripts/dvc_push.py`: `dvc push`, or a `dvc push skipped: ...` log line and exit 0 without bucket access. Use it instead of bare `dvc push` in DAGs and scripts
 - `cd Deployment/terraform && terraform init`: configure the GCS state backend and providers (needs `gcloud auth application-default login`)
 - `terraform fmt -check && terraform validate`: format and syntax check, no cloud calls
 - `terraform plan -var-file=terraform.tfvars`: read-only dry run against project 1 (`terraform.tfvars` is gitignored; copy from `terraform.tfvars.example`)
