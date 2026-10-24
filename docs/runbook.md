@@ -8,16 +8,32 @@ that changes an operational step.
 `docker-compose.yaml` at the repo root runs Airflow 3.3.2 with LocalExecutor
 and a Postgres 16 metadata database: `postgres`, a one-shot `airflow-init`,
 `airflow-apiserver` (UI and API on 127.0.0.1:8080 only), `airflow-scheduler`
-(also runs the tasks), and `airflow-dag-processor`. The image is pinned to
-`apache/airflow:3.3.2-python3.12` (ADR-013). There is no triggerer: add the
-official triggerer service back when the first deferrable operator lands,
+(also runs the tasks), and `airflow-dag-processor`. There is no triggerer: add
+the official triggerer service back when the first deferrable operator lands,
 since a deferred task waits forever without one.
+
+Every Airflow service runs `brt-airflow:local`, built from `airflow.Dockerfile`
+at the repo root: the `apache/airflow:3.3.2-python3.12` base image (ADR-013)
+plus `Data-Pipeline/requirements.txt` installed under Airflow's constraints for
+that image (ADR-022). The requirements file is the only thing copied in; DAG
+and script code is bind-mounted (ADR-017).
+
+### Rebuild the image
+
+```bash
+docker compose up -d --build --wait
+```
+
+Run it after any change to `Data-Pipeline/requirements.txt`, including one that
+arrives with a `git pull`. DAG and script changes never need a rebuild. With
+the requirements unchanged the build is fully cached and adds about a second,
+so it is safe to use `--build` on every start.
 
 ### Start and check
 
 ```bash
 echo "AIRFLOW_UID=$(id -u)" > .env   # Linux only (the VM too), once per clone
-docker compose up -d --wait
+docker compose up -d --build --wait
 docker compose ps -a
 curl -fsS http://127.0.0.1:8080/api/v2/monitor/health
 ```
@@ -90,10 +106,14 @@ environment block in `docker-compose.yaml` passes one value to all of them.
   volume line for its `dags/` folder in `docker-compose.yaml`, mounted at
   `/opt/airflow/dags/<component>` in snake_case (ADR-017); without it, Airflow
   never sees the folder.
+- **A DAG task fails with `ModuleNotFoundError` after a pull.** The image is
+  stale: someone added a package to `Data-Pipeline/requirements.txt` and your
+  containers still run the image built before it. Rebuild with
+  `docker compose up -d --build --wait`.
 - **DAGs still load from the old path after a pull.** A running stack keeps
   its old mounts until its containers are recreated. After pulling a change
   to `docker-compose.yaml`, such as the ADR-017 DAG mount, run
-  `docker compose down`, then `docker compose up -d --wait`.
+  `docker compose down`, then `docker compose up -d --build --wait`.
 
 ## Surge baseline re-check (ADR-005)
 
@@ -381,7 +401,7 @@ EOF
 Start the stack:
 
 ```bash
-cd /opt/boston-resilience-twin && sudo docker compose up -d --wait
+cd /opt/boston-resilience-twin && sudo docker compose up -d --build --wait
 ```
 
 The first start takes about 10 minutes on an e2-medium, half of it pulling the Airflow image. It is not hung.
@@ -396,7 +416,7 @@ cd /opt/boston-resilience-twin && sudo docker compose ps
 
 All four services (postgres, airflow-apiserver, airflow-scheduler, airflow-dag-processor) should show `(healthy)`.
 
-**Stop the VM, never the containers.** Running `docker compose stop` or `down` before a VM stop marks the containers as stopped by hand, and they stay down after the next start. If that happens, run `sudo docker compose up -d --wait`.
+**Stop the VM, never the containers.** Running `docker compose stop` or `down` before a VM stop marks the containers as stopped by hand, and they stay down after the next start. If that happens, run `sudo docker compose up -d --build --wait`.
 
 ### Open the UI (laptop)
 
@@ -411,7 +431,7 @@ Then browse to `http://localhost:18080` and log in with the compose defaults, `a
 ### Update after a merge to main
 
 ```bash
-cd /opt/boston-resilience-twin && sudo git pull --ff-only && sudo docker compose up -d --wait
+cd /opt/boston-resilience-twin && sudo git pull --ff-only && sudo docker compose up -d --build --wait
 ```
 
 The VM runs `main` only. Test branches on your laptop.

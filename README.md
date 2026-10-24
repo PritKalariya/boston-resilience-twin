@@ -53,10 +53,20 @@ echo "AIRFLOW_UID=$(id -u)" > .env
 Then, on every system:
 
 ```bash
-docker compose up -d --wait
+docker compose up -d --build --wait
 ```
 
-The first start downloads about 0.8 GB of images and sets up the database, which takes a few minutes. Later starts take under a minute. `docker compose ps -a` should show four services as `(healthy)` and `airflow-init` as `Exited (0)`.
+The first start downloads the base images, builds the Airflow image and sets up the database. With the base image already pulled that took 1m37s on a laptop; allow a few minutes when Docker has to download it too. Later starts take under a minute. `docker compose ps -a` should show four services as `(healthy)` and `airflow-init` as `Exited (0)`.
+
+**The Airflow image.** Every Airflow service runs `brt-airflow:local`, built from `airflow.Dockerfile`: the `apache/airflow:3.3.2-python3.12` base image (ADR-013) plus `Data-Pipeline/requirements.txt`, installed under Airflow's constraints for that image (ADR-022). The base image has none of the geo packages, so without it a task that imports geopandas, shapely, pyogrio or pyproj fails.
+
+Rebuild it whenever `Data-Pipeline/requirements.txt` changes, including a change you pulled from `main`:
+
+```bash
+docker compose up -d --build --wait
+```
+
+DAG and script changes never need a rebuild: those files are bind-mounted, not copied into the image. A rebuild with the requirements unchanged is fully cached and takes about a second.
 
 Open http://localhost:8080 and log in as `airflow` / `airflow`. These defaults are for your own machine only.
 
