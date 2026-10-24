@@ -33,7 +33,7 @@ x-airflow-common:
     # Scheduler serves /health on port 8974 for its healthcheck.
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
   volumes:
-    - ./Data-Pipeline/dags:/opt/airflow/dags
+    - ./Data-Pipeline/dags:/opt/airflow/dags/data_pipeline
     - ./Data-Pipeline/logs:/opt/airflow/logs
   # Linux: set AIRFLOW_UID to `id -u` in .env. The image requires group 0.
   user: "${AIRFLOW_UID:-50000}:0"
