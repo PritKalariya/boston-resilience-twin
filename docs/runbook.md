@@ -65,9 +65,9 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Five tasks run scripts: `ingest_static_layers`, `parse_legacy_311`,
-  `parse_new_311`, `combine_311` and `spatial_join`.
-- The other 13 are placeholders. Each logs the issue that builds it
+- Six tasks run scripts: `ingest_static_layers`, `parse_legacy_311`,
+  `parse_new_311`, `combine_311`, `spatial_join` and `daily_counts`.
+- The other 12 are placeholders. Each logs the issue that builds it
   (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
 - Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
   hand.
@@ -237,6 +237,17 @@ python Data-Pipeline/scripts/spatial_join.py
 ```
 
 The run adds `geoid20`, `unit` (the neighborhood a request is counted in) and `location`, and prints the share with no unit by year and system. `location` is `placed` or the reason there is no unit: `no_coordinates` (missing or not a number), `placeholder` (a default point listed in `Data-Pipeline/config/placeholder_locations.csv`, matched within about a metre), `outside_boston` (no 2020 tract) or `no_neighborhood` (tract 9815.02, which the city leaves out of every neighborhood). A latitude and longitude entered the wrong way round are swapped back and counted. If a new default point turns up (one spot holding thousands of requests with no neighborhood), add it to the placeholder file in a reviewed PR.
+
+## Daily counts
+
+`daily_counts.py` turns `311_located.parquet` into the table labels are built from (ADR-004): one row per unit, day and storm group, every day present and zero-filled, in `Data-Pipeline/data/processed/daily_counts.parquet`.
+
+```bash
+python Data-Pipeline/scripts/daily_counts.py                                     # 2015-01-01 to the last full day of both systems
+python Data-Pipeline/scripts/daily_counts.py --start 2025-01-01 --end 2025-12-31 # one year
+```
+
+`requests` counts every request kept under `after_switch_policy` (ADR-021); `baseline_requests` counts the ones baselines may use, which under `keep` is the same number. The run prints each step from the combined table to the counted total (unmapped, not storm-related, after_switch, each no-location reason, no date, outside the range) and stops if the counts do not add up to the total.
 
 ## Project 1 infrastructure (Terraform)
 

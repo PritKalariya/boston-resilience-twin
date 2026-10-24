@@ -17,6 +17,7 @@ Week 2: Processing (due 2026-10-18)
 | #53 Policy for legacy rows after their category's switch date | Punith | 2026-10-20 | in review | ADR-021: keep. Setting `after_switch_policy` in `Data-Pipeline/config/processing.csv`, for #15 to apply; results below |
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | done | PR #52 merged; results below; new-system clock in ADR-020; flooding gap needs a team call |
 | #14 Spatial joins | Alekhya (built by Srikar for the Oct 25 deadline) | 2026-10-16 | in review | every request tagged with tract and unit by coordinates; 99.14% placed; results below |
+| #15 Daily counts | Srikar | 2026-10-17 | in review | neighborhood x day x storm group, zero-filled; 215,701 requests counted and reconciled; results below |
 | #20 Airflow on the VM | Prit | 2026-10-18 | done | PR #59 merged. Airflow stack on airflow-vm (LocalExecutor, Postgres 16; ADR-016); UI by SSH tunnel only; VM stopped. Runbook: "Airflow on the VM". After #58 merges, run the update step in the runbook on the VM |
 | #23 Write ADRs 001, 009, 010, 011, 012 | Prit | 2026-10-18 | done | PR #65 merged; ADRs in docs/decisions/ |
 | #29 Verify teammate IAM | Prit | 2026-10-15 | done | PR #51 merged. All 6 members granted, plus `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start and SSH verified; VM stopped. |
@@ -122,6 +123,26 @@ Command: `python Data-Pipeline/scripts/after_switch.py`. Data: legacy files 2015
 | Pruning Request, tree (109 days) | 27 / 179 | 0.80 (1.57%) | 0.17 (0%) | 0.14 (0%) |
 
 Storm labels (ADR-004 unit, 94,512 labeled cells): drop changes 1, exclude_from_baselines none. Snow Plowing and Emergency Responder Snow Plowing switched on 2026-06-23 with 2 test requests and held 50.5% of last winter's legacy snow requests, so drop could delete half of this winter's snow signal. Decision in ADR-021: keep.
+
+## W2-3 results (2026-10-24)
+
+Command: `python Data-Pipeline/scripts/daily_counts.py` after `spatial_join.py`. `Data-Pipeline/data/processed/daily_counts.parquet` has one row per unit, day and storm group: 24 units x 4,301 days (2015-01-01 to 2026-10-10, the last full day of both systems) x 3 groups = 309,672 rows, 84.5% of them zero. It runs in about 3 seconds and peaks at 1.1 GB.
+
+How the total reconciles (`after_switch_policy` keep, so nothing is removed for after_switch):
+
+| step | requests |
+|---|---|
+| rows in the combined table (3,106,511 parsed, minus 1,283 resubmitted copies) | 3,105,228 |
+| unmapped category | -57 |
+| not storm-related | -2,888,393 |
+| no coordinates | -546 |
+| City Hall placeholder | -291 |
+| outside Boston's tracts | -213 |
+| tract 9815.02, in no neighborhood | -13 |
+| after the last full day | -14 |
+| counted | 215,701 |
+
+By storm group: snow_ice 122,585, tree 86,499, flooding 6,617. The total matches #66's comparison once its 291 placeholder rows are taken out (216,019 placed, less 291, 13 and 14).
 
 ## W2-2 results (2026-10-24)
 
