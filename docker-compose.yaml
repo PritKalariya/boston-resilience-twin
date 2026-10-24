@@ -38,9 +38,17 @@ x-airflow-common:
     AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: '30'
     # Scheduler serves /health on port 8974 for its healthcheck.
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    # Pipeline DAGs import Data-Pipeline/scripts by module name (ADR-017, #22).
+    PYTHONPATH: /opt/airflow/repo/Data-Pipeline/scripts
   volumes:
     - ./Data-Pipeline/dags:/opt/airflow/dags/data_pipeline
     - ./Data-Pipeline/logs:/opt/airflow/logs
+    # The repo layout under /opt/airflow/repo, so tasks build the same paths as on
+    # the host. Code, config and the category map are read-only; only data is written.
+    - ./Data-Pipeline/scripts:/opt/airflow/repo/Data-Pipeline/scripts:ro
+    - ./Data-Pipeline/config:/opt/airflow/repo/Data-Pipeline/config:ro
+    - ./docs/data:/opt/airflow/repo/docs/data:ro
+    - ./Data-Pipeline/data:/opt/airflow/repo/Data-Pipeline/data
   # Linux: set AIRFLOW_UID to `id -u` in .env. The image requires group 0.
   user: "${AIRFLOW_UID:-50000}:0"
   # Cap container stdout logs (the VM disk is 30 GB).
@@ -77,14 +85,15 @@ services:
     <<: *airflow-common
     # One-shot. The image entrypoint migrates the DB and creates the UI admin
     # (_AIRFLOW_* below) but ignores migrate errors, so check-migrations sets the exit code.
-    # chown fixes log ownership on Linux; Windows bind mounts ignore it.
+    # chown fixes log and data ownership on Linux (the VM checkout is root-owned);
+    # Windows bind mounts ignore it.
     entrypoint: /bin/bash
     command:
       - -c
       - |
         /entrypoint airflow db check-migrations
         status=$$?
-        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/logs || echo "chown skipped"
+        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/logs /opt/airflow/repo/Data-Pipeline/data || echo "chown skipped"
         exit $$status
     environment:
       <<: *airflow-common-env
