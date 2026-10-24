@@ -95,6 +95,8 @@ The containers restart whenever Docker starts (for example after a reboot) until
 
 **Optional overrides.** `.env` is for local development only. To change a dev default, such as the port, add the line to `.env` using the names in `.env.example`. Never commit `.env`. In Windows PowerShell 5.1, do not create `.env` with `>` or `Out-File`: they write UTF-16 and every compose command then fails.
 
+**API keys.** Tasks that call NOAA, Census or NWS read `NOAA_CDO_TOKEN`, `CENSUS_API_KEY` and `NWS_USER_AGENT` from `.env`. Without your own keys the stack still runs, and only the tasks that need a missing key fail, naming it. How to get them: `docs/data-access.md`.
+
 The VM gets its secrets from Secret Manager (ADR-015), set up in #20. The runbook (`docs/runbook.md`) has the operating steps and fixes for common problems.
 
 **Tests**
