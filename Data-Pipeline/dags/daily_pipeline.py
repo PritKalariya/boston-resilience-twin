@@ -7,7 +7,9 @@ and processed/. Any other range is a slice, written to
 Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/.
 
 Seven tasks run pipeline scripts. The others are placeholders: they log the
-issue that builds them and do nothing else.
+issue that builds them and do nothing else. The last task, push_data, pushes
+the DVC-tracked data to the team remote (dvc_push.py, #19); without bucket
+access it logs `dvc push skipped: ...` and succeeds.
 
 Every task logs its run id, rows in and rows out (#36). The ingest tasks retry
 twice, about 5 to 10 minutes and then 10 to 15 minutes apart (exponential
@@ -24,6 +26,7 @@ from airflow.sdk import Param, dag, get_current_context, task
 from airflow.sdk.exceptions import AirflowFailException
 
 import alerts  # Data-Pipeline/scripts, on PYTHONPATH (docker-compose.yaml)
+import dvc_push
 import pipeline_steps as steps
 
 log = logging.getLogger("airflow.task")
@@ -98,6 +101,13 @@ def daily_pipeline():
             raise AirflowFailException(str(e)) from e
 
     @task
+    def push_data() -> None:
+        # Needs .git, .dvc and .dvcignore mounted at the repo root (docker-compose.yaml).
+        # dvc_push logs the push or the skip; a skip still succeeds.
+        dvc_push.push(steps.REPO)
+        steps.log_task(run_id(), "push_data", None, None)
+
+    @task
     def planned(issue: str) -> None:
         log.warning("Placeholder until %s: nothing ran for %s", issue, run_range().label)
         steps.log_task(run_id(), get_current_context()["ti"].task_id, 0, 0)
@@ -129,7 +139,7 @@ def daily_pipeline():
     check_range() >> [*ingest, static] >> raw_checked
     raw_checked >> [real("parse_legacy_311"), real("parse_new_311")] >> combined
     [combined, static] >> real("spatial_join") >> todo("daily_counts") >> todo("labels_and_features") >> validated
-    validated >> [todo("schema_and_statistics"), todo("bias_slicing")]
+    validated >> [todo("schema_and_statistics"), todo("bias_slicing")] >> push_data()
 
 
 daily_pipeline()

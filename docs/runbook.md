@@ -389,9 +389,37 @@ python Data-Pipeline/scripts/dvc_push.py
 It skips the push, logs one line and exits 0 when there is no access:
 `dvc push skipped: no Google credentials ...` when no credentials are found,
 or `dvc push skipped: these credentials have no access ...` when the bucket
-refuses them (a grader's own Google account). Any other failure, such as a
-full disk or a network error, fails the run.
+refuses them (a grader's own Google account), followed by DVC's own error
+line. Any other failure, such as a full disk, a network error or a push that
+runs past 30 minutes, fails the run.
 
+**In Airflow** the last task of `daily_pipeline`, `push_data`, runs the same
+helper. DVC refuses to run outside a git repository, so `docker-compose.yaml`
+mounts `.git` (read-only), `.dvc` and `.dvcignore` at `/opt/airflow/repo`.
+After pulling a change to those mounts, run `docker compose down`, then
+`docker compose up -d --build --wait`. DVC is in the Airflow image (ADR-022),
+so a change to its pins in `Data-Pipeline/requirements.txt` also needs that
+rebuild. To run only the push task:
+
+```bash
+docker compose exec airflow-scheduler airflow tasks test daily_pipeline push_data
+```
+
+Inside the containers there are no Google credentials on a laptop, so it logs
+`dvc push skipped: no Google credentials ...` and succeeds. On `airflow-vm`
+the service account is picked up. To try a real push from a laptop, pass your
+login into a one-off container:
+
+```bash
+docker compose run --rm \
+  -v ~/.config/gcloud/application_default_credentials.json:/tmp/adc.json:ro \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/adc.json \
+  airflow-scheduler airflow tasks test daily_pipeline push_data
+```
+
+- **`push_data` fails with `/opt/airflow/repo is not a git repository`.** The
+  containers were started before the DVC mounts. Run `docker compose down`,
+  then `docker compose up -d --build --wait`.
 - **`dvc pull` fails with `Anonymous caller does not have storage.objects.get`.**
   No Application Default Credentials. Run the login above.
 - **`does not have storage.objects.get` with your email.** Your account lacks
@@ -399,8 +427,9 @@ full disk or a network error, fails the run.
 - **`UserWarning: ... without a quota project`** or the login's warning that it
   cannot add `boston-resilience-twin` as the quota project. Harmless: Cloud
   Storage does not need a quota project.
-- **`dvc: command not found`.** Run `pip install -r Data-Pipeline/requirements.txt`
-  in the Python 3.12 venv.
+- **`dvc: command not found`, or `No module named dvc` from `dvc_push.py`.** Run
+  `pip install -r Data-Pipeline/requirements.txt` in the Python 3.12 venv. In
+  Airflow, rebuild the image (above).
 
 ## Project 1 infrastructure (Terraform)
 

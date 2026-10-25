@@ -121,7 +121,7 @@ gcloud auth application-default login
 dvc pull
 ```
 
-**Without access**, for example a grader, skip `dvc pull` and rebuild the data from the public sources with `dvc repro` (stages come with #18). Pushing is skipped too: `python Data-Pipeline/scripts/dvc_push.py` logs `dvc push skipped: ...` and exits 0, and the data stays in the local DVC cache.
+**Without access**, for example a grader, skip `dvc pull`. Rebuilding the data from the public sources with `dvc repro` arrives with #18; until then `Data-Pipeline/dvc.yaml` has no stages and `dvc repro` does nothing. Pushing is skipped too: `python Data-Pipeline/scripts/dvc_push.py` logs `dvc push skipped: ...` and exits 0, and the data stays in the local DVC cache.
 
 The runbook ("Versioned data (DVC)") has the checks and fixes.
 
