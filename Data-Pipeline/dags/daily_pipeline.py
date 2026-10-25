@@ -6,7 +6,7 @@ data). The defaults are the full build, written to Data-Pipeline/data/interim/
 and processed/. Any other range is a slice, written to
 Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/.
 
-Four tasks run pipeline scripts. The others are placeholders: they log the
+Five tasks run pipeline scripts. The others are placeholders: they log the
 issue that builds them and do nothing else.
 """
 
@@ -96,7 +96,7 @@ def daily_pipeline():
 
     check_range() >> [*ingest, static] >> raw_checked
     raw_checked >> [real("parse_legacy_311"), real("parse_new_311")] >> combined
-    [combined, static] >> todo("spatial_join") >> todo("daily_counts") >> todo("labels_and_features") >> validated
+    [combined, static] >> real("spatial_join") >> todo("daily_counts") >> todo("labels_and_features") >> validated
     validated >> [todo("schema_and_statistics"), todo("bias_slicing")]
 
 

@@ -65,9 +65,9 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Four tasks run scripts: `ingest_static_layers`, `parse_legacy_311`,
-  `parse_new_311` and `combine_311`.
-- The other 14 are placeholders. Each logs the issue that builds it
+- Five tasks run scripts: `ingest_static_layers`, `parse_legacy_311`,
+  `parse_new_311`, `combine_311` and `spatial_join`.
+- The other 13 are placeholders. Each logs the issue that builds it
   (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
 - Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
   hand.
@@ -227,6 +227,16 @@ python Data-Pipeline/scripts/static_layers.py --refresh    # fetch every file ag
 ```
 
 Raw files go to `Data-Pipeline/data/raw/static/` and the loaded layers to `Data-Pipeline/data/interim/static/` (vectors as GeoParquet in EPSG:4326), both gitignored. The run rewrites `docs/data/static-layers.csv` with the source CRS, row count, retrieval date and SHA-256 of each file; commit it with the change. A changed hash after `--refresh` means the city published a new version, so check the row counts before using it. The run stops on a missing, empty or unreadable file, a missing or duplicate key, or a layer that falls outside Boston after reprojection (usually a wrong CRS).
+
+## Spatial join (311 requests to tracts and neighborhoods)
+
+`spatial_join.py` places every request in `311_combined.parquet` by its coordinates, in a 2020 tract and the ADR-004 neighborhood that holds it, and writes `Data-Pipeline/data/interim/311_located.parquet`. It needs the static layers loaded first.
+
+```bash
+python Data-Pipeline/scripts/spatial_join.py
+```
+
+The run adds `geoid20`, `unit` (the neighborhood a request is counted in) and `location`, and prints the share with no unit by year and system. `location` is `placed` or the reason there is no unit: `no_coordinates` (missing or not a number), `placeholder` (a default point listed in `Data-Pipeline/config/placeholder_locations.csv`, matched within about a metre), `outside_boston` (no 2020 tract) or `no_neighborhood` (tract 9815.02, which the city leaves out of every neighborhood). A latitude and longitude entered the wrong way round are swapped back and counted. If a new default point turns up (one spot holding thousands of requests with no neighborhood), add it to the placeholder file in a reviewed PR.
 
 ## Project 1 infrastructure (Terraform)
 
