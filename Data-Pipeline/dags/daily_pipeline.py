@@ -4,9 +4,10 @@ Triggered by hand until the evening run starts on the VM (#39). Params, both
 inclusive: start (2015-01-01 or later) and end (empty: through the latest
 data). The defaults are the full build, written to Data-Pipeline/data/interim/
 and processed/. Any other range is a slice, written to
-Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/.
+Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/,
+which the 311 ingest tasks refresh first, for any range.
 
-Five tasks run pipeline scripts. The others are placeholders: they log the
+Seven tasks run pipeline scripts. The others are placeholders: they log the
 issue that builds them and do nothing else.
 
 Every task logs its run id, rows in and rows out (#36). The ingest tasks retry
@@ -109,11 +110,12 @@ def daily_pipeline():
         issue = steps.PLANNED[step]
         return planned.override(task_id=step, doc_md=f"Placeholder until {issue}.", **retries(step))(issue)
 
-    ingest = [
+    # One after the other, legacy first: both write the 311 schedule state.
+    legacy_311, new_311 = real("ingest_legacy_311"), real("ingest_new_311")
+    legacy_311 >> new_311
+    ingest = [legacy_311, new_311] + [
         todo(step)
         for step in (
-            "ingest_legacy_311",
-            "ingest_new_311",
             "ingest_noaa_logan",
             "ingest_nws_forecasts",
             "ingest_nws_alerts",

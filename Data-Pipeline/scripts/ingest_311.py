@@ -1,4 +1,4 @@
-"""Download the Boston 311 files from Analyze Boston on a refresh schedule.
+"""Download the Boston 311 files from Analyze Boston on a refresh schedule (#6).
 
 Each source in config/ingest_311_sources.csv has its own refresh interval. A
 source that is not due is skipped without any request. A due source with
@@ -7,12 +7,20 @@ last-modified time changed; a source without it is downloaded every time it is
 due. A download replaces the current file only after it passes its checks, and
 files are replaced whole, so a rerun never appends or duplicates records.
 
-Files land byte for byte in the raw folder legacy_311.py reads (<year>.csv,
-new_system.csv). New-system records are also written to
-prepared/new_system.parquet with a source_system column; their timestamps keep
-the original timestamp text. _manifest.json holds the schedule state, and _runs.jsonl
-gets one line per run with every file's action and row count. The script
-writes this local folder only; raw data reaches Cloud Storage through DVC.
+The raw folder holds only the downloads, byte for byte as published
+(<year>.csv, new_system.csv), and changes only when a source changed, so it is
+the folder DVC versions. The schedule state (_manifest.json) and the run log
+(_runs.jsonl, one line per run with every file's action and row count) live in
+the state folder. New-system records are also written to the interim folder as
+new_system_as_published.parquet: every value as published text, so the
+timestamps stay untouched (Boston local time despite the +00, ADR-020), plus a
+source_system column set to "new", the label map_311 uses. The script writes
+these local folders only; raw data reaches Cloud Storage through DVC.
+
+In the daily_pipeline DAG, ingest_legacy_311 runs with --system legacy and
+then ingest_new_311 with --system new_system, one after the other, so the two
+never write the state file at the same time. A failed source makes the run
+exit with code 1, which fails the task.
 """
 
 from __future__ import annotations
@@ -35,20 +43,20 @@ import pandas as pd
 
 from legacy_311 import REQUIRED_COLUMNS as LEGACY_REQUIRED_COLUMNS
 from legacy_311 import scan_records
+from new_311 import REQUIRED_COLUMNS as NEW_REQUIRED_COLUMNS
 
 log = logging.getLogger("ingest_311")
 
 CKAN_BASE_URL = "https://data.boston.gov"
 USER_AGENT = "boston-resilience-twin-ingest/1.0 (Northeastern IE7374 course project)"
-NEW_SYSTEM_REQUIRED_COLUMNS = {"case_id", "open_date"}
-NEW_SOURCE_SYSTEM = "new_system"
+NEW_SOURCE_SYSTEM = "new"  # the label map_311 gives new-system rows in the combined table
 SOURCE_COLUMNS = ["source", "resource_id", "filename", "system", "refresh_days", "change_detection"]
 SYSTEMS = {"legacy", "new_system"}
 CHANGE_DETECTION = {"catalog", "none"}
 CATALOG_FIELDS = ("hash", "last_modified", "size")
 MANIFEST = "_manifest.json"
 RUN_LOG = "_runs.jsonl"
-PREPARED_DIR = "prepared"
+PREPARED_SUFFIX = "_as_published.parquet"
 CHUNK_BYTES = 1 << 20
 TIMEOUT_SECONDS = 300
 
@@ -66,13 +74,14 @@ class Source:
     def required_columns(self) -> set[str]:
         if self.system == "legacy":
             return set(LEGACY_REQUIRED_COLUMNS)
-        return set(NEW_SYSTEM_REQUIRED_COLUMNS)
+        return set(NEW_REQUIRED_COLUMNS)
 
     @property
     def prepared_name(self) -> str | None:
+        """File name of the as-published parquet in the interim folder (new-system sources only)."""
         if self.system != "new_system":
             return None
-        return f"{PREPARED_DIR}/{Path(self.filename).stem}.parquet"
+        return f"{Path(self.filename).stem}{PREPARED_SUFFIX}"
 
 
 def load_sources(path: Path | str) -> list[Source]:
@@ -185,8 +194,17 @@ def write_json_atomic(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
-def load_manifest(raw_dir: Path) -> dict:
-    path = raw_dir / MANIFEST
+def load_manifest(state_dir: Path, raw_dir: Path | None = None) -> dict:
+    """The schedule state from the state folder.
+
+    Before #6's review the state lived in the raw folder. When the state folder
+    has none yet, that copy is read instead, never moved or changed, so an
+    existing download history is kept and nothing is downloaded again.
+    """
+    path = state_dir / MANIFEST
+    if not path.exists() and raw_dir is not None and (raw_dir / MANIFEST).exists():
+        path = raw_dir / MANIFEST
+        log.warning("no schedule state in %s yet; reading %s (move it there, see the runbook)", state_dir, path)
     manifest = {}
     if path.exists():
         try:
@@ -349,7 +367,9 @@ def prepare_new_system(raw_path: Path, out_path: Path) -> dict:
     }
 
 
-def prepare_all(raw_dir: Path, sources: list[Source], manifest: dict) -> list[dict]:
+def prepare_all(raw_dir: Path, prepared_dir: Path, sources: list[Source], manifest: dict) -> list[dict]:
+    """Write the as-published parquet of each new-system source, unless prepared_dir
+    already holds the one last written from the current raw file."""
     results = []
     for source in sources:
         name = source.prepared_name
@@ -357,10 +377,12 @@ def prepare_all(raw_dir: Path, sources: list[Source], manifest: dict) -> list[di
         raw = raw_dir / source.filename
         if name is None or not raw.exists() or not state.get("sha256"):
             continue
-        out = raw_dir / name
+        out = prepared_dir / name
         previous = manifest["prepared"].get(name, {})
-        if out.exists() and previous.get("from_sha256") == state["sha256"]:
-            results.append({"file": name, "action": "skipped", "reason": "raw file unchanged", "rows": previous.get("rows")})
+        # Compare the file itself too: a run with another --prepared-dir (a DAG
+        # slice) records its own copy here, which says nothing about this one.
+        if out.exists() and previous.get("from_sha256") == state["sha256"] and file_sha256(out) == previous.get("sha256"):
+            results.append({"file": name, "action": "skipped", "reason": "already written from the current raw file", "rows": previous.get("rows")})
             continue
         try:
             info = prepare_new_system(raw, out)
@@ -371,7 +393,7 @@ def prepare_all(raw_dir: Path, sources: list[Source], manifest: dict) -> list[di
         if info["malformed_rows"]:
             log.warning("%s: %d malformed record(s) kept out of %s, counted here", source.filename, info["malformed_rows"], name)
         manifest["prepared"][name] = {**info, "from_sha256": state["sha256"], "sha256": file_sha256(out)}
-        results.append({"file": name, "action": "written", "reason": "raw file changed", **info})
+        results.append({"file": name, "action": "written", "reason": "raw file changed or parquet missing", **info})
         log.info("%s: wrote %d rows (%d malformed counted)", name, info["rows"], info["malformed_rows"])
     return results
 
@@ -380,15 +402,25 @@ def run_ingestion(
     raw_dir: Path | str,
     sources: list[Source],
     client,
+    *,
+    state_dir: Path | str,
+    prepared_dir: Path | str,
     now: datetime | None = None,
     force: bool = False,
     only: list[str] | None = None,
+    system: str | None = None,
     dry_run: bool = False,
 ) -> dict:
     """One ingestion run. Returns the run record; run["failed"] lists anything that failed."""
-    raw_dir = Path(raw_dir)
+    raw_dir, state_dir, prepared_dir = Path(raw_dir), Path(state_dir), Path(prepared_dir)
     now = now or datetime.now(timezone.utc)
     today = now.date()
+    if system:
+        if system not in SYSTEMS:
+            raise ValueError(f"unknown system {system!r}; expected one of {sorted(SYSTEMS)}")
+        sources = [s for s in sources if s.system == system]
+        if not sources:
+            raise ValueError(f"the source list has no {system} sources")
     if only:
         unknown = sorted(set(only) - {s.source for s in sources})
         if unknown:
@@ -397,9 +429,10 @@ def run_ingestion(
 
     if not dry_run:
         raw_dir.mkdir(parents=True, exist_ok=True)
+        state_dir.mkdir(parents=True, exist_ok=True)
         for stale in raw_dir.glob(".*.part"):
             stale.unlink()
-    manifest = load_manifest(raw_dir)
+    manifest = load_manifest(state_dir, raw_dir)
 
     results = []
     for source in sources:
@@ -421,7 +454,7 @@ def run_ingestion(
         results.append(result)
         log.info("%s %s rows=%s (%s)", source.source, result["action"], result["rows"], result["reason"])
         if not dry_run:
-            write_json_atomic(raw_dir / MANIFEST, manifest)
+            write_json_atomic(state_dir / MANIFEST, manifest)
 
     run = {"run_at": now.isoformat(timespec="seconds"), "dry_run": dry_run, "files": results}
     failed = [r["source"] for r in results if r["action"] == "failed"]
@@ -429,21 +462,24 @@ def run_ingestion(
         run["failed"] = failed
         return run
 
-    run["prepared"] = prepare_all(raw_dir, sources, manifest)
+    run["prepared"] = prepare_all(raw_dir, prepared_dir, sources, manifest)
     failed += [p["file"] for p in run["prepared"] if p["action"] == "failed"]
     run["failed"] = failed
 
-    write_json_atomic(raw_dir / MANIFEST, manifest)
-    with open(raw_dir / RUN_LOG, "a", encoding="utf-8") as f:
+    write_json_atomic(state_dir / MANIFEST, manifest)
+    with open(state_dir / RUN_LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps(run, default=str) + "\n")
     return run
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--raw-dir", default="Data-Pipeline/data/raw/311")
+    parser.add_argument("--raw-dir", default="Data-Pipeline/data/raw/311", help="the downloads, and nothing else")
+    parser.add_argument("--state-dir", default="Data-Pipeline/data/state/311", help="schedule state and run log")
+    parser.add_argument("--prepared-dir", default="Data-Pipeline/data/interim", help=f"where new_system{PREPARED_SUFFIX} goes")
     parser.add_argument("--sources", default="Data-Pipeline/config/ingest_311_sources.csv")
     parser.add_argument("--base-url", default=CKAN_BASE_URL)
+    parser.add_argument("--system", choices=sorted(SYSTEMS), help="limit the run to one system's sources")
     parser.add_argument("--only", nargs="+", metavar="SOURCE", help="limit the run to these sources")
     parser.add_argument("--force", action="store_true", help="download every selected source, ignoring the schedule")
     parser.add_argument("--dry-run", action="store_true", help="check the catalog and print the plan; write nothing")
@@ -454,8 +490,11 @@ def main(argv: list[str] | None = None) -> int:
         args.raw_dir,
         load_sources(args.sources),
         CkanClient(args.base_url),
+        state_dir=args.state_dir,
+        prepared_dir=args.prepared_dir,
         force=args.force,
         only=args.only,
+        system=args.system,
         dry_run=args.dry_run,
     )
     table = pd.DataFrame(run["files"])[["source", "action", "rows", "previous_rows", "reason"]]
@@ -464,9 +503,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{p['file']}: {p['action']} ({p['reason']}), rows={p.get('rows')}")
     if run["failed"]:
         print(f"FAILED: {', '.join(run['failed'])}", file=sys.stderr)
-        return 1
-    return 0
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

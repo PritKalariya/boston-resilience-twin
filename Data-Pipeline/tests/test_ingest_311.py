@@ -1,4 +1,5 @@
 import json
+import logging
 import threading
 import urllib.error
 import urllib.parse
@@ -12,7 +13,9 @@ import pandas as pd
 import pytest
 
 import ingest_311 as ing
+from legacy_311 import REQUIRED_COLUMNS as LEGACY_REQUIRED_COLUMNS
 from legacy_311 import read_years, scan_records
+from new_311 import REQUIRED_COLUMNS as NEW_REQUIRED_COLUMNS
 
 REPO_SOURCES = Path(__file__).resolve().parents[1] / "config" / "ingest_311_sources.csv"
 DAY0 = datetime(2026, 10, 15, 20, 0, tzinfo=timezone.utc)
@@ -82,7 +85,26 @@ def raw(tmp_path):
     return tmp_path / "raw" / "311"
 
 
+def state_dir(raw):
+    return raw.parents[1] / "state" / "311"
+
+
+def interim_dir(raw):
+    return raw.parents[1] / "interim"
+
+
+def prepared(raw):
+    return interim_dir(raw) / "new_system_as_published.parquet"
+
+
+def cli_dirs(raw):
+    """Every folder, so a CLI test never writes the repo's default folders."""
+    return ["--raw-dir", str(raw), "--state-dir", str(state_dir(raw)), "--prepared-dir", str(interim_dir(raw))]
+
+
 def run(raw, catalog, when=DAY0, **kwargs):
+    kwargs.setdefault("state_dir", state_dir(raw))
+    kwargs.setdefault("prepared_dir", interim_dir(raw))
     return ing.run_ingestion(raw, SOURCES, catalog, now=when, **kwargs)
 
 
@@ -91,7 +113,7 @@ def actions(run_record):
 
 
 def run_log(raw):
-    return [json.loads(line) for line in (raw / ing.RUN_LOG).read_text().splitlines()]
+    return [json.loads(line) for line in (state_dir(raw) / ing.RUN_LOG).read_text().splitlines()]
 
 
 # Config
@@ -107,7 +129,10 @@ def test_repo_config_matches_refresh_schedule():
     assert sources["legacy_2026"].refresh_days == 1
     new = sources["new_system"]
     assert (new.filename, new.system, new.refresh_days, new.change_detection) == ("new_system.csv", "new_system", 1, "none")
-    assert new.prepared_name == "prepared/new_system.parquet"
+    assert new.prepared_name == "new_system_as_published.parquet"
+    # A download must have the columns its parser reads.
+    assert new.required_columns == set(NEW_REQUIRED_COLUMNS) and "service_name" in new.required_columns
+    assert sources["legacy_2015"].required_columns == set(LEGACY_REQUIRED_COLUMNS)
 
 
 GOOD_ROW = "legacy_2015,r1,2015.csv,legacy,30,catalog\n"
@@ -279,7 +304,7 @@ def test_dry_run_writes_nothing(raw, catalog):
     result = run(raw, catalog, dry_run=True)
     assert set(actions(result).values()) == {"would_download"}
     assert catalog.downloads == []
-    assert not raw.exists()
+    assert not raw.exists() and not state_dir(raw).exists() and not interim_dir(raw).exists()
 
 
 def test_local_file_deleted_is_downloaded_even_if_not_due(raw, catalog):
@@ -381,8 +406,8 @@ def test_stale_partial_files_are_cleaned_up(raw, catalog):
 
 
 def test_corrupt_manifest_stops_the_run(raw, catalog):
-    raw.mkdir(parents=True)
-    (raw / ing.MANIFEST).write_text("{not json")
+    state_dir(raw).mkdir(parents=True)
+    (state_dir(raw) / ing.MANIFEST).write_text("{not json")
     with pytest.raises(ValueError, match="not valid JSON"):
         run(raw, catalog)
 
@@ -399,7 +424,7 @@ def test_legacy_header_with_byte_order_mark_is_accepted(raw, catalog):
 def test_new_system_timestamps_are_preserved(raw, catalog):
     run(raw, catalog)
     assert (raw / "new_system.csv").read_bytes() == NEW_CSV
-    df = pd.read_parquet(raw / "prepared" / "new_system.parquet")
+    df = pd.read_parquet(prepared(raw))
     assert df["open_date"].tolist() == [
         "2026-07-14 10:56:30.994145+00",
         "2026-07-15 03:01:02+00",
@@ -408,20 +433,20 @@ def test_new_system_timestamps_are_preserved(raw, catalog):
     assert df["close_date"].iloc[0] == "2026-07-14 23:42:16+00"
     assert df["close_date"].iloc[1:].isna().all()
     assert df["service_name"].iloc[2] == "Tree Emergency, Large"
-    assert (df["source_system"] == "new_system").all()
+    assert (df["source_system"] == "new").all()  # the label map_311 gives new-system rows
     assert list(df.columns) == ["case_id", "open_date", "close_date", "service_name", "neighborhood", "source_system"]
 
 
 def test_new_system_malformed_rows_are_counted_not_hidden(raw, catalog):
     catalog.files["rnew"] = NEW_CSV + b"BCS-9,2026-10-01 00:00:00+00,,Pothole,Roxbury,extra\n"
     result = run(raw, catalog)
-    prepared = result["prepared"][0]
-    assert (prepared["records"], prepared["rows"], prepared["malformed_rows"]) == (4, 3, 1)
-    assert prepared["malformed_record_positions"] == [3]
+    info = result["prepared"][0]
+    assert (info["records"], info["rows"], info["malformed_rows"]) == (4, 3, 1)
+    assert info["malformed_record_positions"] == [3]
     row = next(r for r in result["files"] if r["source"] == "new_system")
     assert (row["rows"], row["malformed_rows"]) == (4, 1)
     assert (raw / "new_system.csv").read_bytes() == catalog.files["rnew"]
-    assert len(pd.read_parquet(raw / "prepared" / "new_system.parquet")) == 3
+    assert len(pd.read_parquet(prepared(raw))) == 3
 
 
 def test_prepared_file_is_rewritten_only_when_raw_changes(raw, catalog):
@@ -432,21 +457,21 @@ def test_prepared_file_is_rewritten_only_when_raw_changes(raw, catalog):
     catalog.files["rnew"] = NEW_CSV + b"BCS-4,2026-10-15 01:00:00+00,,Pothole,Roxbury\n"
     third = run(raw, catalog, when=DAY0 + timedelta(days=2))
     assert third["prepared"][0]["action"] == "written"
-    assert len(pd.read_parquet(raw / "prepared" / "new_system.parquet")) == 4
+    assert len(pd.read_parquet(prepared(raw))) == 4
 
 
 def test_prepared_file_is_rebuilt_if_deleted(raw, catalog):
     run(raw, catalog)
-    (raw / "prepared" / "new_system.parquet").unlink()
+    (prepared(raw)).unlink()
     result = run(raw, catalog, when=DAY0 + timedelta(hours=1))
     assert result["prepared"][0]["action"] == "written"
 
 
 def test_existing_source_system_column_is_refused(raw, catalog):
-    catalog.files["rnew"] = b"case_id,open_date,source_system\nBCS-1,2026-07-14 10:56:30+00,x\n"
+    catalog.files["rnew"] = b"case_id,open_date,service_name,source_system\nBCS-1,2026-07-14 10:56:30+00,Pothole,x\n"
     result = run(raw, catalog)
     assert result["prepared"][0]["action"] == "failed"
-    assert "prepared/new_system.parquet" in result["failed"]
+    assert "new_system_as_published.parquet" in result["failed"]
 
 
 def test_prepare_counts_duplicate_case_ids_without_dropping(tmp_path):
@@ -487,13 +512,13 @@ def test_run_log_has_row_counts_for_every_file_every_run(raw, catalog):
 
 def test_manifest_matches_files_on_disk(raw, catalog):
     run(raw, catalog)
-    manifest = json.loads((raw / ing.MANIFEST).read_text())
+    manifest = json.loads((state_dir(raw) / ing.MANIFEST).read_text())
     for s in SOURCES:
         state = manifest["sources"][s.source]
         assert state["sha256"] == ing.file_sha256(raw / s.filename)
         assert state["rows"] == scan_records(raw / s.filename)[0]
         assert state["last_checked"] == "2026-10-15"
-    assert manifest["prepared"]["prepared/new_system.parquet"]["rows"] == 3
+    assert manifest["prepared"]["new_system_as_published.parquet"]["rows"] == 3
 
 
 def test_failed_run_is_logged_too(raw, catalog):
@@ -501,6 +526,80 @@ def test_failed_run_is_logged_too(raw, catalog):
     run(raw, catalog)
     entry = run_log(raw)[0]
     assert entry["failed"] == ["legacy_2015"]
+
+
+# Folders: raw/311 holds the downloads only, for DVC; the state and the parquet
+# live elsewhere. The DAG runs one system per task.
+
+
+def snapshot(folder):
+    return {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in sorted(folder.iterdir())}
+
+
+def test_raw_folder_holds_only_the_downloads(raw, catalog):
+    run(raw, catalog)
+    run(raw, catalog, when=DAY0 + timedelta(days=1))
+    assert sorted(p.name for p in raw.iterdir()) == sorted(s.filename for s in SOURCES)
+    assert sorted(p.name for p in state_dir(raw).iterdir()) == [ing.MANIFEST, ing.RUN_LOG]
+    assert [p.name for p in interim_dir(raw).iterdir()] == ["new_system_as_published.parquet"]
+
+
+def test_a_run_with_nothing_new_leaves_raw_untouched(raw, catalog):
+    run(raw, catalog)
+    before = snapshot(raw)
+    run(raw, catalog, when=DAY0 + timedelta(hours=2))  # nothing due
+    run(raw, catalog, when=DAY0 + timedelta(days=30))  # all due, nothing changed
+    assert catalog.downloads.count("rnew") == 2  # fetched again, same bytes
+    assert snapshot(raw) == before
+
+
+def test_state_left_in_raw_by_the_old_layout_is_read_not_changed(raw, catalog, caplog):
+    run(raw, catalog, state_dir=raw)  # where the state lived before it moved
+    old = (raw / ing.MANIFEST).read_bytes()
+    catalog.lookups.clear()
+    catalog.downloads.clear()
+    with caplog.at_level(logging.WARNING, logger="ingest_311"):
+        result = run(raw, catalog, when=DAY0 + timedelta(hours=2))
+    assert set(actions(result).values()) == {"skipped"}
+    assert catalog.lookups == [] and catalog.downloads == []  # nothing downloaded again
+    assert (raw / ing.MANIFEST).read_bytes() == old
+    assert json.loads((state_dir(raw) / ing.MANIFEST).read_text())["sources"] == json.loads(old)["sources"]
+    assert "move it there" in caplog.text
+
+
+def test_system_runs_one_system_and_both_share_the_state(raw, catalog):
+    legacy = run(raw, catalog, system="legacy")
+    assert actions(legacy) == {s.source: "downloaded" for s in SOURCES if s.system == "legacy"}
+    assert legacy["prepared"] == [] and not (raw / "new_system.csv").exists()
+    new = run(raw, catalog, system="new_system")
+    assert actions(new) == {"new_system": "downloaded"}
+    assert [p["action"] for p in new["prepared"]] == ["written"]
+    assert sorted(json.loads((state_dir(raw) / ing.MANIFEST).read_text())["sources"]) == sorted(s.source for s in SOURCES)
+    assert len(run_log(raw)) == 2
+
+
+def test_unknown_system_is_rejected(raw, catalog):
+    with pytest.raises(ValueError, match="unknown system"):
+        run(raw, catalog, system="old")
+
+
+def test_new_system_download_needs_the_columns_new_311_reads(raw, catalog):
+    run(raw, catalog)
+    good = (raw / "new_system.csv").read_bytes()
+    catalog.files["rnew"] = b"case_id,open_date\nBCS-1,2026-07-14 10:56:30+00\n"
+    result = run(raw, catalog, when=DAY0 + timedelta(days=1))
+    row = next(r for r in result["files"] if r["source"] == "new_system")
+    assert row["action"] == "failed" and "service_name" in row["reason"]
+    assert (raw / "new_system.csv").read_bytes() == good
+
+
+def test_a_parquet_written_to_another_folder_does_not_count(raw, catalog, tmp_path):
+    run(raw, catalog)
+    catalog.files["rnew"] = NEW_CSV + b"BCS-4,2026-10-15 01:00:00+00,,Pothole,Roxbury\n"
+    run(raw, catalog, when=DAY0 + timedelta(days=1), prepared_dir=tmp_path / "slice")  # a DAG slice
+    result = run(raw, catalog, when=DAY0 + timedelta(days=1, hours=1))  # nothing due
+    assert result["prepared"][0]["action"] == "written"
+    assert len(pd.read_parquet(prepared(raw))) == 4
 
 
 # Cloud Storage: raw data goes there through DVC only, never from this script
@@ -573,9 +672,9 @@ def write_sources(tmp_path, sources=SOURCES):
 
 
 def test_end_to_end_cli(tmp_path, raw, catalog_server, capsys):
-    args =["--raw-dir", str(raw), "--sources", str(write_sources(tmp_path)), "--base-url", catalog_server.base]
+    args = [*cli_dirs(raw), "--sources", str(write_sources(tmp_path)), "--base-url", catalog_server.base]
 
-    assert ing.main(args) == 0
+    ing.main(args)  # returns on success; a failure raises SystemExit(1)
     out = capsys.readouterr().out
     assert out.count("downloaded") == 4
     for s in SOURCES:
@@ -585,25 +684,27 @@ def test_end_to_end_cli(tmp_path, raw, catalog_server, capsys):
     df, reports = read_years(raw, [2015, 2025, 2026])
     assert len(df) == 3 + 4 + 5
     assert all(r.dropped_rows == 0 for r in reports)
-    assert len(pd.read_parquet(raw / "prepared" / "new_system.parquet")) == 3
+    assert len(pd.read_parquet(prepared(raw))) == 3
 
-    assert ing.main(args) == 0
+    ing.main(args)
     assert "downloaded" not in capsys.readouterr().out
     assert len(run_log(raw)) == 2
     assert len(read_years(raw, [2015, 2025, 2026])[0]) == 12
 
 
 def test_end_to_end_dry_run(tmp_path, raw, catalog_server, capsys):
-    args = ["--raw-dir", str(raw), "--sources", str(write_sources(tmp_path)), "--base-url", catalog_server.base, "--dry-run"]
-    assert ing.main(args) == 0
+    args = [*cli_dirs(raw), "--sources", str(write_sources(tmp_path)), "--base-url", catalog_server.base, "--dry-run"]
+    ing.main(args)
     assert capsys.readouterr().out.count("would_download") == 4
-    assert not raw.exists()
+    assert not raw.exists() and not state_dir(raw).exists() and not interim_dir(raw).exists()
 
 
 def test_end_to_end_truncated_download_fails(tmp_path, raw, catalog_server, capsys):
     catalog_server.truncate.add("r2026")
-    args = ["--raw-dir", str(raw), "--sources", str(write_sources(tmp_path)), "--base-url", catalog_server.base]
-    assert ing.main(args) == 1
+    args = [*cli_dirs(raw), "--sources", str(write_sources(tmp_path)), "--base-url", catalog_server.base]
+    with pytest.raises(SystemExit) as exit_info:  # exit code 1 fails the Airflow task
+        ing.main(args)
+    assert exit_info.value.code == 1
     assert "FAILED: legacy_2026" in capsys.readouterr().err
     assert not (raw / "2026.csv").exists()
     assert (raw / "2015.csv").exists()
@@ -614,7 +715,9 @@ def test_end_to_end_missing_and_unsuccessful_resources(raw, catalog_server):
         ing.Source("gone", "not-there", "gone.csv", "legacy", 1, "catalog"),
         ing.Source("bad", "unsuccessful", "bad.csv", "legacy", 1, "catalog"),
     ]
-    result = ing.run_ingestion(raw, sources, ing.CkanClient(catalog_server.base), now=DAY0)
+    result = ing.run_ingestion(
+        raw, sources, ing.CkanClient(catalog_server.base), now=DAY0, state_dir=state_dir(raw), prepared_dir=interim_dir(raw)
+    )
     reasons = {r["source"]: r["reason"] for r in result["files"]}
     assert result["failed"] == ["gone", "bad"]
     assert "404" in reasons["gone"]
@@ -642,6 +745,8 @@ def test_redirect_drops_only_default_ports(location, expected):
 
 
 def test_end_to_end_redirect_sends_host_from_location(raw, catalog_server):
-    result = ing.run_ingestion(raw, SOURCES[:1], ing.CkanClient(catalog_server.base), now=DAY0)
+    result = ing.run_ingestion(
+        raw, SOURCES[:1], ing.CkanClient(catalog_server.base), now=DAY0, state_dir=state_dir(raw), prepared_dir=interim_dir(raw)
+    )
     assert actions(result) == {"legacy_2015": "downloaded"}
     assert catalog_server.hosts[-1] == urllib.parse.urlsplit(catalog_server.base).netloc
