@@ -446,7 +446,7 @@ Outputs in `Data-Pipeline/data/processed/stats/` (versioned with the rest of `Da
 - `drift.json`: shifts from the previous run beyond the thresholds in `Data-Pipeline/config/stats_thresholds.csv`, plus every schema change (a column added, removed or retyped).
 - `data_docs/index.html`: Great Expectations data docs showing the same numbers. Open it in a browser.
 
-The run compares with the previous run's files before replacing them. If nothing changed it writes nothing, so a rerun on the same data leaves the folder as it was. Shifts are printed and saved but do not fail the run; the validation steps (#17) are what stop a run. To change a threshold, edit the config in a reviewed PR. A table that does not exist yet (`daily_counts` before #15 merges) is skipped and reported.
+The run compares with the previous run's files before replacing them, and builds the data docs before it writes any JSON, so a failed run leaves the previous files as they were. If the statistics, the thresholds and the data docs are all unchanged it writes nothing, so a rerun on the same data leaves the folder as it was. `drift.json` keeps the statistics it compared against (`baselines`), so after a threshold change a rerun on the same data checks that same comparison again with the new values. Shifts are printed and saved but do not fail the run; the validation steps (#17) are what stop a run. To change a threshold, edit the config in a reviewed PR. A table that does not exist yet (`daily_counts` before #15 merges) is skipped and reported.
 
 ## Project 1 infrastructure (Terraform)
 

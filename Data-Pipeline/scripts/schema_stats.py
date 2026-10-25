@@ -29,18 +29,18 @@ from pathlib import Path
 
 import pandas as pd
 
-THRESHOLDS = {
-    "row_count_change_pct": "rows change by more than this percent",
-    "missing_change_points": "a column's missing share moves by more than this many points",
-    "mean_shift_std": "a numeric mean moves by more than this many of the previous standard deviations",
-    "category_share_change_points": "a category's share moves by more than this many points",
-}
+# What each one means is in the note column of Data-Pipeline/config/stats_thresholds.csv.
+THRESHOLDS = ("row_count_change_pct", "missing_change_points", "mean_shift_std", "category_share_change_points")
 MAX_CATEGORIES = 50  # columns with more distinct values (ids, addresses) get no shares
 DATE_COLUMNS = ("open_dt", "date")
 # In a count table every unit and group has the same number of rows, so category
 # shares are weighted by this column there: a storm group's share of requests.
 WEIGHT_COLUMN = "requests"
 DIGITS = 4
+# Means of tiny tables (a one-day slice) move a lot for no reason, so they are not compared.
+MIN_ROWS_FOR_MEAN = 30
+# With a constant column (std 0) any change is infinite in std units; flag only a real move.
+CONSTANT_MEAN_FLOOR = 0.01
 
 logging.getLogger("great_expectations").setLevel(logging.WARNING)
 
@@ -89,7 +89,7 @@ def table_stats(df: pd.DataFrame) -> dict:
              "category_shares_of": WEIGHT_COLUMN if weight is not None else "rows"}
     date = next((c for c in DATE_COLUMNS if c in df.columns), None)
     if date is not None:
-        years = df[date].dt.year.value_counts().sort_index()
+        years = pd.to_datetime(df[date]).dt.year.value_counts().sort_index()
         stats["rows_per_year"] = {str(int(y)): int(n) for y, n in years.items()}
     return stats
 
@@ -117,16 +117,20 @@ def drift(previous: dict, current: dict, thresholds: dict[str, float]) -> list[d
         moved = abs((new[column]["missing_pct"] or 0) - (old[column]["missing_pct"] or 0))
         if moved > thresholds["missing_change_points"]:
             flag("missing_share", column, old[column]["missing_pct"], new[column]["missing_pct"], f"{moved:.2f} points")
+        if column in previous["categories"] and column not in current["categories"]:
+            # A corrupted unit or location column would look like this: too many values to have shares.
+            flag("categories_lost", column, len(previous["categories"][column]), None, f"now more than {MAX_CATEGORIES} distinct values")
 
     for column in sorted(set(previous["numeric"]) & set(current["numeric"])):
         a, b = previous["numeric"][column], current["numeric"][column]
-        if a["mean"] is None or b["mean"] is None:
+        if a["mean"] is None or b["mean"] is None or before_rows < MIN_ROWS_FOR_MEAN:
             continue
         spread = a["std"] or 0.0
         shift = abs(b["mean"] - a["mean"])
-        if (spread and shift / spread > thresholds["mean_shift_std"]) or (not spread and shift):
-            detail = f"{shift / spread:.2f} previous std" if spread else "mean moved and the previous std was 0"
-            flag("mean_shift", column, a["mean"], b["mean"], detail)
+        if spread and shift / spread > thresholds["mean_shift_std"]:
+            flag("mean_shift", column, a["mean"], b["mean"], f"{shift / spread:.2f} previous std")
+        elif not spread and shift > CONSTANT_MEAN_FLOOR * max(abs(a["mean"]), 1.0):
+            flag("mean_shift", column, a["mean"], b["mean"], "mean moved and the previous std was 0")
 
     for column in sorted(set(previous["categories"]) & set(current["categories"])):
         a, b = previous["categories"][column], current["categories"][column]
@@ -147,8 +151,18 @@ def build_data_docs(frames: dict[str, pd.DataFrame], stats: dict[str, dict], sit
     import great_expectations as gx
     import great_expectations.expectations as gxe
 
+    # Built next to the old site and swapped in at the end, so a failure leaves the old site in place.
+    building = site.with_name(f".{site.name}.building")
+    shutil.rmtree(building, ignore_errors=True)
+    with tempfile.TemporaryDirectory(prefix="gx-") as root:
+        _render(gx, gxe, root, frames, stats, building)
     shutil.rmtree(site, ignore_errors=True)
-    context = gx.get_context(mode="file", project_root_dir=tempfile.mkdtemp(prefix="gx-"))
+    building.rename(site)
+    return site / "index.html"
+
+
+def _render(gx, gxe, root: str, frames: dict[str, pd.DataFrame], stats: dict[str, dict], site: Path) -> None:
+    context = gx.get_context(mode="file", project_root_dir=root)
     context.variables.progress_bars = {"globally": False}
     context.add_data_docs_site(site_name="stats", site_config={
         "class_name": "SiteBuilder",
@@ -179,11 +193,15 @@ def build_data_docs(frames: dict[str, pd.DataFrame], stats: dict[str, dict], sit
             failed = [r.expectation_config.type for r in result.results if not r.success]
             raise RuntimeError(f"data docs checks for {definition.name} did not pass: {failed}")
     context.build_data_docs(site_names=["stats"])
-    return site / "index.html"
 
 
 def run(tables: dict[str, Path], thresholds: dict[str, float], out_dir: Path, docs: bool = True) -> dict:
-    """Write each table's statistics and the drift flags when anything changed. Returns what happened."""
+    """Write each table's statistics and the drift flags when anything changed. Returns what happened.
+
+    A table is compared with its previous statistics, or, when those are the same
+    as now, with the baseline the previous run compared against (kept in
+    drift.json), so a threshold change re-checks the same comparison.
+    """
     present = {name: path for name, path in tables.items() if path.exists()}
     skipped = sorted(set(tables) - set(present))
     current, frames = {}, {}
@@ -199,21 +217,31 @@ def run(tables: dict[str, Path], thresholds: dict[str, float], out_dir: Path, do
         path = out_dir / f"{name}.json"
         if path.exists():
             previous[name] = json.loads(path.read_text())
+    report_path, site = out_dir / "drift.json", out_dir / "data_docs"
+    last = json.loads(report_path.read_text()) if report_path.exists() else {}
 
-    if current and all(previous.get(name) == stats for name, stats in current.items()):
+    same_stats = bool(current) and all(previous.get(name) == stats for name, stats in current.items())
+    docs_there = not docs or (site / "index.html").exists()
+    if same_stats and last.get("thresholds") == thresholds and docs_there:
         return {"changed": False, "skipped": skipped, "flags": []}
 
-    flags = []
+    baselines = {}
     for name, stats in current.items():
-        if name in previous:
-            flags += [{"table": name, **f} for f in drift(previous[name], stats, thresholds)]
+        if name in previous and previous[name] != stats:
+            baselines[name] = previous[name]
+        elif name in last.get("baselines", {}):
+            baselines[name] = last["baselines"][name]
+    flags = [{"table": name, **f} for name, base in baselines.items() for f in drift(base, current[name], thresholds)]
+    first_run = sorted(set(current) - set(baselines))
+
+    # Docs first and the JSON last, so a failed docs build leaves the previous run's files as they were.
+    index = build_data_docs(frames, current, site) if docs and frames else None
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, stats in current.items():
         (out_dir / f"{name}.json").write_text(json.dumps(stats, indent=2, sort_keys=True) + "\n")
-    first_run = sorted(set(current) - set(previous))
-    report = {"compared": sorted(previous), "first_run": first_run, "skipped": skipped, "thresholds": thresholds, "flags": flags}
-    (out_dir / "drift.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    index = build_data_docs(frames, current, out_dir / "data_docs") if docs and frames else None
+    report = {"compared": sorted(baselines), "first_run": first_run, "skipped": skipped, "thresholds": thresholds,
+              "flags": flags, "baselines": baselines}
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     return {"changed": True, "skipped": skipped, "flags": flags, "first_run": first_run, "data_docs": index}
 
 

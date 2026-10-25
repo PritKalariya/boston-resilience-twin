@@ -423,7 +423,7 @@ def run_step(step: str, days: DateRange, root: Path = REPO, run_id: str = "manua
                 before, kept = trim_to_range(interim / name, column, days)
                 log.info("run %s task %s: kept %s of %s rows of %s in %s", run_id, step, f"{kept:,}", f"{before:,}", name, days.label)
         rows_in = sum(count_rows(path) for path in plan.files.data_in) if plan.files.data_in else None
-        rows_out = sum(count_rows(path) for path in plan.files.data_out)
+        rows_out = sum(count_rows(path) for path in plan.files.data_out) if plan.files.data_out else None
     except Exception as e:
         log.error("run %s task %s failed: %s: %s", run_id, step, type(e).__name__, e)
         raise

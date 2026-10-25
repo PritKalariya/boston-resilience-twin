@@ -136,3 +136,83 @@ def test_thresholds_config(tmp_path):
     with pytest.raises(ValueError, match="missing thresholds"):
         load_thresholds(short)
 
+
+
+def test_a_failed_docs_build_keeps_the_old_files_and_the_next_run_rebuilds(tmp_path, monkeypatch):
+    import schema_stats
+
+    out = tmp_path / "stats"
+    table = write(tmp_path, located(100))
+    run({"located": table}, THRESHOLDS, out)
+    old_json = (out / "located.json").read_text()
+    real_build = schema_stats.build_data_docs
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("docs build failed")
+
+    monkeypatch.setattr(schema_stats, "build_data_docs", broken)
+    with pytest.raises(RuntimeError, match="docs build failed"):
+        run({"located": write(tmp_path, located(200))}, THRESHOLDS, out)
+    assert (out / "located.json").read_text() == old_json
+    assert (out / "data_docs" / "index.html").exists()
+
+    monkeypatch.setattr(schema_stats, "build_data_docs", real_build)
+    result = run({"located": write(tmp_path, located(200))}, THRESHOLDS, out)
+    assert result["changed"] and json.loads((out / "located.json").read_text())["rows"] == 200
+
+
+def test_docs_are_built_after_a_no_docs_run(tmp_path):
+    out = tmp_path / "stats"
+    table = write(tmp_path, located())
+    run({"located": table}, THRESHOLDS, out, docs=False)
+    result = run({"located": table}, THRESHOLDS, out)
+    assert result["changed"]
+    assert (out / "data_docs" / "index.html").exists()
+    assert not run({"located": table}, THRESHOLDS, out)["changed"]
+
+
+def test_a_threshold_change_rechecks_the_same_comparison(tmp_path):
+    out = tmp_path / "stats"
+    run({"located": write(tmp_path, located(100))}, THRESHOLDS, out, docs=False)
+    grown = write(tmp_path, located(200))
+    assert run({"located": grown}, THRESHOLDS, out, docs=False)["flags"]
+    looser = {**THRESHOLDS, "row_count_change_pct": 500.0}
+    result = run({"located": grown}, looser, out, docs=False)
+    report = json.loads((out / "drift.json").read_text())
+    assert result["changed"] and result["flags"] == []
+    assert report["thresholds"] == looser and report["compared"] == ["located"]
+    assert report["baselines"]["located"]["rows"] == 100
+
+
+def test_the_great_expectations_project_is_cleaned_up(tmp_path, monkeypatch):
+    import tempfile
+
+    scratch = tmp_path / "tmp"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    run({"located": write(tmp_path, located())}, THRESHOLDS, tmp_path / "stats")
+    assert list(scratch.iterdir()) == []
+
+
+def test_a_date_column_read_back_as_objects():
+    from datetime import date
+
+    df = pd.DataFrame({"date": [date(2024, 1, 1), date(2025, 1, 1)], "requests": [1, 2]})
+    assert table_stats(df)["rows_per_year"] == {"2024": 1, "2025": 1}
+
+
+def test_a_column_that_stops_being_categorical_is_flagged():
+    before = pd.DataFrame({"unit": ["East", "West"] * 50})
+    after = pd.DataFrame({"unit": [f"u{i}" for i in range(100)]})
+    flags = drift(table_stats(before), table_stats(after), THRESHOLDS)
+    assert [f["kind"] for f in flags] == ["categories_lost"]
+
+
+def test_mean_shifts_ignore_tiny_tables_and_noise_on_constant_columns():
+    small = drift(table_stats(pd.DataFrame({"x": [1.0, 2.0]})), table_stats(pd.DataFrame({"x": [9.0, 9.0]})), THRESHOLDS)
+    assert small == []
+    constant = pd.DataFrame({"x": [5.0] * 40})
+    nudged = drift(table_stats(constant), table_stats(constant.assign(x=5.0001)), THRESHOLDS)
+    moved = drift(table_stats(constant), table_stats(constant.assign(x=6.0)), THRESHOLDS)
+    assert nudged == []
+    assert [f["kind"] for f in moved] == ["mean_shift"]
