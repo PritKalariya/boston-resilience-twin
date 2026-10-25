@@ -11,14 +11,21 @@ class NetworkBlocked(RuntimeError):
     pass
 
 
+LOOPBACK = {"127.0.0.1", "::1"}
+
+
 # Tests use fixture files and fakes only, never a live API or Cloud Storage
-# (#21). Local Unix sockets stay allowed.
+# (#21). Local Unix sockets and loopback stay allowed: on Windows, which has no
+# AF_UNIX, socket.socketpair() and asyncio (gcsfs, used by DVC) connect over
+# 127.0.0.1.
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
     real_connect = socket.socket.connect
 
     def guarded_connect(sock, address):
         if sock.family == getattr(socket, "AF_UNIX", None):
+            return real_connect(sock, address)
+        if isinstance(address, tuple) and address[0] in LOOPBACK:
             return real_connect(sock, address)
         raise NetworkBlocked(f"test tried to connect to {address!r}; use a fixture file or a fake instead")
 

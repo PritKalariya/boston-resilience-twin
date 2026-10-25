@@ -191,8 +191,10 @@ once on a pull request, open Settings, Branches, the rule for `main`, tick
 `ci.yml` ever changes, update the required check too, or every pull request
 waits for a check that never reports.
 
-- **`NetworkBlocked: test tried to connect to ...`.** The test reaches the
-  internet. Save a small response under the test's fixtures, or patch in a
+- **`NetworkBlocked: test tried to look up ...` or `... tried to connect to ...`.**
+  The test reaches the internet; a request by host name usually fails at the
+  lookup. Connections to `127.0.0.1` and `::1` are allowed. Save a small
+  response under the test's fixtures, or patch in a
   fake (see `test_pipeline_steps.py`, which replaces `static_layers.download`),
   instead of calling the API.
 - **Lint fails with `F401` (unused import) or `F841` (unused variable).**
