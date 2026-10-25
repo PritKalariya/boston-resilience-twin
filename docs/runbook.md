@@ -65,9 +65,9 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Five tasks run scripts: `ingest_static_layers`, `parse_legacy_311`,
-  `parse_new_311`, `combine_311` and `spatial_join`.
-- The other 13 are placeholders. Each logs the issue that builds it
+- Six tasks run scripts: `ingest_static_layers`, `parse_legacy_311`,
+  `parse_new_311`, `combine_311`, `spatial_join` and `schema_and_statistics`.
+- The other 12 are placeholders. Each logs the issue that builds it
   (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
 - Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
   hand.
@@ -263,6 +263,23 @@ python Data-Pipeline/scripts/spatial_join.py
 ```
 
 The run adds `geoid20`, `unit` (the neighborhood a request is counted in) and `location`, and prints the share with no unit by year and system. `location` is `placed` or the reason there is no unit: `no_coordinates` (missing or not a number), `placeholder` (a default point listed in `Data-Pipeline/config/placeholder_locations.csv`, matched within about a metre), `outside_boston` (no 2020 tract) or `no_neighborhood` (tract 9815.02, which the city leaves out of every neighborhood). A latitude and longitude entered the wrong way round are swapped back and counted. If a new default point turns up (one spot holding thousands of requests with no neighborhood), add it to the placeholder file in a reviewed PR.
+
+## Schema and statistics (every run)
+
+`schema_stats.py` describes the processed tables on every run (#35): for each table, the schema (columns, types, share missing) and summary statistics (numeric spread, category shares, rows per year). In `daily_counts`, where every unit and group has the same number of rows, the category shares are shares of requests, so a storm group's share of the counts is tracked.
+
+```bash
+python Data-Pipeline/scripts/schema_stats.py            # located and daily_counts, into Data-Pipeline/data/processed/stats/
+python Data-Pipeline/scripts/schema_stats.py --no-docs  # skip the Great Expectations data docs
+```
+
+Outputs in `Data-Pipeline/data/processed/stats/` (versioned with the rest of `Data-Pipeline/data/` by DVC):
+
+- `<table>.json`: the schema and statistics. Replaced each run, so the previous run's numbers are the version before it.
+- `drift.json`: shifts from the previous run beyond the thresholds in `Data-Pipeline/config/stats_thresholds.csv`, plus every schema change (a column added, removed or retyped).
+- `data_docs/index.html`: Great Expectations data docs showing the same numbers. Open it in a browser.
+
+The run compares with the previous run's files before replacing them. If nothing changed it writes nothing, so a rerun on the same data leaves the folder as it was. Shifts are printed and saved but do not fail the run; the validation steps (#17) are what stop a run. To change a threshold, edit the config in a reviewed PR. A table that does not exist yet (`daily_counts` before #15 merges) is skipped and reported.
 
 ## Project 1 infrastructure (Terraform)
 

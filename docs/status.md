@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-24 by Srikarmk. Edit this file in the PR that changes the state.
+Updated: 2026-10-25 by Srikarmk. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -18,6 +18,7 @@ Week 2: Processing (due 2026-10-18)
 | #53 Policy for legacy rows after their category's switch date | Punith | 2026-10-20 | in review | ADR-021: keep. Setting `after_switch_policy` in `Data-Pipeline/config/processing.csv`, for #15 to apply; results below |
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | done | PR #52 merged; results below; new-system clock in ADR-020; flooding gap needs a team call |
 | #14 Spatial joins | Alekhya (built by Srikar for the Oct 25 deadline) | 2026-10-16 | in review | every request tagged with tract and unit by coordinates; 99.14% placed; results below |
+| #35 Schema and statistics every run | Srikar | 2026-10-22 | in review | schema, statistics and Great Expectations data docs of 311_located and daily_counts each run, drift against the previous run; results below |
 | #20 Airflow on the VM | Prit | 2026-10-18 | done | PR #59 merged. Airflow stack on airflow-vm (LocalExecutor, Postgres 16; ADR-016); UI by SSH tunnel only; VM stopped. Runbook: "Airflow on the VM". After #58 merges, run the update step in the runbook on the VM |
 | #23 Write ADRs 001, 009, 010, 011, 012 | Prit | 2026-10-18 | done | PR #65 merged; ADRs in docs/decisions/ |
 | #29 Verify teammate IAM | Prit | 2026-10-15 | done | PR #51 merged. All 6 members granted, plus `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start and SSH verified; VM stopped. |
@@ -83,6 +84,14 @@ Command: `python Data-Pipeline/scripts/static_layers.py` (add `--download` on a 
 | population_data_dictionary | | document | 286 variables |
 
 ACS demographics come from the city's 2025 population estimates (population on 2025-01-01, characteristics from ACS 2019 to 2023 5-year), so no Census API key is needed. They cover race and ethnicity (B03002), age (B01001), poverty (B17001), household income brackets (B19037), tenure (B25042), vehicles (B08201), language at home (C16001) and disability (S1810). There is no median household income column.
+
+## W3-4 results (2026-10-25)
+
+Command: `python Data-Pipeline/scripts/schema_stats.py`, the `schema_and_statistics` task after validation. For `311_located` (3,105,228 rows, 21 columns) and `daily_counts` (309,672 rows) it writes `<table>.json` (schema, share missing, numeric spread, category shares, rows per year), `drift.json` and Great Expectations data docs to `Data-Pipeline/data/processed/stats/`. About 7 seconds, 1.9 GB peak with the data docs (they get only the described columns; the whole table pushed it to 3.1 GB).
+
+- **Shifts are compared with the previous run's files** against `Data-Pipeline/config/stats_thresholds.csv`: rows change by more than 5%, a column's missing share moves by more than 2 points, a numeric mean moves by more than 0.5 of the previous standard deviation, a category's share moves by more than 2 points, and any column added, removed or retyped. They are flagged in `drift.json` and the log, not failed.
+- **Count tables track shares of requests.** In `daily_counts` every unit and group has the same number of rows, so its category shares are weighted by `requests`: snow_ice 56.831%, tree 40.1013%, flooding 3.0677%. Checked on a fake bad run (10% of rows dropped, tree requests tripled): flagged as a 10.0% row change, tree +26.86 points and snow_ice -25.51 points.
+- **Reruns change nothing.** A run whose statistics equal the previous run's writes nothing, so it works with DVC and #39's "a second run with no new data changes nothing". The history is the earlier versions of the files.
 
 ## W2-10 results (2026-10-21)
 

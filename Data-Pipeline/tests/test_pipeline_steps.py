@@ -84,7 +84,8 @@ def test_outputs_stay_in_the_run_folder(tmp_path, step, days):
     args = script_args(step, days, tmp_path)
     outputs = [Path(v) for flag, v in flag_values(args).items() if flag in OUTPUT_FLAGS]
     assert outputs
-    assert all(path.is_relative_to(run_paths(days, tmp_path).interim) for path in outputs)
+    paths = run_paths(days, tmp_path)
+    assert all(path.is_relative_to(paths.interim) or path.is_relative_to(paths.processed) for path in outputs)
     assert not any("gs://" in arg for arg in args)
 
 

@@ -107,6 +107,10 @@ python -m pytest Data-Pipeline/tests
 
 Use Python 3.12 (ADR-013): the pins come from the Airflow constraints for 3.12, and on other versions the install can fail or build packages from source. Without a system 3.12, `uv venv --python 3.12 --seed .venv && source .venv/bin/activate` creates one (`.venv/` is gitignored). A test command pinned to Python 3.12 comes with W3-7 (#38).
 
+## Data quality
+
+Every pipeline run checks the raw and processed data (#17) and writes a schema and summary statistics of the processed tables (#35): `Data-Pipeline/data/processed/stats/`, with Great Expectations data docs at `Data-Pipeline/data/processed/stats/data_docs/index.html` and the shifts from the previous run in `drift.json`. How to read them and change the thresholds: [Schema and statistics](docs/runbook.md#schema-and-statistics-every-run) in the runbook.
+
 ## Data and licenses
 
 Boston 311 data is published on Analyze Boston under the PDDL. NWS, NOAA, and Census data are U.S. government works. Weather data by [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0).
