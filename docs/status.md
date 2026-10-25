@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-24 by Srikarmk. Edit this file in the PR that changes the state.
+Updated: 2026-10-25 by Alekhya. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -25,6 +25,7 @@ Week 2: Processing (due 2026-10-18)
 | #48 Lifecycle rule for noncurrent versions on the data bucket | Prit | 2026-10-18 | done | PR #56 merged; noncurrent versions in the data bucket deleted after 30 days |
 | #9 Static layers | Alekhya | 2026-10-13 | done | PR #62 merged; results below |
 | #10 Decision: lock the modeling unit | Alekhya | 2026-10-13 | done | PR #66 merged; ADR-004 proposed (team sign-off pending): neighborhood x day, 24 tract-built neighborhoods, surge in any storm group |
+| #17 Validation suites (Great Expectations) | Alekhya | 2026-10-18 | in review | `validate_raw` and `validate_processed` run `validate_data.py` (GE 1.24.1); 259 raw and 55 processed checks pass on the 2026-10-20 data; injected UTC shift and missing column fail by name; results below |
 | #31 Repo layout and pipeline pins | Prit | 2026-10-16 | done | PR #58 merged; ADR-017: one shared Airflow stack at the root, each component mounts its `dags/` at `/opt/airflow/dags/<component>` in snake_case; `Data-Pipeline/requirements.txt` pinned, 94 tests pass in a clean Python 3.12 venv |
 | #69 Airflow image with every pipeline dependency | Prit | 2026-10-22 | done | PR #74 merged; ADR-022: every Airflow service runs `brt-airflow:local` from `airflow.Dockerfile`, the ADR-013 base image plus `Data-Pipeline/requirements.txt` under Airflow's constraints. Cold `docker compose up -d --build --wait` 1m37s (image build plus stack start, base image already pulled), cached `docker compose build` 1.0s, image 3.44 GB on disk against the base image's 3.22 GB. Great Expectations 1.24.1, Fairlearn 0.15.0 and dvc[gs] 3.67.1 all dry-run clean against the constraints with pandas 3.0.5. Unblocks #22 and #37 |
 
@@ -46,6 +47,16 @@ None.
 - **Climate Ready Boston flood layers are coastal only.** Most legacy flooding requests are catch basins (stormwater), which these maps do not cover. No stormwater flood layer is on Analyze Boston.
 - ~~**The Airflow image lacks the geo packages.**~~ Closed by #69 (ADR-022): the Airflow services now run `brt-airflow:local`, which installs `Data-Pipeline/requirements.txt`, so geopandas, shapely, pyogrio and pyproj are importable in a task. The cost is that a requirements change needs `docker compose up -d --build --wait` before the next run.
 - The 2026-10-20 export moves the first new-system date of Broken Park Equipment (not storm related) from 2026-03-10 to 2026-01-09. `docs/data/change-points.csv` is not updated in #10; the next `map_311.py` run in a PR should refresh it.
+
+## W2-5 results (2026-10-25)
+
+Commands: `python Data-Pipeline/scripts/validate_data.py --stage raw` and `--stage processed` (also run through `pipeline_steps.run_step`, the DAG's entry point). Data: Analyze Boston files downloaded 2026-10-20, `311_combined.parquet` and `311_located.parquet` from `map_311.py` and `spatial_join.py`.
+
+- Raw: 259 of 259 checks pass in 15 s (12 legacy files and the new-system export). Processed: 55 of 55 pass in 7 to 10 s.
+- In Airflow (image rebuilt with GE 1.24.1): the `daily_pipeline` slice 2025-01-01 to 2025-12-31 succeeded, all 19 tasks; `validate_raw` 39 of 39 checks and `validate_processed` 55 of 55, results in the slice's `interim/validation/`.
+- Worst values against the bounds in `Data-Pipeline/config/validation_bounds.csv`: median open hour 12.4 to 13.5 (bound 10 to 16; a 4 hour shift puts the earliest file at 16.4); coordinates inside Boston 98.0% in 2015 (bound 95%); placed share 97.9% in 2015 (bound 95%); open times parse 100% (bound 99.9%); legacy rows equal the published counts (bound 99%).
+- Injected bad files fail by name in the tests (`test_validate_data.py`): a 4 or 5 hour UTC shift (raw legacy, raw new system, combined), a missing column, a `-04` suffix, unparseable dates, a truncated file, swapped coordinates, an unknown unit or storm group, duplicate ids, a future date, lost rows and a low placed share.
+- Not yet covered: daily counts (#15, PR #82) and labels (#16) have no suite until they merge; add one in those PRs or a follow-up. #34 can name the failed check from `ValidationFailed` or the JSON; #35 builds statistics on top.
 
 ## W1-10 results (2026-10-20)
 

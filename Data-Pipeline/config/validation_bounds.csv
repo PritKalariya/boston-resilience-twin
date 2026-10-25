@@ -1,0 +1,8 @@
+name,value,note
+open_dt_parsed_min,0.999,share of rows whose open time parses (W1-5: a format bug once blanked 48%)
+new_offset_suffix_min,1.0,share of new-system open_date values ending in +00 (ADR-020 reads them as Boston local)
+median_open_hour_min,10,median open time in hours after midnight; legacy 12.6 and new system 13.5 in 2026-10
+median_open_hour_max,16,real UTC would move the median 4 to 5 hours later (about 17.5 to 18.5)
+published_rows_min,0.99,legacy rows over the count in published_311_counts.csv
+in_boston_min,0.95,share of raw rows with coordinates inside BOSTON_BOUNDS; about 99% in 2026-10
+placed_per_year_min,0.95,share of requests placed in a unit in every year of 311_located (worst 2015 at about 98%)

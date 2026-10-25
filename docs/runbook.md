@@ -65,9 +65,10 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Five tasks run scripts: `ingest_static_layers`, `parse_legacy_311`,
-  `parse_new_311`, `combine_311` and `spatial_join`.
-- The other 13 are placeholders. Each logs the issue that builds it
+- Seven tasks run scripts: `ingest_static_layers`, `validate_raw`,
+  `parse_legacy_311`, `parse_new_311`, `combine_311`, `spatial_join` and
+  `validate_processed`.
+- The other 11 are placeholders. Each logs the issue that builds it
   (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
 - Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
   hand.
@@ -100,6 +101,49 @@ Each task's log, with everything its script printed, is in
 On a laptop (2026-10-21), a one-year slice took 40 seconds and the full
 build about 2.5 minutes. The full build peaked at 3.4 GiB in the scheduler
 container, with `map_311.py` before #68.
+
+### Data validation (Great Expectations)
+
+`validate_raw` runs before parsing and `validate_processed` after the
+processing steps (#17). Both run `Data-Pipeline/scripts/validate_data.py`
+with the bounds in `Data-Pipeline/config/validation_bounds.csv`; change a
+bound there in a reviewed PR, not in the code. Usage analytics are switched
+off (`GX_ANALYTICS_ENABLED=False`).
+
+- **Raw:** each legacy yearly file in the run's range, one at a time, and the
+  new-system export: expected columns, case ids present and unique, open
+  times that parse, the `+00` suffix on new-system times, the median open hour
+  (catches a switch to real UTC, ADR-020), the row count against
+  `published_311_counts.csv`, and coordinates inside Boston.
+- **Processed:** `311_combined.parquet` and `311_located.parquet`: expected
+  columns, unique case ids, known `source_system`, `storm_group`, `match`,
+  `location` and `unit` values, open times from 2015-01-01 to the run date,
+  the median open hour per system, the same row count in both tables, and the
+  share of requests placed in every year.
+
+A failed check fails the task, so nothing after it runs. The task log ends
+with `ValidationFailed: <n> <stage> checks failed: <table>: <check>(<column>)
+observed <value>`, and every result is in
+`Data-Pipeline/data/interim/validation/raw.json` or `processed.json` (for a
+slice, under its folder in `Data-Pipeline/data/slices/`). To check by hand:
+
+```bash
+python Data-Pipeline/scripts/validate_data.py --stage raw
+python Data-Pipeline/scripts/validate_data.py --stage processed
+```
+
+What to do when one fails:
+
+- **`expect_column_to_exist` on a header.** The city renamed or dropped a
+  column. Check the published file before changing any parser.
+- **`expect_column_median_to_be_between(open_hour)` or `offset_00`.** The
+  new-system clock may have changed. Rerun `map_311.check_clock` (it runs in
+  `combine_311`) and read ADR-020 before changing `new_311.CLOCK`.
+- **`expect_table_row_count_to_be_between` on a legacy file.** The download
+  is truncated or the city revised the file. Download it again, and update
+  `published_311_counts.csv` in a PR only if the city's count changed.
+- **`placed_share` or `in_boston`.** Coordinates went missing or were swapped
+  for many rows; look at the year in the JSON before rerunning.
 
 - **`ingest_static_layers` fails with `No module named 'geopandas'`.** The
   containers run an image built before the geo packages were added (ADR-022).

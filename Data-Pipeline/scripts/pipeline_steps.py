@@ -39,6 +39,8 @@ SCRIPTS = {
     "parse_new_311": "new_311",
     "combine_311": "map_311",
     "spatial_join": "spatial_join",
+    "validate_raw": "validate_data",
+    "validate_processed": "validate_data",
 }
 # Task id -> the issue that builds it; a placeholder in the DAG until then.
 PLANNED = {
@@ -49,10 +51,8 @@ PLANNED = {
     "ingest_nws_alerts": "#7",
     "ingest_tides": "#7",
     "ingest_open_meteo": "#8",
-    "validate_raw": "#17",
     "daily_counts": "#15",
     "labels_and_features": "#16",
-    "validate_processed": "#17",
     "schema_and_statistics": "#35",
     "bias_slicing": "#32",
 }
@@ -171,6 +171,23 @@ def script_args(step: str, days: DateRange, root: Path = REPO) -> list[str]:
             "--neighborhoods", interim / "static" / "neighborhoods_by_tract20.parquet",
             "--placeholders", root / "Data-Pipeline" / "config" / "placeholder_locations.csv",
             "--out", interim / "311_located.parquet",
+        ],
+        "validate_raw": [
+            "--stage", "raw",
+            "--config", root / "Data-Pipeline" / "config" / "validation_bounds.csv",
+            "--raw-dir", raw / "311",
+            "--years", *days.legacy_years,
+            "--published", root / "Data-Pipeline" / "config" / "published_311_counts.csv",
+            "--out", interim / "validation" / "raw.json",
+        ],
+        "validate_processed": [
+            "--stage", "processed",
+            "--config", root / "Data-Pipeline" / "config" / "validation_bounds.csv",
+            "--combined", interim / "311_combined.parquet",
+            "--located", interim / "311_located.parquet",
+            "--neighborhoods", interim / "static" / "neighborhoods_by_tract20.parquet",
+            *(["--latest", days.end.isoformat()] if days.end else []),
+            "--out", interim / "validation" / "processed.json",
         ],
     }[step]
     return [str(arg) for arg in args]
