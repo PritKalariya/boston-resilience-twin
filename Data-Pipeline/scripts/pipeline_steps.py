@@ -7,8 +7,10 @@ without loading pandas or geopandas.
 
 A real step calls a pipeline script's own main() with the arguments it would
 get on the command line (run_script), so the scripts stay unchanged and the
-DAG and the dvc.yaml stages (#18) share one entry point per script. Every
-other task is a placeholder until the issue in PLANNED builds it.
+DAG and the dvc.yaml stages (#18) share one entry point per script. Each real
+step is one block in step_plan: its arguments, the files behind them and what
+to do when an input is missing. Every other task is a placeholder until the
+issue in PLANNED builds it.
 
 A slice keeps only its days, in Boston local time (new-system times are
 already local, ADR-020): legacy rows right after parsing, and the combined
@@ -19,13 +21,18 @@ same rows as the full build has for those days.
 
 Logging and failures (#36): every task logs one line with its run id, rows
 in and rows out (log_task). A real step fails before its script runs when an
-input file is missing or empty (InputError), and a script error is logged with
-the run and the task before it is raised again unchanged. Tasks in NETWORK
-retry; the others fail at once, and their failure alert comes from alerts.py.
+input file is missing or empty (InputError), and the DAG fails such a task
+without retrying, since a retry cannot fix it. A step's outputs are deleted
+before its script runs, so a file left by an earlier run cannot pass for new
+output, and empty files in a download folder are deleted so the download runs
+again. A script error is logged with the run and the task before it is raised
+again unchanged. Tasks in NETWORK retry; the others fail at once, and their
+failure alert comes from alerts.py.
 """
 
 from __future__ import annotations
 
+import csv
 import importlib
 import logging
 import sys
@@ -72,21 +79,15 @@ TRIM = {
     "combine_311": [("311_combined.parquet", "open_dt")],
 }
 
-# Tasks that fetch from the network retry: 5 minutes, then 10. The placeholders
-# are listed too, so #6, #7 and #8 get the same retries when they fill them.
+# Tasks that fetch from the network retry twice. Airflow's exponential backoff
+# adds a random spread, so the waits are about 5 to 10 minutes and then 10 to 15
+# (capped). The placeholders are listed too, so #6, #7 and #8 get the same
+# retries when they fill them.
 NETWORK = {task for task in (*SCRIPTS, *PLANNED) if task.startswith("ingest_")}
 RETRIES = 2
 RETRY_DELAY = timedelta(minutes=5)
-RETRY_BACKOFF = 2.0  # each retry waits twice as long as the one before
+RETRY_BACKOFF = 2.0  # each retry's base wait is twice the one before
 MAX_RETRY_DELAY = timedelta(minutes=15)
-
-# What to do when a real step's input is missing or empty.
-HINTS = {
-    "ingest_static_layers": "Restore Data-Pipeline/config/static_layers.csv from git.",
-    "parse_legacy_311": "Put the yearly legacy 311 files in Data-Pipeline/data/raw/311/ (by hand until #6 lands).",
-    "parse_new_311": "Put the new-system export in Data-Pipeline/data/raw/311/ (by hand until #6 lands).",
-    "combine_311": "Run parse_legacy_311 and parse_new_311 for the same range first.",
-}
 
 
 class InputError(Exception):
@@ -164,87 +165,104 @@ def run_paths(days: DateRange, root: Path = REPO) -> RunPaths:
     return RunPaths(raw=data / "raw", interim=base / "interim", processed=base / "processed")
 
 
-def script_args(step: str, days: DateRange, root: Path = REPO) -> list[str]:
-    """Command-line arguments of a real step. Every path is explicit, because the
-    scripts' defaults are relative to the working directory."""
-    if step not in SCRIPTS:
-        raise ValueError(f"no script step {step!r}; real steps: {sorted(SCRIPTS)}")
-    paths = run_paths(days, root)
-    raw, interim = paths.raw, paths.interim
-    args = {
-        "ingest_static_layers": [
-            "--config", root / "Data-Pipeline" / "config" / "static_layers.csv",
-            "--raw-dir", raw / "static",
-            "--out-dir", interim / "static",
-            "--manifest", interim / "static-layers.csv",
-            "--download",
-        ],
-        "parse_legacy_311": [
-            "--raw-dir", raw / "311",
-            "--years", *days.legacy_years,
-            "--out", interim / "legacy_311.parquet",
-        ],
-        "parse_new_311": [
-            "--raw", raw / "311" / "new_system.csv",
-            "--out", interim / "new_311.parquet",
-        ],
-        "combine_311": [
-            "--legacy", interim / "legacy_311.parquet",
-            "--new", interim / "new_311.parquet",
-            "--map", root / "docs" / "data" / "category-map.csv",
-            "--out", interim / "311_combined.parquet",
-            "--change-points", interim / "change-points.csv",
-        ],
-        "spatial_join": [
-            "--combined", interim / "311_combined.parquet",
-            "--tracts", interim / "static" / "tracts_2020.parquet",
-            "--neighborhoods", interim / "static" / "neighborhoods_by_tract20.parquet",
-            "--placeholders", root / "Data-Pipeline" / "config" / "placeholder_locations.csv",
-            "--out", interim / "311_located.parquet",
-        ],
-    }[step]
-    return [str(arg) for arg in args]
-
-
 @dataclass(frozen=True)
 class StepFiles:
-    """A real step's files: data in and out are counted as rows in and out;
-    config in is required but not counted."""
+    """A real step's files. data_in and data_out are counted as rows in and out;
+    config_in (config files and reference layers) is required but not counted."""
 
     data_in: list[Path] = field(default_factory=list)
     config_in: list[Path] = field(default_factory=list)
     data_out: list[Path] = field(default_factory=list)
 
 
-def step_files(step: str, days: DateRange, root: Path = REPO) -> StepFiles:
-    """The files behind script_args. The static layers' raw files are not inputs:
-    the step downloads the ones that are missing."""
+@dataclass(frozen=True)
+class StepPlan:
+    """One real step in one place: the script's arguments, the files behind them,
+    what to do when an input is missing, and a download folder whose empty files
+    are fetched again."""
+
+    args: list
+    files: StepFiles
+    hint: str
+    refetch: Path | None = None
+
+
+def configured_layers(config: Path) -> list[str]:
+    """Static layers that static_layers.py writes a parquet file for (vector and table)."""
+    if not config.is_file():
+        return []
+    with config.open(newline="", encoding="utf-8-sig") as f:
+        return [row["name"] for row in csv.DictReader(f) if row.get("kind") in ("vector", "table")]
+
+
+def step_plan(step: str, days: DateRange, root: Path = REPO) -> StepPlan:
+    """The table of real steps. Each path is named once and used for the arguments
+    and the checks, so a step that #6, #7, #8 or #15 adds is one more block. Every
+    path is explicit, because the scripts' defaults are relative to the working
+    directory."""
+    if step not in SCRIPTS:
+        raise ValueError(f"no script step {step!r}; real steps: {sorted(SCRIPTS)}")
     paths = run_paths(days, root)
     raw, interim = paths.raw, paths.interim
-    return {
-        "ingest_static_layers": StepFiles(
-            config_in=[root / "Data-Pipeline" / "config" / "static_layers.csv"],
-            data_out=[interim / "static"],
-        ),
-        "parse_legacy_311": StepFiles(
-            data_in=[raw / "311" / f"{year}.csv" for year in days.legacy_years],
-            data_out=[interim / "legacy_311.parquet"],
-        ),
-        "parse_new_311": StepFiles(
-            data_in=[raw / "311" / "new_system.csv"],
-            data_out=[interim / "new_311.parquet"],
-        ),
-        "combine_311": StepFiles(
-            data_in=[interim / "legacy_311.parquet", interim / "new_311.parquet"],
-            config_in=[root / "docs" / "data" / "category-map.csv"],
-            data_out=[interim / "311_combined.parquet"],
-        ),
-    }[step]
+    config = root / "Data-Pipeline" / "config"
+    hint_311 = "(by hand until #6 lands)"
+    if step == "ingest_static_layers":
+        layers, raw_dir, out_dir = config / "static_layers.csv", raw / "static", interim / "static"
+        return StepPlan(
+            args=["--config", layers, "--raw-dir", raw_dir, "--out-dir", out_dir,
+                  "--manifest", interim / "static-layers.csv", "--download"],
+            files=StepFiles(config_in=[layers], data_out=[out_dir / f"{name}.parquet" for name in configured_layers(layers)]),
+            hint="Restore Data-Pipeline/config/static_layers.csv from git.",
+            refetch=raw_dir,
+        )
+    if step == "parse_legacy_311":
+        raw_dir, out = raw / "311", interim / "legacy_311.parquet"
+        return StepPlan(
+            args=["--raw-dir", raw_dir, "--years", *days.legacy_years, "--out", out],
+            files=StepFiles(data_in=[raw_dir / f"{year}.csv" for year in days.legacy_years], data_out=[out]),
+            hint=f"Put the yearly legacy 311 files in Data-Pipeline/data/raw/311/ {hint_311}.",
+        )
+    if step == "parse_new_311":
+        export, out = raw / "311" / "new_system.csv", interim / "new_311.parquet"
+        return StepPlan(
+            args=["--raw", export, "--out", out],
+            files=StepFiles(data_in=[export], data_out=[out]),
+            hint=f"Put the new-system export in Data-Pipeline/data/raw/311/ {hint_311}.",
+        )
+    if step == "combine_311":
+        legacy, new, out = interim / "legacy_311.parquet", interim / "new_311.parquet", interim / "311_combined.parquet"
+        category_map = root / "docs" / "data" / "category-map.csv"
+        return StepPlan(
+            args=["--legacy", legacy, "--new", new, "--map", category_map,
+                  "--out", out, "--change-points", interim / "change-points.csv"],
+            files=StepFiles(data_in=[legacy, new], config_in=[category_map], data_out=[out]),
+            hint="Run parse_legacy_311 and parse_new_311 for the same range first.",
+        )
+    # spatial_join (#14)
+    combined, out = interim / "311_combined.parquet", interim / "311_located.parquet"
+    tracts, hoods = interim / "static" / "tracts_2020.parquet", interim / "static" / "neighborhoods_by_tract20.parquet"
+    placeholders = config / "placeholder_locations.csv"
+    return StepPlan(
+        args=["--combined", combined, "--tracts", tracts, "--neighborhoods", hoods,
+              "--placeholders", placeholders, "--out", out],
+        files=StepFiles(data_in=[combined], config_in=[tracts, hoods, placeholders], data_out=[out]),
+        hint="Run combine_311 and ingest_static_layers for the same range first.",
+    )
 
 
-def check_inputs(step: str, files: StepFiles) -> None:
+def script_args(step: str, days: DateRange, root: Path = REPO) -> list[str]:
+    """Command-line arguments of a real step, from step_plan."""
+    return [str(arg) for arg in step_plan(step, days, root).args]
+
+
+def step_files(step: str, days: DateRange, root: Path = REPO) -> StepFiles:
+    """The files behind script_args, from step_plan."""
+    return step_plan(step, days, root).files
+
+
+def check_inputs(step: str, plan: StepPlan) -> None:
     """Stop before the script runs when an input is missing or empty (an empty download)."""
-    needed = files.data_in + files.config_in
+    needed = plan.files.data_in + plan.files.config_in
     missing = [path for path in needed if not path.exists()]
     empty = [path for path in needed if path.is_file() and path.stat().st_size == 0]
     problems = []
@@ -253,32 +271,61 @@ def check_inputs(step: str, files: StepFiles) -> None:
     if empty:
         problems.append("empty " + ", ".join(str(path) for path in empty))
     if problems:
-        raise InputError(f"{step} cannot start: {'; '.join(problems)}. {HINTS[step]}")
+        raise InputError(f"{step} cannot start: {'; '.join(problems)}. {plan.hint}")
 
 
-def check_outputs(step: str, files: StepFiles) -> None:
-    missing = [path for path in files.data_out if not path.exists()]
+def clear_outputs(plan: StepPlan) -> None:
+    """Delete the step's outputs, so a file left by an earlier run cannot pass for new output."""
+    for path in plan.files.data_out:
+        path.unlink(missing_ok=True)
+
+
+def drop_empty_downloads(plan: StepPlan) -> list[Path]:
+    """Delete 0-byte files in the step's download folder, so the download runs again."""
+    if plan.refetch is None or not plan.refetch.is_dir():
+        return []
+    empty = sorted(path for path in plan.refetch.iterdir() if path.is_file() and path.stat().st_size == 0)
+    for path in empty:
+        path.unlink()
+    return empty
+
+
+def check_outputs(step: str, plan: StepPlan) -> None:
+    missing = [path for path in plan.files.data_out if not path.exists()]
     if missing:
         raise RuntimeError(f"{step} finished but wrote no {', '.join(str(path) for path in missing)}")
 
 
 def count_rows(path: Path) -> int:
-    """Rows in a data file: a parquet file's row count from its metadata, a CSV's
-    data lines (its records, unless a field holds a line break), or the total
-    over the parquet files in a folder."""
-    if path.is_dir():
-        return sum(count_rows(part) for part in sorted(path.glob("*.parquet")))
+    """Rows in a data file: a parquet file's row count from its metadata, or a CSV's
+    records counted the way the parsers report file_rows (count_csv_records)."""
     if path.suffix == ".parquet":
         import pyarrow.parquet as pq  # here, so importing this module stays light for the DAG
 
         return pq.ParquetFile(path).metadata.num_rows
-    newlines, last = 0, b"\n"
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 24), b""):
-            newlines += chunk.count(b"\n")
-            last = chunk[-1:]
-    lines = newlines + (last != b"\n")  # a last line without a line break still counts
-    return max(lines - 1, 0)  # not the header
+    return count_csv_records(path)
+
+
+def count_csv_records(path: Path) -> int:
+    """A CSV's records as legacy_311.count_records counts them: no header, no empty
+    lines, and a line break inside a quoted field keeps one record.
+
+    A quoted field can only span lines when a line holds an odd number of quote
+    marks, so while every line is even the records are the non-empty lines. At
+    the first odd line it hands over to legacy_311.count_records. The 16 MB
+    buffer matters in the containers: small reads through the Windows bind
+    mount are what make a CSV reader slow there.
+    """
+    lines = 0
+    with path.open("rb", buffering=1 << 24) as f:
+        for line in f:
+            if line.count(b'"') % 2:
+                from legacy_311 import count_records  # here, since legacy_311 imports pandas
+
+                return count_records(path)
+            if line.rstrip(b"\r\n"):
+                lines += 1
+    return max(lines - 1, 0)
 
 
 def log_task(run_id: str, task: str, rows_in: int | None, rows_out: int | None, seconds: float | None = None) -> None:
@@ -328,21 +375,24 @@ def trim_to_range(path: Path, column: str, days: DateRange) -> tuple[int, int]:
 
 def run_step(step: str, days: DateRange, root: Path = REPO, run_id: str = "manual") -> tuple[int | None, int]:
     """Run one real step and log its run id, rows in and rows out. Returns (rows in, rows out)."""
-    files = step_files(step, days, root)
-    check_inputs(step, files)
+    plan = step_plan(step, days, root)
+    check_inputs(step, plan)
     started = time.monotonic()
     try:
-        run_script(SCRIPTS[step], script_args(step, days, root))
-        check_outputs(step, files)
+        for path in drop_empty_downloads(plan):
+            log.warning("run %s task %s: deleted the empty download %s so it is fetched again", run_id, step, path)
+        clear_outputs(plan)
+        run_script(SCRIPTS[step], [str(arg) for arg in plan.args])
+        check_outputs(step, plan)
         if not days.is_full:
             interim = run_paths(days, root).interim
             for name, column in TRIM.get(step, []):
                 before, kept = trim_to_range(interim / name, column, days)
                 log.info("run %s task %s: kept %s of %s rows of %s in %s", run_id, step, f"{kept:,}", f"{before:,}", name, days.label)
+        rows_in = sum(count_rows(path) for path in plan.files.data_in) if plan.files.data_in else None
+        rows_out = sum(count_rows(path) for path in plan.files.data_out)
     except Exception as e:
         log.error("run %s task %s failed: %s: %s", run_id, step, type(e).__name__, e)
         raise
-    rows_in = sum(count_rows(path) for path in files.data_in) if files.data_in else None
-    rows_out = sum(count_rows(path) for path in files.data_out)
     log_task(run_id, step, rows_in, rows_out, time.monotonic() - started)
     return rows_in, rows_out

@@ -346,23 +346,58 @@ def test_step_files_are_the_files_in_the_arguments(tmp_path, step):
     files = steps.step_files(step, SLICE, tmp_path)
     for path in files.data_in + files.config_in + files.data_out:
         assert str(path) in args or any(path.is_relative_to(folder) for folder in folders), path
-    assert step in steps.HINTS
+    assert steps.step_plan(step, SLICE, tmp_path).hint
 
 
-def test_count_rows_of_csv_parquet_and_folder(tmp_path):
+def test_spatial_join_reads_the_combined_table_and_the_static_layers(tmp_path):
+    files = steps.step_files("spatial_join", SLICE, tmp_path)
+    interim = run_paths(SLICE, tmp_path).interim
+    assert files.data_in == [interim / "311_combined.parquet"]
+    assert files.data_out == [interim / "311_located.parquet"]
+    assert interim / "static" / "tracts_2020.parquet" in files.config_in
+
+
+def test_static_outputs_are_the_configured_layers(tmp_path):
+    config = tmp_path / "Data-Pipeline" / "config"
+    config.mkdir(parents=True)
+    (config / "static_layers.csv").write_text(
+        "name,kind,file,url,publisher,vintage,license,key,text_columns,note\n"
+        "tracts,vector,tracts.geojson,u,p,v,l,id,,\n"
+        "population,table,population.csv,u,p,v,l,id,,\n"
+        "dictionary,document,dictionary.xlsx,u,p,v,l,,,\n"
+    )
+    out = run_paths(SLICE, tmp_path).interim / "static"
+    assert steps.step_files("ingest_static_layers", SLICE, tmp_path).data_out == [out / "tracts.parquet", out / "population.parquet"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        'a,b\n1,"two\nlines"\n3,4\n',  # a quoted line break: falls back to the CSV reader
+        'a,b\n1,"say ""hi"""\n\n3,4\n',  # escaped quotes stay even; an empty line is no record
+        "a,b\r\n1,2\r\n   \r\n3,4",  # CRLF, a line of spaces is a record, no final line break
+        "a,b\n",
+        "",
+    ],
+)
+def test_csv_records_match_the_parsers_count(tmp_path, body):
+    from legacy_311 import count_records
+
+    path = tmp_path / "rows.csv"
+    path.write_bytes(body.encode())
+    assert steps.count_csv_records(path) == count_records(path)
+
+
+def test_count_rows_of_csv_records_and_parquet(tmp_path):
     (tmp_path / "rows.csv").write_text("a,b\n1,2\n3,4\n")
     (tmp_path / "no_final_break.csv").write_text("a,b\n1,2")
     (tmp_path / "header_only.csv").write_text("a,b\n")
     (tmp_path / "empty.csv").write_bytes(b"")
-    folder = tmp_path / "layers"
-    folder.mkdir()
-    pd.DataFrame({"x": [1, 2, 3]}).to_parquet(folder / "one.parquet")
-    pd.DataFrame({"x": [1]}).to_parquet(folder / "two.parquet")
-    (folder / "notes.txt").write_text("not counted")
-    names = ["rows.csv", "no_final_break.csv", "header_only.csv", "empty.csv"]
-    assert [steps.count_rows(tmp_path / name) for name in names] == [2, 1, 0, 0]
-    assert steps.count_rows(folder / "one.parquet") == 3
-    assert steps.count_rows(folder) == 4
+    (tmp_path / "line_break.csv").write_text('a,b\n1,"two\nlines"\n3,4\n')  # one record holds a line break
+    pd.DataFrame({"x": [1, 2, 3]}).to_parquet(tmp_path / "one.parquet")
+    names = ["rows.csv", "no_final_break.csv", "header_only.csv", "empty.csv", "line_break.csv"]
+    assert [steps.count_rows(tmp_path / name) for name in names] == [2, 1, 0, 0, 2]
+    assert steps.count_rows(tmp_path / "one.parquet") == 3
 
 
 def test_every_task_logs_run_id_rows_in_and_rows_out(caplog):
@@ -430,16 +465,39 @@ def test_empty_download_fails_before_the_script_runs(tmp_path, monkeypatch):
         run_step("parse_new_311", SLICE, root, run_id="test-run")
 
 
-def test_empty_static_download_fails_clearly(tmp_path, monkeypatch, caplog):
-    import static_layers
-
-    monkeypatch.setattr(static_layers, "download", lambda *a, **k: pytest.fail("the file is present; nothing to download"))
-    root = tmp_path / "repo"
+def make_static_repo(root, raw_bytes):
     (root / "Data-Pipeline" / "config").mkdir(parents=True)
     (root / "Data-Pipeline" / "config" / "static_layers.csv").write_text(STATIC_CONFIG)
     raw = root / "Data-Pipeline" / "data" / "raw" / "static"
     raw.mkdir(parents=True)
-    (raw / "population.csv").write_bytes(b"")  # what an empty download leaves behind
+    (raw / "population.csv").write_bytes(raw_bytes)
+
+
+def test_an_empty_static_download_is_fetched_again(tmp_path, monkeypatch, caplog):
+    import static_layers
+
+    fetched = []
+
+    def download(url, dest):
+        fetched.append(url)
+        dest.write_text("id,people\nA,10\n")
+
+    monkeypatch.setattr(static_layers, "download", download)
+    root = tmp_path / "repo"
+    make_static_repo(root, b"")  # what an empty download leaves behind
+    monkeypatch.chdir(tmp_path)
+    with caplog.at_level(logging.WARNING, logger="pipeline_steps"):
+        assert run_step("ingest_static_layers", SLICE, root, run_id="test-run") == (None, 1)
+    assert fetched == ["https://example.org/population.csv"]
+    assert "deleted the empty download" in caplog.messages[0]
+
+
+def test_a_download_that_stays_empty_fails_clearly(tmp_path, monkeypatch, caplog):
+    import static_layers
+
+    monkeypatch.setattr(static_layers, "download", lambda url, dest: dest.write_bytes(b""))
+    root = tmp_path / "repo"
+    make_static_repo(root, b"")
     monkeypatch.chdir(tmp_path)
     with caplog.at_level(logging.ERROR, logger="pipeline_steps"), pytest.raises(ValueError, match="population.csv is empty"):
         run_step("ingest_static_layers", SLICE, root, run_id="test-run")
@@ -452,6 +510,33 @@ def test_a_step_that_writes_nothing_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(steps, "run_script", lambda module, args: None)
     with pytest.raises(RuntimeError, match=r"parse_new_311 finished but wrote no .*new_311\.parquet"):
         run_step("parse_new_311", SLICE, root, run_id="test-run")
+
+
+def test_a_stale_output_cannot_pass_for_new_output(tmp_path, monkeypatch):
+    # Yesterday's 999-row file is in place and the script writes nothing.
+    root = tmp_path / "repo"
+    make_repo(root, {2025: LEGACY_2025}, NEW_SYSTEM)
+    interim = run_paths(SLICE, root).interim
+    interim.mkdir(parents=True)
+    pd.DataFrame({"case_id": range(999)}).to_parquet(interim / "new_311.parquet")
+    monkeypatch.setattr(steps, "run_script", lambda module, args: None)
+    with pytest.raises(RuntimeError, match=r"parse_new_311 finished but wrote no .*new_311\.parquet"):
+        run_step("parse_new_311", SLICE, root, run_id="test-run")
+    assert not (interim / "new_311.parquet").exists()
+
+
+def test_a_counting_failure_is_logged_as_a_failure(tmp_path, monkeypatch, caplog):
+    root = tmp_path / "repo"
+    make_repo(root, {2025: LEGACY_2025}, NEW_SYSTEM)
+    monkeypatch.chdir(tmp_path)
+
+    def broken(path):
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(steps, "count_rows", broken)
+    with caplog.at_level(logging.ERROR, logger="pipeline_steps"), pytest.raises(OSError):
+        run_step("parse_new_311", SLICE, root, run_id="test-run")
+    assert caplog.messages[-1] == "run test-run task parse_new_311 failed: OSError: disk went away"
 
 
 STATIC_CONFIG = (
