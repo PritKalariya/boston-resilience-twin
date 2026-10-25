@@ -28,7 +28,10 @@ def alert_message(context: Mapping) -> str:
     run_id = context.get("run_id") or getattr(dag_run, "run_id", None) or "unknown run"
     try_number = getattr(ti, "try_number", None) or "?"
     error = context.get("exception")
-    reason = f"{type(error).__name__}: {error}" if error else "no exception recorded"
+    if error:
+        reason = f"{type(error).__name__}: {error}"
+    else:
+        reason = "no exception recorded (the task may have been killed; check the scheduler log)"
     return f"{dag_id}.{task_id} failed in run {run_id} (try {try_number}): {reason}"
 
 

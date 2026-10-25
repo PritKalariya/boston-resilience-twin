@@ -115,7 +115,7 @@ Full builds of `daily_pipeline` (2015 to 2026) on a laptop, 2026-10-24: Docker D
 
 ![Gantt chart before: one long parse_legacy_311 bar](docs/images/gantt-before.jpeg)
 
-**After.** `parse_legacy_311` runs once per year, at most 4 at a time (`LEGACY_PARALLEL` in `Data-Pipeline/scripts/pipeline_steps.py`, the same as Airflow's parallelism), and a new `merge_legacy_311` task joins the years with the rule `legacy_311.read_years` uses for case ids repeated across years. `legacy_311.py` itself is unchanged.
+**After.** `parse_legacy_311` runs once per year, at most 4 at a time (`LEGACY_PARALLEL`, 4 unless `.env` sets it, the same as Airflow's parallelism; see the runbook), and a new `merge_legacy_311` task joins the years with the rule `legacy_311.read_years` uses for case ids repeated across years. `legacy_311.py` itself is unchanged.
 
 ![Gantt chart after: the years side by side, then merge_legacy_311](docs/images/gantt-after.jpeg)
 

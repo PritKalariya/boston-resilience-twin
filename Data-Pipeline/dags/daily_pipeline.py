@@ -6,21 +6,24 @@ data). The defaults are the full build, written to Data-Pipeline/data/interim/
 and processed/. Any other range is a slice, written to
 Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/.
 
-Four tasks run pipeline scripts. parse_legacy_311 runs once per legacy year,
-at most four at a time, and merge_legacy_311 joins the years (#37). The
-others are placeholders: they log the issue that builds them and do nothing
-else.
+Five tasks run pipeline scripts. parse_legacy_311 runs once per legacy year,
+at most LEGACY_PARALLEL at a time (4 unless .env sets it), and
+merge_legacy_311 joins the years (#37). The others are placeholders: they log
+the issue that builds them and do nothing else.
 
 Every task logs its run id, rows in and rows out (#36). The ingest tasks retry
-twice, 5 and then 10 minutes apart; the others fail at once. A task that fails
-for good sends the W3-3 alert (alerts.py), which goes to its log until #34
-adds Slack or email.
+twice, about 5 to 10 minutes and then 10 to 15 minutes apart (exponential
+backoff with a random spread); the others fail at once. A missing or empty
+input fails at once even in an ingest task, since a retry cannot fix it. A
+task that fails for good sends the W3-3 alert (alerts.py), which goes to its
+log until #34 adds Slack or email.
 """
 
 import logging
 
 import pendulum
 from airflow.sdk import Param, dag, get_current_context, task
+from airflow.sdk.exceptions import AirflowFailException
 
 import alerts  # Data-Pipeline/scripts, on PYTHONPATH (docker-compose.yaml)
 import pipeline_steps as steps
@@ -92,7 +95,11 @@ def daily_pipeline():
 
     @task
     def run(step: str, year: int | None = None) -> None:
-        steps.run_step(step, run_range(), run_id=run_id(), year=year)
+        try:
+            steps.run_step(step, run_range(), run_id=run_id(), year=year)
+        except steps.InputError as e:
+            # A missing or empty input stays missing: fail now instead of retrying.
+            raise AirflowFailException(str(e)) from e
 
     @task
     def planned(issue: str) -> None:
@@ -140,7 +147,7 @@ def daily_pipeline():
     raw_checked >> [parse_legacy, parse_new]
     parse_legacy >> merged
     [merged, parse_new] >> combined
-    [combined, static] >> todo("spatial_join") >> todo("daily_counts") >> todo("labels_and_features") >> validated
+    [combined, static] >> real("spatial_join") >> todo("daily_counts") >> todo("labels_and_features") >> validated
     validated >> [todo("schema_and_statistics"), todo("bias_slicing")]
 
 

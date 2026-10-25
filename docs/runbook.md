@@ -65,11 +65,12 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Four tasks run scripts: `ingest_static_layers`, `parse_legacy_311`,
-  `parse_new_311` and `combine_311`. `parse_legacy_311` runs once per legacy
-  year, at most 4 at a time (`LEGACY_PARALLEL`), and `merge_legacy_311` joins
-  the years with `legacy_311.read_years`' rule for repeated case ids (#37).
-- The other 14 are placeholders. Each logs the issue that builds it
+- Five tasks run scripts: `ingest_static_layers`, `parse_legacy_311`,
+  `parse_new_311`, `combine_311` and `spatial_join`. `parse_legacy_311` runs
+  once per legacy year, at most 4 at a time by default (`LEGACY_PARALLEL`),
+  and `merge_legacy_311` joins the years with `legacy_311.read_years`' rule
+  for repeated case ids (#37).
+- The other 13 are placeholders. Each logs the issue that builds it
   (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
 - Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
   hand.
@@ -103,20 +104,35 @@ On a laptop (2026-10-24, the `brt-airflow:local` image, #68 in), the full
 build took 73 s with the legacy years side by side, against 124 s one after
 another, and peaked at 2.5 GiB in the scheduler container (`docker stats`).
 The README's "Pipeline performance" section has the Gantt charts and numbers.
+To parse fewer years at once, for example 2 on the VM if #61 shows memory is
+tight, put `LEGACY_PARALLEL=2` in `.env` next to `docker-compose.yaml` and run
+`docker compose up -d --build --wait`. Without it the DAG runs 4, and
+Airflow's parallelism (4) caps any higher value. A value that is not a whole
+number of 1 or more stops the DAG from importing; `list-import-errors` shows
+why.
 
 Logging and failures (#36):
 
 - Every task logs one line with its run id, rows in and rows out, for example
   `run slice-2025 task combine_311: rows in 348,466, rows out 280,044 in 3.1 s`.
   Placeholders log 0 and 0, and `check_range` logs n/a. CSV inputs are
-  counted as data lines and parquet files from their metadata. Counting reads
-  each raw CSV once more: about 1.2 s per yearly file in the container on a
-  Windows laptop, so about 15 s on a full build.
-- The `ingest_*` tasks retry twice, 5 and then 10 minutes apart. Every other
-  task fails at once.
+  counted as records, the way the parsers report `file_rows`
+  (`legacy_311.count_records`), and parquet files from their metadata;
+  `ingest_static_layers` counts only the layers in its config. Counting reads
+  each raw CSV once more: about 1 s per yearly file in the container on a
+  Windows laptop, 12 s for all 13 files.
+- The `ingest_*` tasks retry twice. Airflow's exponential backoff adds a
+  random spread, so the waits are about 5 to 10 minutes and then 10 to 15
+  (capped). Every other task fails at once.
 - A real step whose input file is missing or empty fails before its script
-  runs (`InputError`), naming the file and how to get it. A script error is
-  logged as `run <id> task <task> failed: <error>` and keeps its own type.
+  runs (`InputError`), naming the file and how to get it. The DAG raises it
+  as `AirflowFailException`, so even an `ingest_*` task fails at once instead
+  of retrying. A script error is logged as `run <id> task <task> failed:
+  <error>` and keeps its own type.
+- Before a step runs, its outputs are deleted, so a file left by an earlier
+  run cannot pass for new output. `ingest_static_layers` also deletes empty
+  (0-byte) files in `Data-Pipeline/data/raw/static/`, so `--download` fetches
+  them again.
 - A task that fails for good writes `ALERT <dag>.<task> failed in run <id>
   (try <n>): <error>` to its own log (`Data-Pipeline/scripts/alerts.py`).
   Slack or email delivery comes with #34.
@@ -247,6 +263,16 @@ python Data-Pipeline/scripts/static_layers.py --refresh    # fetch every file ag
 ```
 
 Raw files go to `Data-Pipeline/data/raw/static/` and the loaded layers to `Data-Pipeline/data/interim/static/` (vectors as GeoParquet in EPSG:4326), both gitignored. The run rewrites `docs/data/static-layers.csv` with the source CRS, row count, retrieval date and SHA-256 of each file; commit it with the change. A changed hash after `--refresh` means the city published a new version, so check the row counts before using it. The run stops on a missing, empty or unreadable file, a missing or duplicate key, or a layer that falls outside Boston after reprojection (usually a wrong CRS).
+
+## Spatial join (311 requests to tracts and neighborhoods)
+
+`spatial_join.py` places every request in `311_combined.parquet` by its coordinates, in a 2020 tract and the ADR-004 neighborhood that holds it, and writes `Data-Pipeline/data/interim/311_located.parquet`. It needs the static layers loaded first.
+
+```bash
+python Data-Pipeline/scripts/spatial_join.py
+```
+
+The run adds `geoid20`, `unit` (the neighborhood a request is counted in) and `location`, and prints the share with no unit by year and system. `location` is `placed` or the reason there is no unit: `no_coordinates` (missing or not a number), `placeholder` (a default point listed in `Data-Pipeline/config/placeholder_locations.csv`, matched within about a metre), `outside_boston` (no 2020 tract) or `no_neighborhood` (tract 9815.02, which the city leaves out of every neighborhood). A latitude and longitude entered the wrong way round are swapped back and counted. If a new default point turns up (one spot holding thousands of requests with no neighborhood), add it to the placeholder file in a reviewed PR.
 
 ## Project 1 infrastructure (Terraform)
 

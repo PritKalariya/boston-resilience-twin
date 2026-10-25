@@ -21,7 +21,10 @@ def test_alert_falls_back_to_the_dag_run():
 
 
 def test_alert_with_an_empty_context():
-    assert alerts.alert_message({}) == "unknown DAG.unknown task failed in run unknown run (try ?): no exception recorded"
+    assert alerts.alert_message({}) == (
+        "unknown DAG.unknown task failed in run unknown run (try ?): "
+        "no exception recorded (the task may have been killed; check the scheduler log)"
+    )
 
 
 def test_failure_callback_writes_the_alert_to_the_task_log(caplog):
