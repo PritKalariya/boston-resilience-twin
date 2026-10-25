@@ -46,7 +46,7 @@ What a source had to meet:
 - Licenses carry into the README and the data card (#43): PDDL for city data, U.S. government works for NOAA, NWS and Census, CC BY 4.0 with attribution for Open-Meteo.
 - Keys live in Secret Manager (ADR-015, ADR-019), never in the repo.
 - Which of these become model features is decided by ADR-003, not here.
-- Static layers have older vintages than the 311 data (Climate Ready Boston 2016, ACS 2019 to 2023). They describe neighborhoods, not days, and are reloaded when the source updates.
+- Static layers do not come from the training years: Climate Ready Boston is from 2016, the ACS characteristics from 2019 to 2023 and the population estimates from 2025. They describe neighborhoods, not days, are used as fixed descriptors (ADR-003), and are reloaded when the source updates.
 
 ## Revisit when
 

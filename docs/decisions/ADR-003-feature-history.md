@@ -21,10 +21,11 @@ A model trained on years where a feature is missing either learns nothing from i
 
 - **Split by time, never shuffled:** train 2015 to 2023, validate 2024, test 2025 to mid-2026, live from deployment. 2020 and 2021 are flagged and down-weighted, as the spec sets out.
 - **History rule.** A day-level feature is used only if its source covers every training year, 2015 to 2023. A feature that misses a training year is dropped, not imputed or back-filled. Short gaps inside covered years (for example the 8 missing gust days at Logan) are allowed, counted and reported in the data card.
+- **Live rule.** A feature is used only if it is also available live with the same definition. 311 features are built per storm group from categories that carry over to the new system, and a group with no live source is dropped as a feature: flooding today, which has no new-system category (ADR-005). snow_ice lags will run lower live while about half of last winter's snow_ice requests have no new-system category; #16 decides whether to use them.
 - **Weather.** Training uses observed weather (NOAA GHCN-D, Logan), which covers every training year. Validation and test swap in Open-Meteo archived forecasts for the same variables, and live uses forecasts. Because training sees the weather that happened, backtest scores are upper bounds and are reported as such.
-- **311 features** (lagged counts by storm group) come from both systems through the category map, so they cover every year.
-- **Static attributes** (tract and neighborhood geography, population and ACS characteristics, Climate Ready Boston layers) do not vary by day. They are allowed with their vintage recorded (`docs/data/static-layers.csv`), since the same values apply in training and live.
-- A source that fails the rule can still drive the live system without being a model feature, for example NWS alerts starting the event DAG.
+- **311 features** (lagged counts by storm group) come from both systems through the category map, so they cover every year; they still have to pass the live rule.
+- **Static attributes** (tract and neighborhood geography, population and ACS characteristics, Climate Ready Boston layers) do not vary by day. They are used as fixed neighborhood descriptors, with their vintage recorded (`docs/data/static-layers.csv`), since the same values apply in training and live. The population estimates (2025) and ACS characteristics (2019 to 2023) describe neighborhoods after most of the training years, so as model features they carry a little look-ahead. For fairness slicing that is what we want, since a neighborhood's group stays fixed across splits.
+- A source that fails either rule can still drive the live system without being a model feature, for example NWS alerts starting the event DAG.
 
 ## Alternatives considered
 | Option | Cost | Effort | Failure behavior |
@@ -43,7 +44,8 @@ A model trained on years where a feature is missing either learns nothing from i
 - The test window spans the 311 migration (ADR-020, ADR-005), so test results include the switch.
 - #12 must find an alert-history source for the training years or drop the alert feature; either way it is written as ADR-014.
 - Validation and test results on archived forecasts are the honest estimate of live skill; training-period scores on observed weather are not.
-- The data card (#43) lists each feature's coverage years and gaps.
+- The data card (#43) lists each feature's coverage years and gaps, and the vintage of each static attribute against the training years.
+- Flooding lags stay out of the features while flooding has no new-system category; that follows the flooding decision in #16 and changes if a new category appears.
 - Features from the new 311 system alone (Aug 2025 onward) cannot be used.
 
 ## Revisit when
