@@ -148,7 +148,7 @@ def test_script_exits_0_without_credentials(tmp_path):
         "PATH": "/usr/bin:/bin",
         "HOME": str(tmp_path),
         "CLOUDSDK_CONFIG": str(tmp_path / "gcloud"),  # no gcloud login
-        "NO_GCE_CHECK": "True",  # no metadata server lookup (not on a VM)
+        "NO_GCE_CHECK": "true",  # no metadata server lookup; google-auth reads only lowercase "true"
     }
     result = subprocess.run(
         [sys.executable, dvc_push.__file__, "--repo", str(tmp_path)],
