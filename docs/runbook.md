@@ -226,14 +226,15 @@ environment block in `docker-compose.yaml` passes one value to all of them.
 
 Pipeline tasks read `NOAA_CDO_TOKEN`, `CENSUS_API_KEY` and `NWS_USER_AGENT`
 from the environment (docs/data-access.md). Locally they come from `.env`.
-A team member fills them from Secret Manager (needs `gcloud auth login` with
-project 1 set). It replaces any existing lines for the three keys and keeps
-the rest of `.env`:
+A team member fills them from Secret Manager (needs `gcloud auth login`; the
+command names project 1, so another default gcloud project does not matter).
+It replaces any existing lines for the three keys and keeps the rest of
+`.env`:
 
 ```bash
 touch .env && grep -vE "^(NOAA_CDO_TOKEN|CENSUS_API_KEY|NWS_USER_AGENT)=" .env > .env.tmp; mv .env.tmp .env
 for s in noaa-cdo-token census-api-key nws-user-agent; do
-  printf "%s='%s'\n" "$(echo "$s" | tr a-z- A-Z_)" "$(gcloud secrets versions access latest --secret="$s")" >> .env
+  printf "%s='%s'\n" "$(echo "$s" | tr a-z- A-Z_)" "$(gcloud secrets versions access latest --secret="$s" --project=boston-resilience-twin)" >> .env
 done
 docker compose up -d --wait
 ```
@@ -449,8 +450,8 @@ Terraform creates the secret slots empty. Values are added by hand and never
 go into a `.tf` file, a tfvars file, chat, the repo, or a ticket.
 
 Who can: the members listed in the `secret_writers` tfvars variable. They hold
-`roles/secretmanager.secretVersionAdder` on `noaa-cdo-token`,
-`census-api-key` and `nws-user-agent` only, which is the permission to add a
+`roles/secretmanager.secretVersionAdder` on each slot in `local.secret_ids`
+(`Deployment/terraform/secrets.tf`) only, which is the permission to add a
 new version. It is not
 project wide and it does not let them read the values back; reading is
 `roles/secretmanager.secretAccessor`, which every team member already has.
