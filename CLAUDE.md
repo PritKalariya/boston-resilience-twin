@@ -73,6 +73,10 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `python Data-Pipeline/scripts/after_switch.py`: legacy rows opened after their category's switch date (`after_switch`) by category, the worst overlap windows and the storm surge labels under each policy (markdown for ADR-021); reads `after_switch_policy` from `Data-Pipeline/config/processing.csv`, needs the static layers (about 1.5 minutes)
 - `python -m pytest Data-Pipeline/tests`
 - `ruff check .`: lint as CI runs it (errors only, `ruff.toml`); install with `pip install ruff==0.17.2`. CI (`.github/workflows/ci.yml`) runs it and the tests on every PR
+- `gcloud auth application-default login`: Google credentials for DVC, once per machine. Human only (opens a browser)
+- `dvc remote list`, `dvc status -c`, `dvc pull`: show the remote (`gs://boston-resilience-twin-data/dvc`), compare the cache with it, fetch the data for the current commit
+- `python Data-Pipeline/scripts/dvc_push.py`: `dvc push`, or a `dvc push skipped: ...` log line and exit 0 without bucket access. Use it instead of bare `dvc push` in DAGs and scripts
+- `docker compose exec airflow-scheduler airflow tasks test daily_pipeline push_data`: run only the DAG's DVC push task (skips without credentials; runbook "Versioned data (DVC)")
 - `cd Deployment/terraform && terraform init`: configure the GCS state backend and providers (needs `gcloud auth application-default login`)
 - `terraform fmt -check && terraform validate`: format and syntax check, no cloud calls
 - `terraform plan -var-file=terraform.tfvars`: read-only dry run against project 1 (`terraform.tfvars` is gitignored; copy from `terraform.tfvars.example`)
