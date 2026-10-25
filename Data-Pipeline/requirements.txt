@@ -13,8 +13,11 @@ pandas==3.0.5
 pyarrow==25.0.1
 
 # Not in the constraints file: pinned to the versions the tests passed on.
-# pyproj comes in through geopandas, iniconfig through pytest.
+# pyproj comes in through geopandas, iniconfig through pytest, altair through
+# great-expectations (ADR-022 dry run).
+altair==6.3.0
 geopandas==1.2.0
+great-expectations==1.24.1
 iniconfig==2.3.1
 pyogrio==0.13.0
 pyproj==3.8.0
