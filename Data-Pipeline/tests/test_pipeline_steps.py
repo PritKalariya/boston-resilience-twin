@@ -118,8 +118,8 @@ def test_legacy_step_reads_only_the_years_in_range():
 
 
 def test_unknown_step():
-    with pytest.raises(ValueError, match="no script step 'spatial_join'"):
-        script_args("spatial_join", FULL)
+    with pytest.raises(ValueError, match="no script step 'labels_and_features'"):
+        script_args("labels_and_features", FULL)
 
 
 FAKE_SCRIPT = """
