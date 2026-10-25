@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-21 by piyush1420. Edit this file in the PR that changes the state.
+Updated: 2026-10-25 by piyush1420. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -10,18 +10,26 @@ Week 2: Processing (due 2026-10-18)
 |---|---|---|---|---|
 | #1 Harden repo and team workflow | Prit | 2026-10-10 | in progress | |
 | #2 Local dev environment and Python pin | Punith | 2026-10-13 | done | PR #55 merged. `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); ADR-013 pins Python 3.12 |
+| #22 Daily DAG skeleton | Punith | 2026-10-18 | in review | `daily_pipeline`: 19 tasks; 4 run scripts (static layers, legacy and new 311, combine), 14 are placeholders until #6, #7, #8, #14, #15, #16, #17, #35, #32; results below. Runs on the #69 image (ADR-022), no manual installs |
+| #36 Logging and error handling across tasks | Punith | 2026-10-22 | in review | Builds on #72. Every task logs run id, rows in and rows out; `ingest_*` tasks retry twice; missing or empty inputs fail before the script runs; a failed task writes the W3-3 alert to its log until #34 delivers it; results below |
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
 | #6 311 ingestion DAG v1 | Piyush | 2026-10-13 | in review | Code and tests done. The direct GCS upload was removed to meet "GCS only through DVC": the script and DAG write `Data-Pipeline/data/raw/311/` only. `airflow dags test ingest_311` passed in the team's local Airflow 3.3.2 on 2026-10-21; this PR adds the `scripts`, `config` and `data` mounts it needs. Versioning to GCS waits on DVC (see Blocked) |
 | #11 Decision: live baselines for the new 311 format | Punith | 2026-10-13 | done | PR #63 merged; ADR-005: baseline = same weeks of the previous 3 years, both systems, by storm group |
+| #53 Policy for legacy rows after their category's switch date | Punith | 2026-10-20 | in review | ADR-021: keep. Setting `after_switch_policy` in `Data-Pipeline/config/processing.csv`, for #15 to apply; results below |
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | done | PR #52 merged; results below; new-system clock in ADR-020; flooding gap needs a team call |
-| #20 Airflow on the VM | Prit | 2026-10-18 | in review | PR #59. Airflow stack on airflow-vm (LocalExecutor, Postgres 16; ADR-016); UI by SSH tunnel only; VM stopped. Runbook: "Airflow on the VM". After #58 merges, run the update step in the runbook on the VM |
+| #14 Spatial joins | Alekhya (built by Srikar for the Oct 25 deadline) | 2026-10-16 | in review | every request tagged with tract and unit by coordinates; 99.14% placed; results below |
+| #20 Airflow on the VM | Prit | 2026-10-18 | done | PR #59 merged. Airflow stack on airflow-vm (LocalExecutor, Postgres 16; ADR-016); UI by SSH tunnel only; VM stopped. Runbook: "Airflow on the VM". After #58 merges, run the update step in the runbook on the VM |
+| #23 Write ADRs 001, 009, 010, 011, 012 | Prit | 2026-10-18 | done | PR #65 merged; ADRs in docs/decisions/ |
 | #29 Verify teammate IAM | Prit | 2026-10-15 | done | PR #51 merged. All 6 members granted, plus `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start and SSH verified; VM stopped. |
 | #49 Decide who gets sudo on the Airflow VM | Prit | 2026-10-17 | in review | Owner call: owner plus Srikar get `roles/compute.osAdminLogin`, bound to the `airflow-vm` instance only, through the new `vm_admins` variable. Plan-only; apply from main after merge. |
 | #50 Let Kirtan add secret values | Prit | 2026-10-16 | done | PR #54 merged. secretVersionAdder for `secret_writers` on both secret slots (secret level); ADR-019. |
 | #48 Lifecycle rule for noncurrent versions on the data bucket | Prit | 2026-10-18 | done | PR #56 merged; noncurrent versions in the data bucket deleted after 30 days |
 | #9 Static layers | Alekhya | 2026-10-13 | done | PR #62 merged; results below |
 | #10 Decision: lock the modeling unit | Alekhya | 2026-10-13 | done | PR #66 merged; ADR-004 proposed (team sign-off pending): neighborhood x day, 24 tract-built neighborhoods, surge in any storm group |
+| #31 Repo layout and pipeline pins | Prit | 2026-10-16 | done | PR #58 merged; ADR-017: one shared Airflow stack at the root, each component mounts its `dags/` at `/opt/airflow/dags/<component>` in snake_case; `Data-Pipeline/requirements.txt` pinned, 94 tests pass in a clean Python 3.12 venv |
+| #69 Airflow image with every pipeline dependency | Prit | 2026-10-22 | done | PR #74 merged; ADR-022: every Airflow service runs `brt-airflow:local` from `airflow.Dockerfile`, the ADR-013 base image plus `Data-Pipeline/requirements.txt` under Airflow's constraints. Cold `docker compose up -d --build --wait` 1m37s (image build plus stack start, base image already pulled), cached `docker compose build` 1.0s, image 3.44 GB on disk against the base image's 3.22 GB. Great Expectations 1.24.1, Fairlearn 0.15.0 and dvc[gs] 3.67.1 all dry-run clean against the constraints with pandas 3.0.5. Unblocks #22 and #37 |
+| #24 Write ADRs 002, 003 | Srikar | 2026-10-18 | in review | ADR-002 supporting sources, ADR-003 time-based split and feature-history rule; both record scoping decisions (dated 2026-10-04) |
 
 ## Blocked
 - #6: versioning raw 311 to GCS waits on DVC setup. The repo has no `.dvc/` folder, no DVC remote and an empty `Data-Pipeline/dvc.yaml`, and DVC is in neither `Data-Pipeline/requirements.txt` nor the Airflow image. The docs do not name the issue that sets it up; on GitHub, #19 (DVC remote on GCS) and #18 (DVC stages), both Kirtan, cover it. Until then the raw 311 files exist only on the machine that ran the DAG.
@@ -32,15 +40,14 @@ Week 2: Processing (due 2026-10-18)
 - **Flooding has no new-system category.** Legacy flooding requests (mostly Catchbasin) stop after Jul 2026 and nothing in the new system replaces them, so live flooding counts are zero. Affects the target; ADR-005 escalates it, since no baseline can fix a missing source. Needs a team decision (#10, #16) before the target freeze.
 - **Snow has not been through the new system yet.** Snow Plowing and Emergency Responder Snow Plowing exist (2 requests), but all of winter 2025 to 2026 went to the legacy system. Unshoveled Sidewalk (48% of last winter's snow requests) has no new category so far. The first snow storm this winter is the real switch for snow_ice; ADR-005 sets a re-check for it (runbook).
 - Five new-system categories appeared after the W2-1 run (Illegal Parking 909, Abandoned Vehicles 51, Parking Meter Repairs 13, OPC Public Inquiry 2, Moving Permits 1; export of 2026-10-19). They are `unmapped` until `docs/data/category-map.csv` gets rows for them. None is storm related.
-- Neighborhood names differ between systems: 23 legacy and 25 new-system names, 16 shared (the new system splits Allston and Brighton, adds North End, Chinatown, West End and others). #15 needs one unit list, from the spatial join or a name map, before daily counts.
+- Neighborhood names differ between systems (23 legacy and 25 new-system names, 16 shared), so #14 places requests by coordinates instead of the name field (ADR-004).
 - Animal requests are missing from 2025-06-12 (last legacy) to 2025-08-01 (first day of the new export).
 - The local Airflow stack idles at about 0.95 GB of memory (scheduler 397 MiB, API server 294 MiB, DAG processor 193 MiB, Postgres 67 MiB; `docker stats`, 2026-10-16). The e2-medium has 4 GB, so tasks get roughly 2.5 GB once Ubuntu is counted (estimate). #20 should confirm headroom on the VM, and pipeline tasks should avoid loading every legacy year into memory at once.
-- The Airflow 3.3.2 image ships pandas 3.0.5 and pyarrow 25.0.1, while `Data-Pipeline/requirements.txt` asks only for `pandas>=2.2`. The current 14 tests pass in the image (Python 3.12.14, pandas 3.0.5; 2026-10-16), but the requirements should be aligned with the Airflow constraints before the scripts move into DAGs (#22).
-- On all years (2015 to 2026), `map_311.py` peaks at about 3.5 GB, above the roughly 2.5 GB left for tasks on the e2-medium, and `legacy_311.py` at about 1.9 GB. #22 should split them per year or read fewer columns before they move into DAGs.
+- On all years (2015 to 2026), `map_311.py` now peaks at about 2.1 GB (was 3.7 GB) and `legacy_311.py` at about 1.8 GB (Python 3.12, pandas 3). Both fit the roughly 2.5 GB left for tasks on the e2-medium, with little headroom, so #22 should run them as separate tasks, not side by side.
 - **Four neighborhood lists.** The BPDA boundaries have 26 neighborhoods, the tract-built boundaries and the 2025 population tables have 24, and 311 has 23 legacy and 25 new-system names. ADR-004 (proposed) uses the 24 tract-built neighborhoods and places requests by coordinates, so the 311 field is not used for the unit.
 - **Social vulnerability uses 2010 tracts** (180, `GEOID10`), while every other layer uses 2020 tracts (207). Joining it to 2020 tracts needs a crosswalk or an area overlay (#14).
 - **Climate Ready Boston flood layers are coastal only.** Most legacy flooding requests are catch basins (stormwater), which these maps do not cover. No stormwater flood layer is on Analyze Boston.
-- **geopandas is not in the Airflow constraints file.** `Data-Pipeline/requirements.txt` adds `geopandas>=1.1` (tested with 1.2.0, shapely 2.2.0, pyproj 3.8.0, pyogrio 0.13.0). Once PR #58 pins the other packages, this line needs an exact pin too, and the Airflow image needs it installed before #22 runs the step in a DAG.
+- ~~**The Airflow image lacks the geo packages.**~~ Closed by #69 (ADR-022): the Airflow services now run `brt-airflow:local`, which installs `Data-Pipeline/requirements.txt`, so geopandas, shapely, pyogrio and pyproj are importable in a task. The cost is that a requirements change needs `docker compose up -d --build --wait` before the next run.
 - The 2026-10-20 export moves the first new-system date of Broken Park Equipment (not storm related) from 2026-03-10 to 2026-01-09. `docs/data/change-points.csv` is not updated in #10; the next `map_311.py` run in a PR should refresh it.
 - The Analyze Boston catalog `size` for the new-system file is stale (488,098 bytes listed; the file is 24,763,502 bytes with 70,208 records on 2026-10-15). #6 treats the new-system file as having no reliable change detection and downloads it whenever it is due.
 - The 2026 file is refreshed daily by #6. In January 2027 someone must add a `legacy_2027` row to `Data-Pipeline/config/ingest_311_sources.csv` and slow 2026 down; see the runbook.
@@ -80,6 +87,31 @@ Command: `python Data-Pipeline/scripts/static_layers.py` (add `--download` on a 
 
 ACS demographics come from the city's 2025 population estimates (population on 2025-01-01, characteristics from ACS 2019 to 2023 5-year), so no Census API key is needed. They cover race and ethnicity (B03002), age (B01001), poverty (B17001), household income brackets (B19037), tenure (B25042), vehicles (B08201), language at home (C16001) and disability (S1810). There is no median household income column.
 
+## W2-10 results (2026-10-21)
+
+Commands: `docker compose up -d --wait`, then `airflow dags trigger daily_pipeline` as in the runbook ("Run the data pipeline DAG"). Laptop with Docker Desktop (16 GB); the geo packages were installed by hand in the running scheduler until #69. Raw files: legacy 2015 to 2026 and the new-system export of 2026-10-19.
+
+| run | range | result | wall time | rows written |
+|---|---|---|---|---|
+| slice-2025b | 2025-01-01 to 2025-12-31 | all 19 tasks succeed | 33 s | combined 280,044 (legacy 275,914, new 4,130), exactly the full build's 2025 rows (pandas `assert_frame_equal`), in `data/slices/` |
+| full-build | the defaults (2015-01-01 to latest) | all 19 tasks succeed | 141 s | legacy 3,039,046; new 72,373; combined 3,110,129, the same as the manual run |
+| bad-start | start 2014-06-01 | fails at `check_range`, nothing else runs | 6 s | none |
+| bad-key | conf key `stat` | fails at `check_range`, nothing else runs | 7 s | none |
+
+A malformed date (2025-13-01) is rejected at trigger time, and the slice left `data/interim/` untouched. Of the 19 tasks, 4 run scripts and 14 are placeholders that log their issue. The slowest task is `parse_legacy_311` (103 s on all years), then `combine_311` (18 s) and `ingest_static_layers` (11 s). In the full build the scheduler container peaked at 3.44 GiB against 0.55 GiB idle (`docker stats` every few seconds), so the tasks added about 2.9 GiB, above the roughly 2.5 GB the VM leaves for tasks; #68 cuts `map_311.py` to about 2.1 GB.
+
+## W3-5 results (2026-10-23)
+
+Runs of `daily_pipeline` on a laptop (the geo packages installed by hand until #69), raw files of 2026-10-19.
+
+| run | checks | result |
+|---|---|---|
+| slice-2025c | every task logs run id, rows in and rows out | 19 of 19 task logs have the line, for example `run slice-2025c task combine_311: rows in 348,466, rows out 280,044 in 5.0 s` |
+| bad-start-36 | a failed task sends the W3-3 alert | `check_range` fails and its log has `ALERT daily_pipeline.check_range failed in run bad-start-36 (try 1): ValueError: start 2014-06-01 is before 2015-01-01, the first training day`; the other 18 tasks do not run |
+| missing-new-36 | a missing source fails clearly, with no retry | with `new_system.csv` renamed for the test, `parse_new_311` fails on try 1: `InputError: parse_new_311 cannot start: missing .../raw/311/new_system.csv. Put the new-system export in Data-Pipeline/data/raw/311/ (by hand until #6 lands).`, followed by the alert |
+
+From the DAG in the container: the eight `ingest_*` tasks have 2 retries with a 5-minute base delay, backoff 2.0 and at most 15 minutes, so about 5 to 10 and then 10 to 15 minutes with Airflow's random spread; the other tasks have none, and every task has the failure callback. After Kirtan's review (2026-10-25): a missing or empty input fails at once without retrying (`AirflowFailException`), a step's outputs are deleted before it runs so an old file cannot pass for new output, an empty static download is deleted and fetched again, CSV rows are counted as records the way the parsers report them, and `ingest_static_layers` counts only its configured layers. A corrupt file (a garbage CSV, a non-parquet file) and an empty download (a 0-byte export, a 0-byte static layer) are covered by tests. Checked live on a 2025 slice: every task succeeds, including `spatial_join` (280,044 rows in and out); with `static_layers.csv` hidden for one run, `ingest_static_layers` fails on try 1 with the ALERT line and does not retry.
+
 ## W1-11 results (2026-10-19)
 
 Command: `python Data-Pipeline/scripts/live_baselines.py` (plus `--window-days 84` and `--drop-after-switch`, same verdicts). Data: legacy files 2015 to 2026 and the new-system export downloaded 2026-10-19, combined with `map_311.py`; last full day 2026-10-17; Logan GHCN-D with WSF5 gusts.
@@ -92,6 +124,55 @@ Command: `python Data-Pipeline/scripts/live_baselines.py` (plus `--window-days 8
 | flooding | none | no new-system source | | escalated |
 
 Decision in ADR-005: method A (same day plus or minus 14 days in each of the previous 3 years, both systems, broad storm groups).
+
+## W3-14 results (2026-10-21)
+
+Command: `python Data-Pipeline/scripts/after_switch.py`. Data: legacy files 2015 to 2026 and the new-system export of 2026-10-19, combined with `map_311.py`; last full day 2026-10-17; static layers downloaded 2026-10-21.
+
+2,640 legacy rows (0.087%) were opened on or after their category's first new-system day, in 27 categories (20 with more than one row), with windows of up to 111 days. 27 are storm-related (Pruning Request); snow_ice and flooding have none so far. Each cell is the per-neighborhood daily count over the same weeks of the previous 3 years, with the surge rate (k 2, m 3) in brackets.
+
+| category (window) | legacy / new-system rows in window | before | after, keep | after, drop |
+|---|---|---|---|---|
+| Improper Trash Storage (48 days) | 919 / 1,096 | 1.13 (5.21%) | 0.66 (3.56%) | 0.36 (0.78%) |
+| Illegal Graffiti (32 days) | 595 / 7 | 1.24 (4.17%) | 1.68 (4.56%) | 0.02 (0%) |
+| Park Groundskeeping (111 days) | 445 / 10 | 0.88 (1.80%) | 0.78 (0.90%) | 0.02 (0%) |
+| Pruning Request, tree (109 days) | 27 / 179 | 0.80 (1.57%) | 0.17 (0%) | 0.14 (0%) |
+
+Storm labels (ADR-004 unit, 94,512 labeled cells): drop changes 1, exclude_from_baselines none. Snow Plowing and Emergency Responder Snow Plowing switched on 2026-06-23 with 2 test requests and held 50.5% of last winter's legacy snow requests, so drop could delete half of this winter's snow signal. Decision in ADR-021: keep.
+
+## W2-2 results (2026-10-24)
+
+Command: `python Data-Pipeline/scripts/spatial_join.py` after `map_311.py` and `static_layers.py`. Every request is placed by its coordinates in a 2020 tract and in the ADR-004 neighborhood built from whole tracts; the 311 neighborhood field is not used. 3,078,578 of 3,105,228 requests (99.14%) are placed in the 24 units. The 253,253 distinct points are placed once each, so the run takes about 4 seconds and peaks at 1.8 GB.
+
+| no unit because | requests |
+|---|---|
+| no coordinates | 18,594 |
+| City Hall placeholder | 4,849 |
+| outside Boston's tracts | 2,908 |
+| tract 9815.02, in no neighborhood | 299 |
+
+Share with no unit, by year and system (the script also prints the reason columns):
+
+| year | system | requests | no unit | share |
+|---|---|---|---|---|
+| 2015 | legacy | 202,066 | 4,146 | 2.05% |
+| 2016 | legacy | 210,483 | 3,683 | 1.75% |
+| 2017 | legacy | 245,475 | 2,505 | 1.02% |
+| 2018 | legacy | 257,610 | 2,528 | 0.98% |
+| 2019 | legacy | 253,782 | 2,260 | 0.89% |
+| 2020 | legacy | 246,165 | 2,169 | 0.88% |
+| 2021 | legacy | 269,665 | 1,845 | 0.68% |
+| 2022 | legacy | 272,931 | 1,532 | 0.56% |
+| 2023 | legacy | 307,791 | 1,736 | 0.56% |
+| 2024 | legacy | 306,756 | 1,544 | 0.5% |
+| 2025 | legacy | 275,914 | 1,721 | 0.62% |
+| 2025 | new | 4,130 | 64 | 1.55% |
+| 2026 | legacy | 188,048 | 794 | 0.42% |
+| 2026 | new | 64,412 | 123 | 0.19% |
+
+- **City Hall placeholder.** 4,808 legacy requests with the 311 neighborhood "Boston", and 41 new-system requests at "1 City Hall Plz" (mostly animal requests), all sit on one point (42.360295, -71.05827): the default for a request with no address. Placed by coordinates, they would all land in Downtown (291 of them storm-related; on #66 the 290 legacy ones added 4 Downtown training surges). They now count as no location. The point is in `Data-Pipeline/config/placeholder_locations.csv`.
+- **Swapped coordinates.** 11 legacy requests (2015 to 2020, none storm-related) have latitude and longitude the wrong way round; all 11 land in a Boston tract once swapped back, so they are swapped and placed.
+- **Hand-checked points.** 12 landmarks, one per neighborhood, from Fenway Park to Cleary Square: every tract matches the Census Bureau geocoder (2020 tracts) and every unit matches the landmark's neighborhood. They are a test in `test_spatial_join.py`.
 
 ## W2-1 results (2026-10-16)
 

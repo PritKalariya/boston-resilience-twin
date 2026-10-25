@@ -8,16 +8,32 @@ that changes an operational step.
 `docker-compose.yaml` at the repo root runs Airflow 3.3.2 with LocalExecutor
 and a Postgres 16 metadata database: `postgres`, a one-shot `airflow-init`,
 `airflow-apiserver` (UI and API on 127.0.0.1:8080 only), `airflow-scheduler`
-(also runs the tasks), and `airflow-dag-processor`. The image is pinned to
-`apache/airflow:3.3.2-python3.12` (ADR-013). There is no triggerer: add the
-official triggerer service back when the first deferrable operator lands,
+(also runs the tasks), and `airflow-dag-processor`. There is no triggerer: add
+the official triggerer service back when the first deferrable operator lands,
 since a deferred task waits forever without one.
+
+Every Airflow service runs `brt-airflow:local`, built from `airflow.Dockerfile`
+at the repo root: the `apache/airflow:3.3.2-python3.12` base image (ADR-013)
+plus `Data-Pipeline/requirements.txt` installed under Airflow's constraints for
+that image (ADR-022). The requirements file is the only thing copied in; DAG
+and script code is bind-mounted (ADR-017).
+
+### Rebuild the image
+
+```bash
+docker compose up -d --build --wait
+```
+
+Run it after any change to `Data-Pipeline/requirements.txt`, including one that
+arrives with a `git pull`. DAG and script changes never need a rebuild. With
+the requirements unchanged the build is fully cached and adds about a second,
+so it is safe to use `--build` on every start.
 
 ### Start and check
 
 ```bash
 echo "AIRFLOW_UID=$(id -u)" > .env   # Linux only (the VM too), once per clone
-docker compose up -d --wait
+docker compose up -d --build --wait
 docker compose ps -a
 curl -fsS http://127.0.0.1:8080/api/v2/monitor/health
 ```
@@ -40,6 +56,84 @@ docker compose exec airflow-scheduler airflow dags list-runs hello
 
 `list-import-errors` prints `No data found` when every DAG file imports. The
 hello run reaches `success` within a minute.
+
+### Run the data pipeline DAG
+
+`Data-Pipeline/dags/daily_pipeline.py` chains ingestion, processing and
+validation, one task per module (#22). `docker-compose.yaml` mounts the repo
+under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
+`Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
+`PYTHONPATH`, so tasks import the scripts (ADR-017).
+
+- Five tasks run scripts: `ingest_static_layers`, `parse_legacy_311`,
+  `parse_new_311`, `combine_311` and `spatial_join`.
+- The other 13 are placeholders. Each logs the issue that builds it
+  (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
+- Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
+  hand.
+
+The DAG runs only when triggered. It takes two params, both inclusive:
+`start` (2015-01-01 or later) and `end` (empty: through the latest data).
+
+```bash
+docker compose exec airflow-scheduler airflow dags unpause daily_pipeline
+# One year, into Data-Pipeline/data/slices/2025-01-01_2025-12-31/
+docker compose exec airflow-scheduler airflow dags trigger daily_pipeline -r slice-2025 -c '{"start": "2025-01-01", "end": "2025-12-31"}'
+# Full build, into Data-Pipeline/data/interim/
+docker compose exec airflow-scheduler airflow dags trigger daily_pipeline -r full-build
+docker compose exec airflow-scheduler airflow dags list-runs daily_pipeline
+docker compose exec airflow-scheduler airflow tasks states-for-dag-run daily_pipeline slice-2025
+```
+
+In the UI, Trigger opens a form with the two dates. A slice never overwrites
+the full-build files that other scripts read; delete its folder in
+`Data-Pipeline/data/slices/` when you are done. A slice keeps only its days,
+in Boston local time (new-system times are already local, ADR-020): legacy
+rows are cut right after parsing, and the combined table after combining.
+The parsed new-system export stays whole, because combining needs every new
+case to set the switch dates and to drop resubmitted legacy copies. So a
+slice's `311_combined.parquet` holds the same rows as the full build has for
+those days. A run fails at `check_range`
+on a start before 2015, an end before the start, or an unknown conf key.
+Each task's log, with everything its script printed, is in
+`Data-Pipeline/logs/dag_id=daily_pipeline/run_id=<run>/task_id=<task>/`.
+On a laptop (2026-10-21), a one-year slice took 40 seconds and the full
+build about 2.5 minutes. The full build peaked at 3.4 GiB in the scheduler
+container, with `map_311.py` before #68.
+
+Logging and failures (#36):
+
+- Every task logs one line with its run id, rows in and rows out, for example
+  `run slice-2025 task combine_311: rows in 348,466, rows out 280,044 in 3.1 s`.
+  Placeholders log 0 and 0, and `check_range` logs n/a. CSV inputs are
+  counted as records, the way the parsers report `file_rows`
+  (`legacy_311.count_records`), and parquet files from their metadata;
+  `ingest_static_layers` counts only the layers in its config. Counting reads
+  each raw CSV once more: about 1 s per yearly file in the container on a
+  Windows laptop, 12 s for all 13 files.
+- The `ingest_*` tasks retry twice. Airflow's exponential backoff adds a
+  random spread, so the waits are about 5 to 10 minutes and then 10 to 15
+  (capped). Every other task fails at once.
+- A real step whose input file is missing or empty fails before its script
+  runs (`InputError`), naming the file and how to get it. The DAG raises it
+  as `AirflowFailException`, so even an `ingest_*` task fails at once instead
+  of retrying. A script error is logged as `run <id> task <task> failed:
+  <error>` and keeps its own type.
+- Before a step runs, its outputs are deleted, so a file left by an earlier
+  run cannot pass for new output. `ingest_static_layers` also deletes empty
+  (0-byte) files in `Data-Pipeline/data/raw/static/`, so `--download` fetches
+  them again.
+- A task that fails for good writes `ALERT <dag>.<task> failed in run <id>
+  (try <n>): <error>` to its own log (`Data-Pipeline/scripts/alerts.py`).
+  Slack or email delivery comes with #34.
+
+- **`ingest_static_layers` fails with `No module named 'geopandas'`.** The
+  containers run an image built before the geo packages were added (ADR-022).
+  Rebuild with `docker compose up -d --build --wait`.
+- **Linux: "Permission denied" in `Data-Pipeline/data`.** The stack ran
+  without `AIRFLOW_UID`, so `airflow-init` gave the folder to uid 50000. Set
+  `AIRFLOW_UID` (Start and check), then take it back:
+  `sudo chown -R "$(id -u):$(id -g)" Data-Pipeline/data`.
 
 ### Stop and reset
 
@@ -86,7 +180,18 @@ environment block in `docker-compose.yaml` passes one value to all of them.
   without `AIRFLOW_UID`. Run the `sudo chown` under Stop and reset, then
   write `.env` before the next start.
 - **A DAG does not show up.** Run `airflow dags list-import-errors` (above).
-  New files are picked up within 30 seconds.
+  New files are picked up within 30 seconds. A new component also needs a
+  volume line for its `dags/` folder in `docker-compose.yaml`, mounted at
+  `/opt/airflow/dags/<component>` in snake_case (ADR-017); without it, Airflow
+  never sees the folder.
+- **A DAG task fails with `ModuleNotFoundError` after a pull.** The image is
+  stale: someone added a package to `Data-Pipeline/requirements.txt` and your
+  containers still run the image built before it. Rebuild with
+  `docker compose up -d --build --wait`.
+- **DAGs still load from the old path after a pull.** A running stack keeps
+  its old mounts until its containers are recreated. After pulling a change
+  to `docker-compose.yaml`, such as the ADR-017 DAG mount, run
+  `docker compose down`, then `docker compose up -d --build --wait`.
 
 ## Surge baseline re-check (ADR-005)
 
@@ -101,14 +206,41 @@ both 311 systems combined. Rerun the check when any of these happens:
 python Data-Pipeline/scripts/legacy_311.py
 python Data-Pipeline/scripts/new_311.py
 python Data-Pipeline/scripts/map_311.py --change-points Data-Pipeline/data/interim/change-points.csv
-python Data-Pipeline/scripts/live_baselines.py
+python Data-Pipeline/scripts/live_baselines.py --change-points Data-Pipeline/data/interim/change-points.csv
 ```
 
-`map_311.py` writes the switch dates to the gitignored data folder here, so
-the committed `docs/data/change-points.csv` only changes in a reviewed PR.
+`map_311.py` writes the switch dates to the gitignored data folder here and
+`live_baselines.py` reads them from there, so the committed
+`docs/data/change-points.csv` only changes in a reviewed PR.
 For snow, compare snow-day counts with the legacy range and look for
 unmapped or non-snow categories that jump on snow days; open a category-map
 PR if so, and update ADR-005.
+
+## After-switch policy (ADR-021)
+
+`map_311.py` flags legacy requests opened on or after their category's
+first new-system day (`after_switch`). ADR-021 keeps them. The setting is
+`after_switch_policy` in `Data-Pipeline/config/processing.csv`: `keep`
+(default), `drop`, or `exclude_from_baselines` (counted on their day, left
+out of baselines). Change it only in a reviewed PR that updates ADR-021,
+regenerates counts and labels, and reports the change in totals.
+
+Rerun the check after a new 311 export, after a category-map PR, and at the
+first snow of the winter:
+
+```bash
+python Data-Pipeline/scripts/legacy_311.py
+python Data-Pipeline/scripts/new_311.py
+python Data-Pipeline/scripts/map_311.py --change-points Data-Pipeline/data/interim/change-points.csv
+python Data-Pipeline/scripts/static_layers.py --download --manifest Data-Pipeline/data/interim/static-layers.csv
+python Data-Pipeline/scripts/after_switch.py
+```
+
+The `--manifest` path keeps the committed `docs/data/static-layers.csv` as
+it is. `after_switch.py` takes about 1.5 minutes and writes no files. Look
+for a window where both systems logged many rows and the ratio under keep is
+well above 1 (requests entered twice), and in winter for Snow Plowing rows
+flagged `after_switch`.
 
 ## Static layers
 
@@ -121,6 +253,16 @@ python Data-Pipeline/scripts/static_layers.py --refresh    # fetch every file ag
 ```
 
 Raw files go to `Data-Pipeline/data/raw/static/` and the loaded layers to `Data-Pipeline/data/interim/static/` (vectors as GeoParquet in EPSG:4326), both gitignored. The run rewrites `docs/data/static-layers.csv` with the source CRS, row count, retrieval date and SHA-256 of each file; commit it with the change. A changed hash after `--refresh` means the city published a new version, so check the row counts before using it. The run stops on a missing, empty or unreadable file, a missing or duplicate key, or a layer that falls outside Boston after reprojection (usually a wrong CRS).
+
+## Spatial join (311 requests to tracts and neighborhoods)
+
+`spatial_join.py` places every request in `311_combined.parquet` by its coordinates, in a 2020 tract and the ADR-004 neighborhood that holds it, and writes `Data-Pipeline/data/interim/311_located.parquet`. It needs the static layers loaded first.
+
+```bash
+python Data-Pipeline/scripts/spatial_join.py
+```
+
+The run adds `geoid20`, `unit` (the neighborhood a request is counted in) and `location`, and prints the share with no unit by year and system. `location` is `placed` or the reason there is no unit: `no_coordinates` (missing or not a number), `placeholder` (a default point listed in `Data-Pipeline/config/placeholder_locations.csv`, matched within about a metre), `outside_boston` (no 2020 tract) or `no_neighborhood` (tract 9815.02, which the city leaves out of every neighborhood). A latitude and longitude entered the wrong way round are swapped back and counted. If a new default point turns up (one spot holding thousands of requests with no neighborhood), add it to the placeholder file in a reviewed PR.
 
 ## Project 1 infrastructure (Terraform)
 
@@ -347,7 +489,7 @@ EOF
 Start the stack:
 
 ```bash
-cd /opt/boston-resilience-twin && sudo docker compose up -d --wait
+cd /opt/boston-resilience-twin && sudo docker compose up -d --build --wait
 ```
 
 The first start takes about 10 minutes on an e2-medium, half of it pulling the Airflow image. It is not hung.
@@ -362,7 +504,7 @@ cd /opt/boston-resilience-twin && sudo docker compose ps
 
 All four services (postgres, airflow-apiserver, airflow-scheduler, airflow-dag-processor) should show `(healthy)`.
 
-**Stop the VM, never the containers.** Running `docker compose stop` or `down` before a VM stop marks the containers as stopped by hand, and they stay down after the next start. If that happens, run `sudo docker compose up -d --wait`.
+**Stop the VM, never the containers.** Running `docker compose stop` or `down` before a VM stop marks the containers as stopped by hand, and they stay down after the next start. If that happens, run `sudo docker compose up -d --build --wait`.
 
 ### Open the UI (laptop)
 
@@ -377,7 +519,7 @@ Then browse to `http://localhost:18080` and log in with the compose defaults, `a
 ### Update after a merge to main
 
 ```bash
-cd /opt/boston-resilience-twin && sudo git pull --ff-only && sudo docker compose up -d --wait
+cd /opt/boston-resilience-twin && sudo git pull --ff-only && sudo docker compose up -d --build --wait
 ```
 
 The VM runs `main` only. Test branches on your laptop.
