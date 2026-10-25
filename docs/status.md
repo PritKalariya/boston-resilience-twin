@@ -10,7 +10,7 @@ Week 2: Processing (due 2026-10-18)
 |---|---|---|---|---|
 | #1 Harden repo and team workflow | Prit | 2026-10-10 | in progress | |
 | #2 Local dev environment and Python pin | Punith | 2026-10-13 | done | PR #55 merged. `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); ADR-013 pins Python 3.12 |
-| #22 Daily DAG skeleton | Punith | 2026-10-18 | in review | `daily_pipeline`: 19 tasks; 4 run scripts (static layers, legacy and new 311, combine), 14 are placeholders until #6, #7, #8, #14, #15, #16, #17, #35, #32; results below. Runs on the #69 image (ADR-022), no manual installs |
+| #22 Daily DAG skeleton | Punith | 2026-10-18 | in review | `daily_pipeline`: 19 tasks; 7 run scripts (static layers, raw validation, legacy and new 311, combine, spatial join, processed validation), 11 are placeholders until #6, #7, #8, #15, #16, #35, #32; results below. Runs on the #69 image (ADR-022), no manual installs |
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
 | #11 Decision: live baselines for the new 311 format | Punith | 2026-10-13 | done | PR #63 merged; ADR-005: baseline = same weeks of the previous 3 years, both systems, by storm group |
@@ -25,7 +25,7 @@ Week 2: Processing (due 2026-10-18)
 | #48 Lifecycle rule for noncurrent versions on the data bucket | Prit | 2026-10-18 | done | PR #56 merged; noncurrent versions in the data bucket deleted after 30 days |
 | #9 Static layers | Alekhya | 2026-10-13 | done | PR #62 merged; results below |
 | #10 Decision: lock the modeling unit | Alekhya | 2026-10-13 | done | PR #66 merged; ADR-004 proposed (team sign-off pending): neighborhood x day, 24 tract-built neighborhoods, surge in any storm group |
-| #17 Validation suites (Great Expectations) | Alekhya | 2026-10-18 | in review | `validate_raw` and `validate_processed` run `validate_data.py` (GE 1.24.1); 259 raw and 55 processed checks pass on the 2026-10-20 data; injected UTC shift and missing column fail by name; results below |
+| #17 Validation suites (Great Expectations) | Alekhya | 2026-10-18 | in review | `validate_raw` and `validate_processed` run `validate_data.py` (GE 1.24.1); all raw and processed checks pass on the 2026-10-20 data; review fixes from Kirtan in; injected UTC shift and missing column fail by name; results below |
 | #31 Repo layout and pipeline pins | Prit | 2026-10-16 | done | PR #58 merged; ADR-017: one shared Airflow stack at the root, each component mounts its `dags/` at `/opt/airflow/dags/<component>` in snake_case; `Data-Pipeline/requirements.txt` pinned, 94 tests pass in a clean Python 3.12 venv |
 | #69 Airflow image with every pipeline dependency | Prit | 2026-10-22 | done | PR #74 merged; ADR-022: every Airflow service runs `brt-airflow:local` from `airflow.Dockerfile`, the ADR-013 base image plus `Data-Pipeline/requirements.txt` under Airflow's constraints. Cold `docker compose up -d --build --wait` 1m37s (image build plus stack start, base image already pulled), cached `docker compose build` 1.0s, image 3.44 GB on disk against the base image's 3.22 GB. Great Expectations 1.24.1, Fairlearn 0.15.0 and dvc[gs] 3.67.1 all dry-run clean against the constraints with pandas 3.0.5. Unblocks #22 and #37 |
 
@@ -52,7 +52,7 @@ None.
 
 Commands: `python Data-Pipeline/scripts/validate_data.py --stage raw` and `--stage processed` (also run through `pipeline_steps.run_step`, the DAG's entry point). Data: Analyze Boston files downloaded 2026-10-20, `311_combined.parquet` and `311_located.parquet` from `map_311.py` and `spatial_join.py`.
 
-- Raw: 259 of 259 checks pass in 15 s (12 legacy files and the new-system export). Processed: 55 of 55 pass in 7 to 10 s.
+- Raw: 144 blocking checks and 142 warning-level checks, all passing, in about 15 s (12 legacy files and the new-system export). Processed: 55 of 55 blocking checks pass in 7 to 10 s. (After review on #83: only the parsers' required columns, coordinates and more than 0.1% missing or repeated case ids block; optional columns and a few bad ids warn.)
 - In Airflow (image rebuilt with GE 1.24.1): the `daily_pipeline` slice 2025-01-01 to 2025-12-31 succeeded, all 19 tasks; `validate_raw` 39 of 39 checks and `validate_processed` 55 of 55, results in the slice's `interim/validation/`.
 - Worst values against the bounds in `Data-Pipeline/config/validation_bounds.csv`: median open hour 12.4 to 13.5 (bound 10 to 16; a 4 hour shift puts the earliest file at 16.4); coordinates inside Boston 98.0% in 2015 (bound 95%); placed share 97.9% in 2015 (bound 95%); open times parse 100% (bound 99.9%); legacy rows equal the published counts (bound 99%).
 - Injected bad files fail by name in the tests (`test_validate_data.py`): a 4 or 5 hour UTC shift (raw legacy, raw new system, combined), a missing column, a `-04` suffix, unparseable dates, a truncated file, swapped coordinates, an unknown unit or storm group, duplicate ids, a future date, lost rows and a low placed share.

@@ -111,17 +111,29 @@ bound there in a reviewed PR, not in the code. Usage analytics are switched
 off (`GX_ANALYTICS_ENABLED=False`).
 
 - **Raw:** each legacy yearly file in the run's range, one at a time, and the
-  new-system export: expected columns, case ids present and unique, open
-  times that parse, the `+00` suffix on new-system times, the median open hour
-  (catches a switch to real UTC, ADR-020), the row count against
-  `published_311_counts.csv`, and coordinates inside Boston.
+  new-system export: the parsers' required columns and coordinates, case ids
+  present and unique, open times that parse, no non-zero offset on
+  new-system times (`new_311.has_other_offset`, ADR-020), the median open
+  hour (catches a switch to real UTC), the row count against
+  `published_311_counts.csv` (legacy years and the new-system export), and
+  coordinates inside Boston.
 - **Processed:** `311_combined.parquet` and `311_located.parquet`: expected
   columns, unique case ids, known `source_system`, `storm_group`, `match`,
   `location` and `unit` values, open times from 2015-01-01 to the run date,
   the median open hour per system, the same row count in both tables, and the
   share of requests placed in every year.
 
-A failed check fails the task, so nothing after it runs. The task log ends
+Checks are blocking or warnings. A failed blocking check fails the task, so
+nothing after it runs. A warning is printed (`WARNING <table>: <check>`) and
+kept in the JSON, and the run goes on, because the parsers already handle
+it: an optional column missing (anything in `KEEP_COLUMNS` outside the
+parsers' `REQUIRED_COLUMNS` and the coordinates; the parsers fill it with
+blanks), or a few missing or repeated case ids (the parsers drop and count
+them). More than `case_id_ok_min` (0.1%) of ids missing or repeated blocks.
+`placed_per_year_min` leaves out years with fewer than
+`placed_min_year_rows` rows, so early January does not fail on a few rows.
+
+A failed blocking check fails the task. The task log ends
 with `ValidationFailed: <n> <stage> checks failed: <table>: <check>(<column>)
 observed <value>`, and every result is in
 `Data-Pipeline/data/interim/validation/raw.json` or `processed.json` (for a
@@ -135,8 +147,9 @@ python Data-Pipeline/scripts/validate_data.py --stage processed
 What to do when one fails:
 
 - **`expect_column_to_exist` on a header.** The city renamed or dropped a
-  column. Check the published file before changing any parser.
-- **`expect_column_median_to_be_between(open_hour)` or `offset_00`.** The
+  required column (as a warning: an optional one). Check the published file
+  before changing any parser.
+- **`expect_column_median_to_be_between(open_hour)` or `offset_ok`.** The
   new-system clock may have changed. Rerun `map_311.check_clock` (it runs in
   `combine_311`) and read ADR-020 before changing `new_311.CLOCK`.
 - **`expect_table_row_count_to_be_between` on a legacy file.** The download

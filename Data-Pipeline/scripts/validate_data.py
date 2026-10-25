@@ -7,9 +7,14 @@ new-system export. --stage processed checks 311_combined.parquet and
 
 Every table gets two batches: its header (a 0-row frame, so a missing column
 fails by name without reading the data) and the columns the checks need.
-The run writes every result to --out as JSON and raises ValidationFailed,
-naming each failed check, if any check fails, so the DAG task fails and the
-steps after it do not run.
+
+Checks are blocking or warnings. A blocking check guards what the next steps
+need (the parsers' REQUIRED_COLUMNS and coordinates, open times, the clock,
+row counts); a warning flags something the parsers already handle (an
+optional column gone, a few duplicate or missing case ids). The run writes
+every result to --out as JSON, prints the warnings, and raises
+ValidationFailed, naming each failed blocking check, so the DAG task fails
+and the steps after it do not run.
 """
 
 from __future__ import annotations
@@ -34,16 +39,18 @@ import pandas as pd
 import legacy_311
 import map_311
 import new_311
+import pipeline_steps
 from spatial_join import LOCATIONS
 from static_layers import BOSTON_BOUNDS
 
-FIRST_DAY = pd.Timestamp("2015-01-01")
-STORM_GROUPS = ["snow_ice", "tree", "flooding"]
+FIRST_DAY = pd.Timestamp(pipeline_steps.FIRST_DAY)
+STORM_GROUPS = sorted(map_311.STORM_GROUPS - {""})  # "" is a blank group; the combined table stores it as null
 SYSTEMS = ["legacy", "new"]
-MATCHES = ["same", "renamed", "merged", "split", "legacy_only", "new_only", "unmapped", "excluded"]
+MATCHES = sorted(map_311.MATCHES | {map_311.UNMAPPED})
+COORDINATES = ["latitude", "longitude"]  # spatial_join needs them
 BOUND_NAMES = {
-    "open_dt_parsed_min", "new_offset_suffix_min", "median_open_hour_min", "median_open_hour_max",
-    "published_rows_min", "in_boston_min", "placed_per_year_min",
+    "open_dt_parsed_min", "new_offset_ok_min", "median_open_hour_min", "median_open_hour_max",
+    "published_rows_min", "in_boston_min", "placed_per_year_min", "placed_min_year_rows", "case_id_ok_min",
 }
 GEOID20 = r"^25025\d{6}$"
 
@@ -61,6 +68,7 @@ class Check:
     column: str
     success: bool
     observed: str
+    blocking: bool = True
 
 
 def load_bounds(path: Path | str) -> dict[str, float]:
@@ -86,7 +94,7 @@ class Validator:
         self._batches = context.data_sources.add_pandas("frames").add_dataframe_asset("frame").add_batch_definition_whole_dataframe("whole")
         self.checks: list[Check] = []
 
-    def run(self, table: str, df: pd.DataFrame, expectations: list) -> None:
+    def run(self, table: str, df: pd.DataFrame, expectations: list, blocking: bool = True) -> None:
         suite = gx.ExpectationSuite(name=table)
         for expectation in expectations:
             suite.add_expectation(expectation)
@@ -102,16 +110,40 @@ class Validator:
                 column=str(config.kwargs.get("column", "")),
                 success=bool(item.success),
                 observed=str(observed),
+                blocking=blocking,
             ))
 
     @property
     def failed(self) -> list[Check]:
-        return [c for c in self.checks if not c.success]
+        """Failed blocking checks: these fail the stage."""
+        return [c for c in self.checks if not c.success and c.blocking]
+
+    @property
+    def warnings(self) -> list[Check]:
+        return [c for c in self.checks if not c.success and not c.blocking]
 
 
 def header_checks(columns, expected) -> tuple[pd.DataFrame, list]:
     """A 0-row frame with the file's columns and one existence check per expected column."""
     return pd.DataFrame(columns=list(columns)), [gxe.ExpectColumnToExist(column=c) for c in expected]
+
+
+def run_header(v: Validator, table: str, columns, required, optional) -> None:
+    """Missing required columns block; missing optional ones (the parsers fill them) warn."""
+    frame, exist = header_checks(columns, list(required))
+    v.run(f"{table} header", frame, exist)
+    frame, exist = header_checks(columns, [c for c in optional if c not in required])
+    v.run(f"{table} header", frame, exist, blocking=False)
+
+
+def id_checks(column: str, share: float) -> tuple[list, list]:
+    """Case ids: blocking when more than 1 - share are missing or repeated, a warning on any."""
+    blocking = [
+        gxe.ExpectColumnValuesToNotBeNull(column=column, mostly=share),
+        gxe.ExpectColumnValuesToBeUnique(column=column, mostly=share),
+    ]
+    warning = [gxe.ExpectColumnValuesToNotBeNull(column=column), gxe.ExpectColumnValuesToBeUnique(column=column)]
+    return blocking, warning
 
 
 def open_hours(times: pd.Series) -> pd.Series:
@@ -148,12 +180,11 @@ def validate_raw(v: Validator, raw_dir: Path, years: list[int], published: pd.Da
         if not path.exists() or path.stat().st_size == 0:
             v.checks.append(Check(f"raw {name}", "file_exists_and_is_not_empty", "", False, "missing or empty"))
             continue
-        header, df = raw_frame(path, "open_dt", ["case_enquiry_id", "open_dt", "latitude", "longitude"], utc=False)
-        frame, exist = header_checks(header, legacy_311.KEEP_COLUMNS)
-        v.run(f"raw {name} header", frame, exist)
+        header, df = raw_frame(path, "open_dt", ["case_enquiry_id", "open_dt", *COORDINATES], utc=False)
+        run_header(v, f"raw {name}", header, [*sorted(legacy_311.REQUIRED_COLUMNS), *COORDINATES], legacy_311.KEEP_COLUMNS)
+        ids, id_warnings = id_checks("case_enquiry_id", bounds["case_id_ok_min"])
         checks = [
-            gxe.ExpectColumnValuesToNotBeNull(column="case_enquiry_id"),
-            gxe.ExpectColumnValuesToBeUnique(column="case_enquiry_id"),
+            *ids,
             gxe.ExpectColumnValuesToBeInSet(column="open_parsed", value_set=[True], mostly=bounds["open_dt_parsed_min"]),
             gxe.ExpectColumnMedianToBeBetween(column="open_hour", **hour),
             gxe.ExpectColumnValuesToBeInSet(column="in_boston", value_set=[True], mostly=bounds["in_boston_min"]),
@@ -161,26 +192,32 @@ def validate_raw(v: Validator, raw_dir: Path, years: list[int], published: pd.Da
         if name in published.index:
             checks.append(gxe.ExpectTableRowCountToBeBetween(min_value=int(bounds["published_rows_min"] * published[name])))
         v.run(f"raw {name}", df, checks)
+        v.run(f"raw {name}", df, id_warnings, blocking=False)
 
     name = "new_system.csv"
     path = raw_dir / name
     if not path.exists() or path.stat().st_size == 0:
         v.checks.append(Check(f"raw {name}", "file_exists_and_is_not_empty", "", False, "missing or empty"))
         return
-    header, df = raw_frame(path, "open_date", ["case_id", "open_date", "latitude", "longitude"], utc=True)
-    frame, exist = header_checks(header, new_311.KEEP_COLUMNS)
-    v.run(f"raw {name} header", frame, exist)
+    header, df = raw_frame(path, "open_date", ["case_id", "open_date", *COORDINATES], utc=True)
+    run_header(v, f"raw {name}", header, [*sorted(new_311.REQUIRED_COLUMNS), *COORDINATES], new_311.KEEP_COLUMNS)
     if "open_date" in df:
-        df["offset_00"] = df["open_date"].str.strip().str.match(r".*\d{2}:\d{2}(:\d{2}(\.\d+)?)?[+-]00(:?00)?$")
+        # The parser's own rule (ADR-020): only a different offset is bad. A blank
+        # or offset-less time passes here and is caught by open_parsed instead.
+        df["offset_ok"] = ~new_311.has_other_offset(df["open_date"].fillna(""))
+    ids, id_warnings = id_checks("case_id", bounds["case_id_ok_min"])
     checks = [
-        gxe.ExpectColumnValuesToNotBeNull(column="case_id"),
-        gxe.ExpectColumnValuesToBeUnique(column="case_id"),
+        *ids,
         gxe.ExpectColumnValuesToBeInSet(column="open_parsed", value_set=[True], mostly=bounds["open_dt_parsed_min"]),
-        gxe.ExpectColumnValuesToBeInSet(column="offset_00", value_set=[True], mostly=bounds["new_offset_suffix_min"]),
+        gxe.ExpectColumnValuesToBeInSet(column="offset_ok", value_set=[True], mostly=bounds["new_offset_ok_min"]),
         gxe.ExpectColumnMedianToBeBetween(column="open_hour", **hour),
         gxe.ExpectColumnValuesToBeInSet(column="in_boston", value_set=[True], mostly=bounds["in_boston_min"]),
     ]
+    if name in published.index:
+        # The export only grows, so the published count is a floor.
+        checks.append(gxe.ExpectTableRowCountToBeBetween(min_value=int(bounds["published_rows_min"] * published[name])))
     v.run(f"raw {name}", df, checks)
+    v.run(f"raw {name}", df, id_warnings, blocking=False)
 
 
 def parquet_frame(path: Path, keep: list[str]) -> tuple[list[str], pd.DataFrame]:
@@ -211,8 +248,9 @@ def validate_processed(
         gxe.ExpectColumnValuesToBeInSet(column="storm_group", value_set=STORM_GROUPS),
         gxe.ExpectColumnValuesToBeInSet(column="match", value_set=MATCHES),
         gxe.ExpectColumnValuesToNotBeNull(column="open_dt"),
+        # Strictly before the day after `latest`, as trim_to_range keeps a slice.
         gxe.ExpectColumnValuesToBeBetween(
-            column="open_dt", min_value=FIRST_DAY, max_value=pd.Timestamp(latest) + pd.Timedelta(days=1)
+            column="open_dt", min_value=FIRST_DAY, max_value=pd.Timestamp(latest) + pd.Timedelta(days=1), strict_max=True
         ),
     ]
     v.run("311_combined", df, checks)
@@ -236,8 +274,12 @@ def validate_processed(
         gxe.ExpectColumnValuesToMatchRegex(column="geoid20", regex=GEOID20),
     ])
     if {"open_dt", "location"} <= set(df.columns) and len(df):
-        placed = (df["location"] == "placed").groupby(df["open_dt"].dt.year).mean()
-        v.run("311_located per year", pd.DataFrame({"year": placed.index, "placed_share": placed.to_numpy()}), [
+        by_year = (df["location"] == "placed").groupby(df["open_dt"].dt.year).agg(["mean", "size"])
+        # A year with few rows so far (early January) would fail on a handful of unplaced requests.
+        full = by_year[by_year["size"] >= bounds["placed_min_year_rows"]]
+        if full.empty:
+            return
+        v.run("311_located per year", pd.DataFrame({"year": full.index, "placed_share": full["mean"].to_numpy()}), [
             gxe.ExpectColumnMinToBeBetween(column="placed_share", min_value=bounds["placed_per_year_min"]),
         ])
 
@@ -274,7 +316,11 @@ def main() -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"stage": args.stage, "checks": [asdict(c) for c in v.checks]}, indent=2))
     print(markdown(v.checks))
-    print(f"\n{len(v.checks) - len(v.failed)} of {len(v.checks)} checks passed; wrote {out}")
+    blocking = [c for c in v.checks if c.blocking]
+    print(f"\n{len(blocking) - len(v.failed)} of {len(blocking)} blocking checks passed, "
+          f"{len(v.warnings)} warnings; wrote {out}")
+    for c in v.warnings:
+        print(f"WARNING {c.table}: {c.expectation}({c.column}) observed {c.observed}")
     if v.failed:
         names = "; ".join(f"{c.table}: {c.expectation}({c.column}) observed {c.observed}" for c in v.failed)
         raise ValidationFailed(f"{len(v.failed)} {args.stage} checks failed: {names}")

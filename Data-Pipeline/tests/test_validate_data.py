@@ -36,10 +36,11 @@ def legacy_csv(path, n=N, shift_hours=0, drop=(), bad_dates=0):
     return path
 
 
-def new_csv(path, n=N, shift_hours=0, suffix="+00", drop=()):
+def new_csv(path, n=N, shift_hours=0, suffix="+00", drop=(), blank_dates=0):
     df = pd.DataFrame({c: "x" for c in new_311.KEEP_COLUMNS}, index=range(n))
     df["case_id"] = [f"BCS-{i:08d}" for i in range(n)]
     df["open_date"] = [t.strftime("%Y-%m-%d %H:%M:%S") + suffix for t in open_times(n, shift_hours)]
+    df.loc[: blank_dates - 1, "open_date"] = ""
     df["latitude"], df["longitude"] = "42.31", "-71.06"
     df.drop(columns=list(drop)).to_csv(path, index=False)
     return path
@@ -63,6 +64,10 @@ def run_raw(raw_dir, published, years=(2024,)):
 
 def failed(v):
     return {(c.table, c.expectation, c.column) for c in v.failed}
+
+
+def warned(v):
+    return {(c.table, c.expectation, c.column) for c in v.warnings}
 
 
 # Raw stage
@@ -107,9 +112,57 @@ def test_a_different_offset_fails(raw):
     new_csv(raw_dir / "new_system.csv", suffix="-04")
     # Read with its offset, the time also moves 4 hours later, so the median check fails too.
     assert failed(run_raw(raw_dir, published)) == {
-        ("raw new_system.csv", "expect_column_values_to_be_in_set", "offset_00"),
+        ("raw new_system.csv", "expect_column_values_to_be_in_set", "offset_ok"),
         ("raw new_system.csv", "expect_column_median_to_be_between", "open_hour"),
     }
+
+
+def test_optional_column_missing_only_warns(raw):
+    raw_dir, published = raw
+    legacy_csv(raw_dir / "2024.csv", drop=["ward"])
+    new_csv(raw_dir / "new_system.csv", drop=["precinct"])
+    v = run_raw(raw_dir, published)
+    assert not v.failed
+    assert warned(v) == {
+        ("raw 2024.csv header", "expect_column_to_exist", "ward"),
+        ("raw new_system.csv header", "expect_column_to_exist", "precinct"),
+    }
+
+
+def test_missing_coordinates_column_fails(raw):
+    raw_dir, published = raw
+    legacy_csv(raw_dir / "2024.csv", drop=["latitude"])
+    assert ("raw 2024.csv header", "expect_column_to_exist", "latitude") in failed(run_raw(raw_dir, published))
+
+
+def test_one_blank_new_system_time_passes(raw):
+    # Kirtan's case on #83: 1 blank in 1,000 rows. The parser drops it; the stage must not fail.
+    raw_dir, published = raw
+    new_csv(raw_dir / "new_system.csv", n=1000, blank_dates=1)
+    published.loc[published["source"] == "new_system.csv", "published_rows"] = 1000
+    assert not run_raw(raw_dir, published).failed
+
+
+def test_a_few_duplicate_ids_warn_and_many_fail(raw):
+    raw_dir, published = raw
+    path = legacy_csv(raw_dir / "2024.csv", n=2000)
+    published.loc[published["source"] == "2024.csv", "published_rows"] = 2000
+    df = pd.read_csv(path, dtype=str)
+    df.loc[1, "case_enquiry_id"] = df.loc[0, "case_enquiry_id"]  # 1 of 2,000
+    df.to_csv(path, index=False)
+    v = run_raw(raw_dir, published)
+    assert not v.failed
+    assert warned(v) == {("raw 2024.csv", "expect_column_values_to_be_unique", "case_enquiry_id")}
+
+    df.loc[1:40, "case_enquiry_id"] = df.loc[0, "case_enquiry_id"]  # 2% repeated
+    df.to_csv(path, index=False)
+    assert ("raw 2024.csv", "expect_column_values_to_be_unique", "case_enquiry_id") in failed(run_raw(raw_dir, published))
+
+
+def test_truncated_new_system_export_fails(raw):
+    raw_dir, published = raw
+    new_csv(raw_dir / "new_system.csv", n=150)
+    assert failed(run_raw(raw_dir, published)) == {("raw new_system.csv", "expect_table_row_count_to_be_between", "")}
 
 
 def test_unparseable_dates_beyond_the_bound_fail(raw):
@@ -217,8 +270,24 @@ def test_duplicate_case_and_future_date_fail(tmp_path):
     assert ("311_combined", "expect_column_values_to_be_between", "open_dt") in names
 
 
-def test_low_placed_share_and_lost_rows_fail(tmp_path):
+def test_request_at_midnight_after_the_latest_day_fails(tmp_path):
     combined = combined_frame()
+    combined.loc[0, "open_dt"] = pd.Timestamp("2026-10-26 00:00")  # latest is 2026-10-25
+    names = failed(run_processed(write_processed(tmp_path, combined, located_frame(combined))))
+    assert ("311_combined", "expect_column_values_to_be_between", "open_dt") in names
+
+
+def test_a_short_year_is_left_out_of_the_placed_share(tmp_path):
+    # 1,200 placed rows in 2024, then 20 rows in early 2025 with half unplaced.
+    combined = combined_frame(n=1220)
+    combined.loc[1200:, "open_dt"] = pd.Timestamp("2025-01-02 12:00")
+    located = located_frame(combined)
+    located.loc[1210:, ["location", "unit", "geoid20"]] = ["no_coordinates", None, None]
+    assert not run_processed(write_processed(tmp_path, combined, located)).failed
+
+
+def test_low_placed_share_and_lost_rows_fail(tmp_path):
+    combined = combined_frame(n=1200)
     located = located_frame(combined, placed=0.9).iloc[:-1]
     names = failed(run_processed(write_processed(tmp_path, combined, located)))
     assert names == {
