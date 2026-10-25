@@ -27,6 +27,7 @@ Week 2: Processing (due 2026-10-18)
 | #10 Decision: lock the modeling unit | Alekhya | 2026-10-13 | done | PR #66 merged; ADR-004 proposed (team sign-off pending): neighborhood x day, 24 tract-built neighborhoods, surge in any storm group |
 | #31 Repo layout and pipeline pins | Prit | 2026-10-16 | done | PR #58 merged; ADR-017: one shared Airflow stack at the root, each component mounts its `dags/` at `/opt/airflow/dags/<component>` in snake_case; `Data-Pipeline/requirements.txt` pinned, 94 tests pass in a clean Python 3.12 venv |
 | #69 Airflow image with every pipeline dependency | Prit | 2026-10-22 | done | PR #74 merged; ADR-022: every Airflow service runs `brt-airflow:local` from `airflow.Dockerfile`, the ADR-013 base image plus `Data-Pipeline/requirements.txt` under Airflow's constraints. Cold `docker compose up -d --build --wait` 1m37s (image build plus stack start, base image already pulled), cached `docker compose build` 1.0s, image 3.44 GB on disk against the base image's 3.22 GB. Great Expectations 1.24.1, Fairlearn 0.15.0 and dvc[gs] 3.67.1 all dry-run clean against the constraints with pandas 3.0.5. Unblocks #22 and #37 |
+| #24 Write ADRs 002, 003 | Srikar | 2026-10-18 | in review | ADR-002 supporting sources, ADR-003 time-based split and feature-history rule; both record scoping decisions (dated 2026-10-04) |
 
 ## Blocked
 None.
