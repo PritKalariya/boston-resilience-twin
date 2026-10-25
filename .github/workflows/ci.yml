@@ -1,0 +1,50 @@
+# CI v1 (#21): lint and tests on every pull request and every push to main.
+# Python 3.12 from .python-version (ADR-013). No secrets: the job reads nothing
+# from the repository's secrets, and tests/conftest.py blocks network access so
+# tests use fixture files only. The job name is the required status check on
+# main (runbook, "CI").
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    name: Lint and test (Python 3.12)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: Data-Pipeline/requirements.txt
+
+      - name: Check Python is 3.12
+        run: python -c "import sys; print(sys.version); sys.exit(sys.version_info[:2] != (3, 12))"
+
+      # Lint first: it needs no dependencies, so a lint error fails in seconds.
+      - name: Lint
+        run: |
+          pip install ruff==0.17.2
+          ruff check --output-format=github .
+
+      - name: Install dependencies
+        run: pip install -r Data-Pipeline/requirements.txt
+
+      - name: Test
+        run: python -m pytest Data-Pipeline/tests

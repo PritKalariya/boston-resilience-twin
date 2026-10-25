@@ -71,6 +71,7 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `python Data-Pipeline/scripts/spatial_join.py`: place every request in `311_combined.parquet` in a 2020 tract and its ADR-004 neighborhood by coordinates, write `Data-Pipeline/data/interim/311_located.parquet` and print the share with no location by year (needs the static layers)
 - `python Data-Pipeline/scripts/after_switch.py`: legacy rows opened after their category's switch date (`after_switch`) by category, the worst overlap windows and the storm surge labels under each policy (markdown for ADR-021); reads `after_switch_policy` from `Data-Pipeline/config/processing.csv`, needs the static layers (about 1.5 minutes)
 - `python -m pytest Data-Pipeline/tests`
+- `ruff check .`: lint as CI runs it (errors only, `ruff.toml`); install with `pip install ruff==0.17.2`. CI (`.github/workflows/ci.yml`) runs it and the tests on every PR
 - `cd Deployment/terraform && terraform init`: configure the GCS state backend and providers (needs `gcloud auth application-default login`)
 - `terraform fmt -check && terraform validate`: format and syntax check, no cloud calls
 - `terraform plan -var-file=terraform.tfvars`: read-only dry run against project 1 (`terraform.tfvars` is gitignored; copy from `terraform.tfvars.example`)
