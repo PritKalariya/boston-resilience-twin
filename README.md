@@ -103,7 +103,10 @@ The VM gets its secrets from Secret Manager (ADR-015), set up in #20. The runboo
 ```bash
 pip install -r Data-Pipeline/requirements.txt
 python -m pytest Data-Pipeline/tests
+pip install ruff==0.17.2 && ruff check .   # lint, as CI runs it
 ```
+
+CI (`.github/workflows/ci.yml`) runs the same lint and tests on Python 3.12 for every pull request and every push to main. Tests may not reach the network: `Data-Pipeline/tests/conftest.py` fails any test that tries, so use fixture files or fakes.
 
 Use Python 3.12 (ADR-013): the pins come from the Airflow constraints for 3.12, and on other versions the install can fail or build packages from source. Without a system 3.12, `uv venv --python 3.12 --seed .venv && source .venv/bin/activate` creates one (`.venv/` is gitignored). A test command pinned to Python 3.12 comes with W3-7 (#38).
 

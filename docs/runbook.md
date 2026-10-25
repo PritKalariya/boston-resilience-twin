@@ -250,6 +250,40 @@ environment block in `docker-compose.yaml` passes one value to all of them.
   to `docker-compose.yaml`, such as the ADR-017 DAG mount, run
   `docker compose down`, then `docker compose up -d --build --wait`.
 
+## CI
+
+`.github/workflows/ci.yml` runs on every pull request and every push to
+main: check Python is 3.12, `ruff check .` (errors only, rules in
+`ruff.toml`), install `Data-Pipeline/requirements.txt`, then
+`python -m pytest Data-Pipeline/tests`. It uses no secrets, and
+`Data-Pipeline/tests/conftest.py` blocks network access in every test, so a
+test that calls a live API or Cloud Storage fails with `NetworkBlocked`.
+The job is cancelled after 10 minutes; a normal run takes 1 to 2.
+
+Run the same checks locally before pushing:
+
+```bash
+ruff check .
+python -m pytest Data-Pipeline/tests
+```
+
+**Making the check required (repo admin, once).** After the workflow has run
+once on a pull request, open Settings, Branches, the rule for `main`, tick
+"Require status checks to pass before merging", search for
+`Lint and test (Python 3.12)`, add it, and save. If the job name in
+`ci.yml` ever changes, update the required check too, or every pull request
+waits for a check that never reports.
+
+- **`NetworkBlocked: test tried to look up ...` or `... tried to connect to ...`.**
+  The test reaches the internet; a request by host name usually fails at the
+  lookup. Connections to `127.0.0.1` and `::1` are allowed. Save a small
+  response under the test's fixtures, or patch in a
+  fake (see `test_pipeline_steps.py`, which replaces `static_layers.download`),
+  instead of calling the API.
+- **Lint fails with `F401` (unused import) or `F841` (unused variable).**
+  Remove it, or run `ruff check --fix .`.
+- **`Check Python is 3.12` fails.** `.python-version` changed; ADR-013 pins 3.12.
+
 ## Surge baseline re-check (ADR-005)
 
 ADR-005 builds surge baselines from the same weeks of the previous 3 years,
