@@ -68,6 +68,8 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `python Data-Pipeline/scripts/live_baselines.py`: test the 311 switch dates as change points and replay surge baseline methods across them (markdown for ADR-005); `--window-days 84` and `--drop-after-switch` for sensitivity
 - `python Data-Pipeline/scripts/static_layers.py [--download|--refresh]`: load the layers in `Data-Pipeline/config/static_layers.csv` to `Data-Pipeline/data/interim/static/` (EPSG:4326) and write `docs/data/static-layers.csv`; `--download` fetches missing files, `--refresh` all of them
 - `python Data-Pipeline/scripts/compare_units.py`: compare candidate modeling units (empty-cell share, surge rate with the ADR-005 baseline) from `311_combined.parquet` and the static tracts and neighborhoods (markdown; about 4 minutes)
+- `python Data-Pipeline/scripts/spatial_join.py`: place every request in `311_combined.parquet` in a 2020 tract and its ADR-004 neighborhood by coordinates, write `Data-Pipeline/data/interim/311_located.parquet` and print the share with no location by year (needs the static layers)
+- `python Data-Pipeline/scripts/after_switch.py`: legacy rows opened after their category's switch date (`after_switch`) by category, the worst overlap windows and the storm surge labels under each policy (markdown for ADR-021); reads `after_switch_policy` from `Data-Pipeline/config/processing.csv`, needs the static layers (about 1.5 minutes)
 - `python -m pytest Data-Pipeline/tests`
 - `cd Deployment/terraform && terraform init`: configure the GCS state backend and providers (needs `gcloud auth application-default login`)
 - `terraform fmt -check && terraform validate`: format and syntax check, no cloud calls
@@ -76,10 +78,13 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `gcloud compute instances start|stop airflow-vm --zone=us-east1-b`: VM power; Terraform does not manage run state
 - `read -rs VALUE && printf '%s' "$VALUE" | gcloud secrets versions add <secret> --data-file=-; unset VALUE`: add a secret value with no trailing newline and nothing in shell history (see runbook). Human only, never run by Claude Code
 - `docker compose config --quiet`: validate `docker-compose.yaml`; no output means valid
-- `docker compose up -d --wait`: start Airflow 3.3.2 (LocalExecutor) and Postgres 16 and wait until healthy; UI at http://localhost:8080, login airflow / airflow (local defaults)
+- `docker compose up -d --build --wait`: start Airflow 3.3.2 (LocalExecutor) and Postgres 16 and wait until healthy, rebuilding the Airflow image first (fully cached, about 1 s, unless `Data-Pipeline/requirements.txt` changed; ADR-022); UI at http://localhost:8080, login airflow / airflow (local defaults)
 - `docker compose ps -a`: service state and health; `airflow-init` shows `Exited (0)` once the database is migrated
 - `docker compose logs <service>`: logs of one service, for example `airflow-scheduler`
 - `docker compose exec airflow-scheduler airflow dags list-import-errors`: DAG import errors; `No data found` when every DAG imports
 - `docker compose exec airflow-scheduler airflow dags unpause|trigger|list-runs hello`: run the hello smoke test (new DAGs start paused)
+- `docker compose exec airflow-scheduler airflow dags trigger daily_pipeline -r <run-id> -c '{"start": "2025-01-01", "end": "2025-12-31"}'`: run the pipeline DAG on a slice, dates inclusive, written to `Data-Pipeline/data/slices/<start>_<end>/`; without `-c` it is the full build into `Data-Pipeline/data/interim/` (unpause it first, as for hello)
+- `docker compose exec airflow-scheduler airflow tasks states-for-dag-run daily_pipeline <run-id>`: the state of every task in one run
+- `docker compose exec airflow-scheduler airflow dags test daily_pipeline -c '<conf>' [--mark-success-pattern <task-id regex>]`: run every task once in the CLI process, without the scheduler; matching tasks are marked success without running (pause the DAG first)
 - `docker compose exec airflow-scheduler python --version`: Python in the Airflow image (ADR-013 pins 3.12)
 - `docker compose down`: stop and remove the containers, keep the metadata DB; add `-v` to delete it too (full reset)
