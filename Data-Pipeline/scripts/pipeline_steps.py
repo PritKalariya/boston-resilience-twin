@@ -57,6 +57,8 @@ SCRIPTS = {
     "parse_new_311": "new_311",
     "combine_311": "map_311",
     "spatial_join": "spatial_join",
+    "validate_raw": "validate_data",
+    "validate_processed": "validate_data",
 }
 # Task id -> the issue that builds it; a placeholder in the DAG until then.
 PLANNED = {
@@ -67,10 +69,8 @@ PLANNED = {
     "ingest_nws_alerts": "#7",
     "ingest_tides": "#7",
     "ingest_open_meteo": "#8",
-    "validate_raw": "#17",
     "daily_counts": "#15",
     "labels_and_features": "#16",
-    "validate_processed": "#17",
     "bias_slicing": "#32",
 }
 # Task id -> the outputs a slice cuts to its days afterwards, with their time column.
@@ -248,6 +248,28 @@ def step_plan(step: str, days: DateRange, root: Path = REPO) -> StepPlan:
                   "--out", out, "--change-points", interim / "change-points.csv"],
             files=StepFiles(data_in=[legacy, new], config_in=[category_map], data_out=[out]),
             hint="Run parse_legacy_311 and parse_new_311 for the same range first.",
+        )
+    if step == "validate_raw":
+        # #17. Only rows in are counted: the step writes a JSON of check results, not data.
+        raw_dir, bounds, published = raw / "311", config / "validation_bounds.csv", config / "published_311_counts.csv"
+        return StepPlan(
+            args=["--stage", "raw", "--config", bounds, "--raw-dir", raw_dir, "--years", *days.legacy_years,
+                  "--published", published, "--out", interim / "validation" / "raw.json"],
+            files=StepFiles(
+                data_in=[*(raw_dir / f"{year}.csv" for year in days.legacy_years), raw_dir / "new_system.csv"],
+                config_in=[bounds, published],
+            ),
+            hint=f"Put the legacy 311 files and the new-system export in Data-Pipeline/data/raw/311/ {hint_311}.",
+        )
+    if step == "validate_processed":
+        combined, located = interim / "311_combined.parquet", interim / "311_located.parquet"
+        bounds, hoods = config / "validation_bounds.csv", interim / "static" / "neighborhoods_by_tract20.parquet"
+        return StepPlan(
+            args=["--stage", "processed", "--config", bounds, "--combined", combined, "--located", located,
+                  "--neighborhoods", hoods, *(["--latest", days.end.isoformat()] if days.end else []),
+                  "--out", interim / "validation" / "processed.json"],
+            files=StepFiles(data_in=[combined, located], config_in=[bounds, hoods]),
+            hint="Run spatial_join and ingest_static_layers for the same range first.",
         )
     # spatial_join (#14)
     combined, out = interim / "311_combined.parquet", interim / "311_located.parquet"
