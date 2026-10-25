@@ -43,13 +43,21 @@ def has_google_credentials() -> bool:
     from google.auth.exceptions import DefaultCredentialsError
 
     # A laptop login without a quota project warns here; Cloud Storage does not need one.
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", UserWarning)
-        try:
-            google.auth.default()
-        except DefaultCredentialsError:
-            return False
-    return True
+    # Without any credentials, google-auth also logs "Authentication failed using
+    # Compute Engine authentication ..." as a warning; our own skip line says it better.
+    default_log = logging.getLogger("google.auth._default")
+    level = default_log.level
+    default_log.setLevel(logging.ERROR)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            try:
+                google.auth.default()
+            except DefaultCredentialsError:
+                return False
+        return True
+    finally:
+        default_log.setLevel(level)
 
 
 def no_access_line(output: str) -> str | None:

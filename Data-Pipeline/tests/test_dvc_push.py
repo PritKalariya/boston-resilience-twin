@@ -127,6 +127,23 @@ def test_has_google_credentials_false_without_any(monkeypatch):
     assert has_google_credentials() is False
 
 
+def test_no_credentials_hides_the_compute_engine_warning(monkeypatch, caplog):
+    import google.auth
+    from google.auth.exceptions import DefaultCredentialsError
+
+    def no_credentials():
+        logging.getLogger("google.auth._default").warning(
+            "Authentication failed using Compute Engine authentication due to unavailable metadata server."
+        )
+        raise DefaultCredentialsError("Your default credentials were not found.")
+
+    monkeypatch.setattr(google.auth, "default", no_credentials)
+    with caplog.at_level(logging.WARNING):
+        assert has_google_credentials() is False
+    assert "Compute Engine" not in caplog.text
+    assert logging.getLogger("google.auth._default").level == logging.NOTSET  # restored
+
+
 def test_has_google_credentials_true_and_quiet(monkeypatch, recwarn):
     import google.auth
 
@@ -156,6 +173,7 @@ def test_script_exits_0_without_credentials(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert "dvc push skipped: no Google credentials" in result.stderr
+    assert "Compute Engine" not in result.stderr
 
 
 def test_main_fails_on_other_errors(monkeypatch, tmp_path):
