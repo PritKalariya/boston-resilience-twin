@@ -1,0 +1,101 @@
+# Data card
+
+Every source the project uses or plans to use: where it comes from, its license and how to credit it, what period it describes, how often it changes, and what is known to be wrong or missing. Which sources were chosen is ADR-002; which may become model features is ADR-003. Facts were checked against each source on 2026-10-25 unless a row says otherwise.
+
+## Summary
+
+| Source | Role | License | Pipeline today |
+|---|---|---|---|
+| [Boston 311, legacy yearly files](#boston-311-service-requests) | Target and lagged demand, 2015 to 2026 | PDDL | Parsed (`legacy_311.py`); files downloaded by hand until #6 |
+| [Boston 311, new system](#boston-311-service-requests) | Target and lagged demand from 2025-08-01 | PDDL | Parsed (`new_311.py`); export downloaded by hand until #6 |
+| [NOAA GHCN-D, Boston Logan](#noaa-ghcn-d-boston-logan) | Observed weather for training | U.S. government work | File placed by hand for `measure_311.py`; ingestion is #7 |
+| [NWS forecasts and alerts](#nws-forecasts-and-alerts) | Live forecast weather; alerts start the event DAG | U.S. government work | Not ingested yet (#7) |
+| [NOAA tides, Boston gauge](#noaa-tides-boston-harbor-gauge) | Coastal water level and surge | U.S. government work | Not ingested yet (#7) |
+| [Open-Meteo](#open-meteo) | Forecast weather for validation and test | CC BY 4.0, attribution required | In review (#8, PR #76) |
+| [City and Census geography and population](#city-geography-population-and-climate-ready-boston) | Units, fairness slices, flood context | PDDL | Loaded (`static_layers.py`, #9) |
+
+## Coverage against the training years
+
+ADR-003 uses a day-level feature only if its source covers every training year, 2015 to 2023.
+
+| Source | Covers | Training years 2015 to 2023 |
+|---|---|---|
+| 311 legacy files | 2011 onward (2015 onward used) | Yes |
+| 311 new system | 2025-08-01 onward | No: new-system-only fields cannot be features |
+| GHCN-D Logan: rain, snow, max temperature | 1936 onward | Yes |
+| GHCN-D Logan: gusts | 1996 onward; 8 missing gust days in the training years (ADR-003) | Yes, gaps counted and reported |
+| NWS forecasts | Live only | No: live input, not a training feature |
+| NWS alerts | Live; history for 2015 to 2023 is #12 (ADR-014) | Not yet: drop the feature if #12 finds no history |
+| Tides, Boston gauge | 1921 onward | Yes |
+| Open-Meteo history and first-hours forecasts | 2021 onward | No: not used in training |
+| Open-Meteo day-before forecasts (GFS) | 2024-01-21 onward | No: validation (2024) and test only |
+| Static layers | One vintage each (below) | Fixed neighborhood descriptors, not day-level (ADR-003) |
+
+## Boston 311 service requests
+
+- **URL:** https://data.boston.gov/dataset/311-service-requests (Analyze Boston). Yearly CSVs "311 SERVICE REQUESTS - 2011" to "311 Service Requests - 2026", and "311 Service Requests - NEW SYSTEM" with its own data dictionary and the city's Data Transition Guide on the same page.
+- **License and attribution:** Open Data Commons Public Domain Dedication and License (PDDL). No attribution required; the README credits Analyze Boston.
+- **Vintage:** legacy 2015-01-01 to the latest export; the new system from 2025-08-01. Row counts at download are in `Data-Pipeline/config/published_311_counts.csv` (legacy 2015 to 2026: 3,037,969; new system: 68,542, checked 2026-10-13).
+- **Update frequency:** daily (dataset page: "Updated daily starting 2011").
+- **Known issues:**
+  - **Migration.** The city moved case types to a new backend in waves from October 2025, expected to finish by mid-2026. The two systems have different schemas and categories that are not one to one; `docs/data/category-map.csv` maps them and `docs/data/change-points.csv` records each category's switch date.
+  - **New-system clock.** `open_date` ends in `+00` but is Boston local time (ADR-020). Every run re-checks this (`map_311.check_clock`).
+  - **Legacy rows after a switch.** 2,519 legacy rows were opened on or after their category's switch date; they are kept and flagged `after_switch` (ADR-021).
+  - **City data error, fixed.** The dataset page notes that from 2026-08-12 case types moved to the new system during 2026 were mistakenly dropped from the 2026 legacy file, fixed as of 2026-08-25. A 2026 legacy file downloaded in that window undercounts.
+  - **Flooding has no new-system category.** Legacy flooding requests (mostly catch basins) stop after Jul 2026, so live flooding counts are zero (ADR-005, #16).
+  - **Snow has not been through the new system.** Winter 2025 to 2026 snow requests all went to the legacy system, and Unshoveled Sidewalk (48% of last winter's snow requests) has no new category yet. The first storm this winter is the real switch for snow_ice.
+  - **Neighborhood names differ** (23 legacy, 25 new-system names, 16 shared), so requests are placed by coordinates, not by name (ADR-004, #14).
+  - **Gaps and odd categories.** Animal requests are missing from 2025-06-12 to 2025-08-01. New categories keep appearing in the export (five unmapped and not storm related as of 2026-10-19); they count as `unmapped` until the map gets a row.
+  - **Timestamp formats.** Legacy `open_dt` mixes whole and fractional seconds; parsing without `format="ISO8601"` loses about half the rows (W1-5).
+
+## NOAA GHCN-D, Boston Logan
+
+- **URL:** station USW00014739 (Boston Logan International Airport) in the Global Historical Climatology Network Daily, through the NOAA Climate Data Online API v2, https://www.ncei.noaa.gov/cdo-web/api/v2/ (free token, docs/data-access.md). Station data: https://www.ncei.noaa.gov/access/services/data/v1?dataset=daily-summaries&stations=USW00014739
+- **License and attribution:** U.S. government work, no restrictions. Credit NOAA National Centers for Environmental Information.
+- **Vintage:** 1936-01-01 to 2026-10-20 at the check, so about 5 days behind today. Elements used: PRCP (rain), SNOW, SNWD, TMAX, TMIN, AWND, WSF2 and WSF5 (gusts, from 1996).
+- **Update frequency:** daily, a few days behind; recent days can be revised.
+- **Known issues:** 8 missing gust days in the training years (ADR-003), counted and reported, not filled. Observed weather in training makes backtests upper bounds (ADR-003). Daily values follow the station's local standard-time day, not the Boston calendar day used for 311; #16 decides how to align them.
+
+## NWS forecasts and alerts
+
+- **URL:** https://api.weather.gov. Boston (City Hall, 42.3601, -71.0589) is grid point BOX 71,101 (forecast office BOX), forecast zone MAZ015, county MAC025.
+- **License and attribution:** U.S. government work. Credit the National Weather Service.
+- **Vintage:** live only. Forecasts cover the next 7 days; alerts are the ones active at request time.
+- **Update frequency:** gridpoint forecasts update several times a day; alerts change as they are issued.
+- **Known issues:** every request needs an identifying `User-Agent` or it gets 403 (docs/data-access.md). No archive: a forecast that is not saved when it is current is gone, so ingestion (#7) stores a snapshot each run. Alert history for the training years has no source yet (#12).
+
+## NOAA tides, Boston Harbor gauge
+
+- **URL:** CO-OPS station 8443970 "Boston", https://tidesandcurrents.noaa.gov/stationhome.html?id=8443970, data from https://api.tidesandcurrents.noaa.gov/api/prod/datagetter (no key).
+- **License and attribution:** U.S. government work. Credit NOAA Center for Operational Oceanographic Products and Services (CO-OPS).
+- **Vintage:** established 1921-05-03. Tidal datums on the 1983 to 2001 epoch, in feet unless metric is requested.
+- **Update frequency:** observed water level every 6 minutes, hourly heights after verification; predictions are published ahead.
+- **Known issues:** times come back in GMT, local standard time or local time with daylight saving depending on the request, so the request must name one. Recent data is preliminary until verified. Surge is observed minus predicted, so both products are needed (#7).
+
+## Open-Meteo
+
+- **URL:** https://open-meteo.com: the Historical Weather API (ERA5), Historical Forecast API (ECMWF IFS) and Previous Runs API (GFS), at the Logan point (42.36057, -71.00975). Details in PR #76.
+- **License and attribution:** CC BY 4.0. Show "Weather data by Open-Meteo.com" with a link, as the README does, plus each model's own credit: Copernicus Climate Change Service for ERA5, ECMWF (CC BY 4.0) for IFS, NOAA NCEP for GFS. PR #76 writes one attribution row per stored file to `docs/data/open-meteo.csv`.
+- **Vintage:** ERA5 history and ECMWF first-hours forecasts from 2021-01-01; GFS day-before forecasts from 2024-01-21.
+- **Update frequency:** daily; ERA5 runs about 5 days behind.
+- **Known issues (from PR #76):** the archived forecasts before 2024 are first-hours data, close to the real weather, so they must not be used for validation or test. GFS has no rain or snowfall values before 2024-12-06, only total precipitation. ECMWF moved shower rain from `rain` to `showers` during 2025, so total precipitation is the consistent value across years.
+
+## City geography, population and Climate Ready Boston
+
+One row per layer, with source URL, vintage, row count, download date and SHA-256, is in `docs/data/static-layers.csv` (written by `static_layers.py` from `Data-Pipeline/config/static_layers.csv`).
+
+| Layer | Publisher | Vintage | Known issues |
+|---|---|---|---|
+| 2020 Census tracts (207) | Boston Planning Department | 2020 Census | |
+| Neighborhoods built from 2020 tracts (24) | Boston Planning Department | 2020 tracts | The unit (ADR-004); same names as the population tables |
+| BPDA neighborhoods (26) | Boston Planning Department | Current release, built from zoning, zip and 2010 tract lines | The city says they are not official boundaries; not used for the unit |
+| Population estimates, neighborhood and tract | Boston Planning Department Research Division | Population on 2025-01-01; characteristics from ACS 2019 to 2023 5-year | After most training years, so a little look-ahead as features (ADR-003); ACS comes from these tables, no Census API call |
+| Climate Ready Boston social vulnerability (180) | City of Boston | 2016, 2010 tracts | Keyed by 2010 tracts; needs a crosswalk to 2020 tracts |
+| Climate Ready Boston flood extents, 9 inch sea level rise, 10% and 1% annual chance | City of Boston | 2016 (2030s scenario) | Coastal flooding only; catch basin (stormwater) flooding is not covered |
+
+- **License and attribution:** PDDL for every layer (Analyze Boston). ACS characteristics are U.S. Census Bureau data republished by the city.
+- **Update frequency:** when the city publishes a new release; a changed SHA-256 in `static-layers.csv` shows it, and `static_layers.py --refresh` reloads them.
+
+## Keeping this card current
+
+Update the matching section in the PR that adds or changes a source, a vintage or a known issue. Coverage and gap counts for features are filled in by #16 when features are built.
