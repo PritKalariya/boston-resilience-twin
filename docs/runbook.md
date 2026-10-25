@@ -102,6 +102,32 @@ On a laptop (2026-10-21), a one-year slice took 40 seconds and the full
 build about 2.5 minutes. The full build peaked at 3.4 GiB in the scheduler
 container, with `map_311.py` before #68.
 
+Logging and failures (#36):
+
+- Every task logs one line with its run id, rows in and rows out, for example
+  `run slice-2025 task combine_311: rows in 348,466, rows out 280,044 in 3.1 s`.
+  Placeholders log 0 and 0, and `check_range` logs n/a. CSV inputs are
+  counted as records, the way the parsers report `file_rows`
+  (`legacy_311.count_records`), and parquet files from their metadata;
+  `ingest_static_layers` counts only the layers in its config. Counting reads
+  each raw CSV once more: about 1 s per yearly file in the container on a
+  Windows laptop, 12 s for all 13 files.
+- The `ingest_*` tasks retry twice. Airflow's exponential backoff adds a
+  random spread, so the waits are about 5 to 10 minutes and then 10 to 15
+  (capped). Every other task fails at once.
+- A real step whose input file is missing or empty fails before its script
+  runs (`InputError`), naming the file and how to get it. The DAG raises it
+  as `AirflowFailException`, so even an `ingest_*` task fails at once instead
+  of retrying. A script error is logged as `run <id> task <task> failed:
+  <error>` and keeps its own type.
+- Before a step runs, its outputs are deleted, so a file left by an earlier
+  run cannot pass for new output. `ingest_static_layers` also deletes empty
+  (0-byte) files in `Data-Pipeline/data/raw/static/`, so `--download` fetches
+  them again.
+- A task that fails for good writes `ALERT <dag>.<task> failed in run <id>
+  (try <n>): <error>` to its own log (`Data-Pipeline/scripts/alerts.py`).
+  Slack or email delivery comes with #34.
+
 ### Data validation (Great Expectations)
 
 `validate_raw` runs before parsing and `validate_processed` after the
