@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-23 by Srikarmk. Edit this file in the PR that changes the state.
+Updated: 2026-10-24 by piyush1420. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -26,6 +26,7 @@ Week 2: Processing (due 2026-10-18)
 | #10 Decision: lock the modeling unit | Alekhya | 2026-10-13 | done | PR #66 merged; ADR-004 proposed (team sign-off pending): neighborhood x day, 24 tract-built neighborhoods, surge in any storm group |
 | #31 Repo layout and pipeline pins | Prit | 2026-10-16 | done | PR #58 merged; ADR-017: one shared Airflow stack at the root, each component mounts its `dags/` at `/opt/airflow/dags/<component>` in snake_case; `Data-Pipeline/requirements.txt` pinned, 94 tests pass in a clean Python 3.12 venv |
 | #69 Airflow image with every pipeline dependency | Prit | 2026-10-22 | done | PR #74 merged; ADR-022: every Airflow service runs `brt-airflow:local` from `airflow.Dockerfile`, the ADR-013 base image plus `Data-Pipeline/requirements.txt` under Airflow's constraints. Cold `docker compose up -d --build --wait` 1m37s (image build plus stack start, base image already pulled), cached `docker compose build` 1.0s, image 3.44 GB on disk against the base image's 3.22 GB. Great Expectations 1.24.1, Fairlearn 0.15.0 and dvc[gs] 3.67.1 all dry-run clean against the constraints with pandas 3.0.5. Unblocks #22 and #37 |
+| #12 Decision: alert-history source for 2015 to 2023 | Piyush | 2026-10-14 | in progress | ADR-014 proposed (Punith reviews): the Iowa Environmental Mesonet archive of NWS alerts, Boston zone MAZ015 and county MAC025, has alerts in every year 2015 to 2026, so the alert feature meets ADR-003; results below |
 
 ## Blocked
 None.
@@ -45,6 +46,20 @@ None.
 - **Climate Ready Boston flood layers are coastal only.** Most legacy flooding requests are catch basins (stormwater), which these maps do not cover. No stormwater flood layer is on Analyze Boston.
 - ~~**The Airflow image lacks the geo packages.**~~ Closed by #69 (ADR-022): the Airflow services now run `brt-airflow:local`, which installs `Data-Pipeline/requirements.txt`, so geopandas, shapely, pyogrio and pyproj are importable in a task. The cost is that a requirements change needs `docker compose up -d --build --wait` before the next run.
 - The 2026-10-20 export moves the first new-system date of Broken Park Equipment (not storm related) from 2026-03-10 to 2026-01-09. `docs/data/change-points.csv` is not updated in #10; the next `map_311.py` run in a PR should refresh it.
+- **No open issue downloads the NWS alert history.** ADR-014 (proposed) takes 2015-onward alerts from the Iowa Environmental Mesonet archive, but #7 lands only live NWS alerts (ADR-002) and #16 uses alerts without a download step. The team needs to assign the history download, with its raw pulls versioned by DVC (#18, #19), before #16 builds the alert feature.
+- **Notes for #16 on alerts (ADR-014).** Count an alert for day D only if its first bulletin (the first 12 digits of `product_id`, UTC) is before the cutoff: start and end are the alert's last state, and 138 zone alerts end before they start. County severe thunderstorm, flash flood and tornado warnings start when first sent, so they are never known the evening before. NWS alert types were renamed during 2015 to 2026 (freezing rain advisory, blizzard watch, flash flood watch, excessive heat, wind chill), so #16 needs a reviewed map from alert type to storm group. Spec risk 4 (alert history needs a source) can close once ADR-014 is accepted; the spec's owner updates it.
+
+## W1-12 results (2026-10-24)
+
+Source: the Iowa Environmental Mesonet per-area service for NWS alerts, Boston forecast zone MAZ015 and county MAC025 (office BOX), queried 2026-10-24. The query links, storm checks and lead times are in ADR-014.
+
+| split | years | zone MAZ015 alerts | county MAC025 alerts |
+|---|---|---|---|
+| train | 2015 to 2023 | 684 (63 to 115 a year) | 235 (11 to 39 a year) |
+| validation | 2024 | 85 | 23 |
+| test | 2025 | 51 | 13 |
+
+The four storm checks (2015-01-27, 2018-01-04, 2018-03-02, 2022-01-29) each show their blizzard, coastal flood or high wind warnings. The NWS API returns no alerts for the 2015 blizzard, so it cannot be the history source.
 
 ## W1-10 results (2026-10-20)
 
