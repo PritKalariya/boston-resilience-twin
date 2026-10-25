@@ -12,10 +12,8 @@ The surge rule here is for comparison only; #16 freezes the real one.
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 import geopandas as gpd
-import numpy as np
 import pandas as pd
 
 from live_baselines import GRID, seasonal_baseline, surge_flags
