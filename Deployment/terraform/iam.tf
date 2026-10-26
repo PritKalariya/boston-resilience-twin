@@ -92,7 +92,7 @@ resource "google_compute_instance_iam_member" "vm_admins" {
 # --- Secret writers ---------------------------------------------------------
 
 # Adding a secret value needs more than accessor. The grant is per secret, so a
-# writer can add versions to these two slots and to nothing else in the project.
+# writer can add versions to these slots and to nothing else in the project.
 locals {
   secret_writer_grants = {
     for pair in setproduct(var.secret_writers, local.secret_ids) :

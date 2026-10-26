@@ -96,6 +96,8 @@ The containers restart whenever Docker starts (for example after a reboot) until
 
 **Optional overrides.** `.env` is for local development only. To change a dev default, such as the port, add the line to `.env` using the names in `.env.example`. Never commit `.env`. In Windows PowerShell 5.1, do not create `.env` with `>` or `Out-File`: they write UTF-16 and every compose command then fails.
 
+**API keys.** Tasks that call NOAA, Census or NWS read `NOAA_CDO_TOKEN`, `CENSUS_API_KEY` and `NWS_USER_AGENT` from `.env`. Without your own keys the stack still runs, and only the tasks that need a missing key fail, naming it. How to get them: `docs/data-access.md`.
+
 The VM gets its secrets from Secret Manager (ADR-015), set up in #20. The runbook (`docs/runbook.md`) has the operating steps and fixes for common problems.
 
 **Tests**
@@ -128,3 +130,5 @@ The runbook ("Versioned data (DVC)") has the checks and fixes.
 ## Data and licenses
 
 Boston 311 data is published on Analyze Boston under the PDDL. NWS, NOAA, and Census data are U.S. government works. Weather data by [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0).
+
+The [data card](docs/data/data-card.md) lists every source with its URL, license and attribution, vintage, update frequency, coverage of the training years and known issues.
