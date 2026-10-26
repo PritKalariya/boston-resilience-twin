@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-25 by Kirtan. Edit this file in the PR that changes the state.
+Updated: 2026-10-26 by Kirtan. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -14,6 +14,7 @@ Week 2: Processing (due 2026-10-18)
 | #36 Logging and error handling across tasks | Punith | 2026-10-22 | in review | Builds on #72. Every task logs run id, rows in and rows out; `ingest_*` tasks retry twice; missing or empty inputs fail before the script runs; a failed task writes the W3-3 alert to its log until #34 delivers it; results below |
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
 | #4 API access and secrets | Kirtan | 2026-10-11 | in progress | `docs/data-access.md` has one check per API (NOAA CDO, Census, NWS). NOAA and Census keys stored and checked (200, 2026-10-20); `nws-user-agent` slot added in `secrets.tf`, waiting on Prit's review and apply, then its value and NWS check. Keys reach the Airflow containers from `.env` (`NOAA_CDO_TOKEN`, `CENSUS_API_KEY`, `NWS_USER_AGENT`); `credentials.require` fails a task naming a missing key (checked in the scheduler container, 2026-10-23). The pipeline needs no Census key so far (W1-9) |
+| #7 Observational weather ingestion | Kirtan | 2026-10-13 | in review | `noaa_logan.py`, `tides.py`, `nws.py` as the `ingest_noaa_logan`, `ingest_tides`, `ingest_nws_forecasts` and `ingest_nws_alerts` tasks; raw files as returned, rerun-safe (settled periods skipped, NWS snapshots named by issue time); a missing key fails before the script runs. Real runs through Airflow (2026-10-26): tides 48 half-years from 2015 in 29 s, every half complete (4,344, 4,368 or 4,416 hours), rerun 47 final and 1 unchanged; NWS forecast and alerts saved, rerun unchanged; NOAA 2015 to 2026 (through 2026-10-20, the usual lag), every element on every day except snow depth (SNWD: none from 2015 at Logan) and peak gust (WSF5: 8 missing days in 2015 to 2023, the count ADR-003 cites) |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
 | #11 Decision: live baselines for the new 311 format | Punith | 2026-10-13 | done | PR #63 merged; ADR-005: baseline = same weeks of the previous 3 years, both systems, by storm group |
 | #53 Policy for legacy rows after their category's switch date | Punith | 2026-10-20 | in review | ADR-021: keep. Setting `after_switch_policy` in `Data-Pipeline/config/processing.csv`, for #15 to apply; results below |

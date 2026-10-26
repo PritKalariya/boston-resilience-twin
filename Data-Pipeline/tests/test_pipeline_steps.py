@@ -83,8 +83,13 @@ def test_bad_ranges_fail(params, message):
 def test_outputs_stay_in_the_run_folder(tmp_path, step, days):
     args = script_args(step, days, tmp_path)
     outputs = [Path(v) for flag, v in flag_values(args).items() if flag in OUTPUT_FLAGS]
-    assert outputs
     paths = run_paths(days, tmp_path)
+    if step.startswith("ingest_") and not outputs:
+        # A raw download (#7): it adds to the shared raw folder and keeps its
+        # history, so it writes nothing else, in a slice or a full build.
+        assert Path(flag_values(args)["--raw-dir"]).is_relative_to(paths.raw)
+        return
+    assert outputs
     assert all(path.is_relative_to(paths.interim) or path.is_relative_to(paths.processed) for path in outputs)
     assert not any("gs://" in arg for arg in args)
 

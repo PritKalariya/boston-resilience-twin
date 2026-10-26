@@ -6,8 +6,10 @@ data). The defaults are the full build, written to Data-Pipeline/data/interim/
 and processed/. Any other range is a slice, written to
 Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/.
 
-Eight tasks run pipeline scripts. The others are placeholders: they log the
-issue that builds them and do nothing else. The last task, push_data, pushes
+Twelve tasks run pipeline scripts, four of them the weather and tide
+downloads (#7). The others are placeholders: they log the issue that builds
+them and do nothing else; an ingest task becomes real once its script is in
+pipeline_steps.SCRIPTS. The last task, push_data, pushes
 the DVC-tracked data to the team remote (dvc_push.py, #19); without bucket
 access it logs `dvc push skipped: ...` and succeeds.
 
@@ -120,7 +122,7 @@ def daily_pipeline():
         return planned.override(task_id=step, doc_md=f"Placeholder until {issue}.", **retries(step))(issue)
 
     ingest = [
-        todo(step)
+        real(step) if step in steps.SCRIPTS else todo(step)
         for step in (
             "ingest_legacy_311",
             "ingest_new_311",

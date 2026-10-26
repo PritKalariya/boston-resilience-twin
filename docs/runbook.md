@@ -362,6 +362,62 @@ for a window where both systems logged many rows and the ratio under keep is
 well above 1 (requests entered twice), and in winter for Snow Plowing rows
 flagged `after_switch`.
 
+## Weather and tide downloads
+
+Four `daily_pipeline` tasks keep the raw weather and tide history (#7). They
+are `ingest_*` tasks, so they retry twice on a network error; a missing key
+fails at once, naming it.
+
+| Task | Script | Source | Stored under `Data-Pipeline/data/raw/` | Key |
+|---|---|---|---|---|
+| `ingest_noaa_logan` | `noaa_logan.py` | NOAA CDO API v2, GHCN-D Logan (USW00014739), daily from 2015 | `weather/noaa_logan/<year>.json` | `NOAA_CDO_TOKEN` |
+| `ingest_tides` | `tides.py` | CO-OPS Boston gauge 8443970, hourly observed and predicted from 2015, metres above MLLW, GMT | `tides/observed/` and `tides/predicted/`, `<year>-H1.json` and `-H2.json` | none |
+| `ingest_nws_forecasts` | `nws.py forecasts` | NWS gridpoint data, office BOX at City Hall | `weather/nws_forecasts/<UTC date>/<updateTime>.json` | `NWS_USER_AGENT` |
+| `ingest_nws_alerts` | `nws.py alerts` | NWS active alerts, zone MAZ015 | `weather/nws_alerts/<UTC date>/<updated>.json` | `NWS_USER_AGENT` |
+
+Files are stored exactly as the source returned them (NOAA's pages are joined
+into one file per year, values unchanged). Reruns are safe:
+
+- **History (NOAA, tides).** A folder's `_manifest.json` records each file's
+  period, download time and SHA-256. A period is final once it was downloaded
+  long enough after it ended for the source to stop revising it: NOAA 30 days,
+  tide observations 45 days (verified data lags about a month), predictions at
+  once. A final file is never fetched again; any other is fetched whole and
+  replaces its file only after its checks pass, so a failed run keeps the old
+  file. CO-OPS takes at most 365 days per request, hence the half-years.
+- **Snapshots (NWS).** NWS keeps no archive, so each run saves what is current,
+  named by NWS's own issue time. A rerun with nothing new writes nothing.
+
+Run one task, or a script directly from the repo root:
+
+```bash
+docker compose exec airflow-scheduler airflow tasks test daily_pipeline ingest_tides
+python Data-Pipeline/scripts/tides.py
+python Data-Pipeline/scripts/noaa_logan.py     # needs NOAA_CDO_TOKEN
+python Data-Pipeline/scripts/nws.py forecasts  # needs NWS_USER_AGENT
+```
+
+The first tide run fetches 48 half-years (about 30 s); after that a run
+fetches only the current half-years.
+
+Logan reports no snow depth (`SNWD`) from 2015 on, although the station has
+it in older years, so those files hold seven of the eight elements. Peak gust
+(`WSF5`) misses 8 days in 2015 to 2023, the gap ADR-003 counts.
+
+- **`<task> cannot start: NOAA_CDO_TOKEN not set` (or `NWS_USER_AGENT`).** The
+  key is empty in the container. Fill `.env` ("API keys in .env"), then
+  `docker compose up -d --wait`.
+- **NOAA `HTTP 400 ... Token parameter is required` or `not valid`.** The
+  token is missing or wrong; check it with docs/data-access.md.
+- **NOAA `HTTP 429` or `HTTP 503`.** CDO's rate limit or an outage; the task
+  retries, and allows 10,000 requests a day per token.
+- **NWS `HTTP 403`.** The user agent is empty or not accepted.
+- **`... has no data for a ... long over`.** A finished period came back empty,
+  which a source should never do; the run stops instead of storing nothing.
+  Check the source's status page and rerun later.
+- **`_manifest.json is not valid JSON`.** Fix it, or delete it: the folder is
+  then fetched again from 2015, replacing files only where they changed.
+
 ## Static layers
 
 `Data-Pipeline/config/static_layers.csv` lists each static layer: file name, source URL, publisher, vintage, license, and the key column that must be present, unique and non-blank. To add or replace a layer, change a row there in a reviewed PR.
