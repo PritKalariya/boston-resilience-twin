@@ -6,7 +6,7 @@ data). The defaults are the full build, written to Data-Pipeline/data/interim/
 and processed/. Any other range is a slice, written to
 Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/.
 
-Eight tasks run pipeline scripts. The others are placeholders: they log the
+Eleven tasks run pipeline scripts. The others are placeholders: they log the
 issue that builds them and do nothing else. The last task, push_data, pushes
 the DVC-tracked data to the team remote (dvc_push.py, #19); without bucket
 access it logs `dvc push skipped: ...` and succeeds.
@@ -132,13 +132,16 @@ def daily_pipeline():
         )
     ]
     static = real("ingest_static_layers")
+    alert_history = real("ingest_alert_history")
     raw_checked = real("validate_raw")
     combined = real("combine_311")
+    counts = real("daily_counts")
     validated = real("validate_processed")
 
-    check_range() >> [*ingest, static] >> raw_checked
+    check_range() >> [*ingest, static, alert_history] >> raw_checked
     raw_checked >> [real("parse_legacy_311"), real("parse_new_311")] >> combined
-    [combined, static] >> real("spatial_join") >> real("daily_counts") >> todo("labels_and_features") >> validated
+    [combined, static] >> real("spatial_join") >> counts
+    counts >> [real("surge_labels"), real("feature_table")] >> validated
     validated >> [todo("schema_and_statistics"), todo("bias_slicing")] >> push_data()
 
 

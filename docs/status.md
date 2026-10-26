@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-25 by Alekhya. Edit this file in the PR that changes the state.
+Updated: 2026-10-25 by piyush1420. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -19,6 +19,7 @@ Week 2: Processing (due 2026-10-18)
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | done | PR #52 merged; results below; new-system clock in ADR-020; flooding gap needs a team call |
 | #14 Spatial joins | Alekhya (built by Srikar for the Oct 25 deadline) | 2026-10-16 | in review | every request tagged with tract and unit by coordinates; 99.14% placed; results below |
 | #15 Daily counts | Srikar | 2026-10-17 | in review | neighborhood x day x storm group, zero-filled; 215,701 requests counted and reconciled; results below |
+| #16 Surge labels and feature table | Piyush | 2026-10-18 | in review | Rule recommended: sd, k 2, m 5 (train 3.44%); 94,560 of 103,440 cells labeled. Feature table: 311 lags, NWS alerts from the IEM archive (ADR-014, 18:00 cutoff), calendar, static attributes. Three `daily_pipeline` tasks. Weather and tides wait on #7 and #8 (Blocked); results below |
 | #20 Airflow on the VM | Prit | 2026-10-18 | done | PR #59 merged. Airflow stack on airflow-vm (LocalExecutor, Postgres 16; ADR-016); UI by SSH tunnel only; VM stopped. Runbook: "Airflow on the VM". After #58 merges, run the update step in the runbook on the VM |
 | #23 Write ADRs 001, 009, 010, 011, 012 | Prit | 2026-10-18 | done | PR #65 merged; ADRs in docs/decisions/ |
 | #29 Verify teammate IAM | Prit | 2026-10-15 | done | PR #51 merged. All 6 members granted, plus `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start and SSH verified; VM stopped. |
@@ -35,9 +36,13 @@ Week 2: Processing (due 2026-10-18)
 | #19 DVC remote on GCS | Kirtan | 2026-10-15 | in review | Remote `gs://boston-resilience-twin-data/dvc` set in `.dvc/config` (repo root); dvc 3.67.1 and dvc-gs 3.1.0 pinned. `dvc_push.py` skips with a log line and exits 0 without bucket access (checked with no credentials, 2026-10-23). Round trip with team credentials checked in a scratch repo (push, `dvc pull` in a fresh clone, files match; test objects removed, 2026-10-23). `push_data`, the last task of `daily_pipeline`, runs it; the containers mount `.git` (read-only, since DVC needs a git repo), `.dvc` and `.dvcignore`. `airflow tasks test daily_pipeline push_data` without credentials: skip line, task success; with team credentials: `dvc push to gs://boston-resilience-twin-data/dvc: Everything is up to date.`, task success (2026-10-25). No data tracked yet: stages come with #18 |
 
 ## Blocked
-None.
+- #16 feature table: weather and tides wait on #7 (NOAA Logan observed weather, Boston Harbor tides) and #8 (Open-Meteo archived forecasts for validation and test, ADR-003). The table has 311 lags, NWS alerts, calendar fields and static attributes; `feature_table.py` names what is missing on every run.
+- #16 alert history follows ADR-014, which is still proposed (PR #88). Merge #88 before or with #16.
 
 ## Risks raised
+- **No surge rule reaches the spec's 1.3 to 2.9%.** With the ADR-004 unit the training rate runs 3.44% (sd, k 2, m 5) to 14.86% (top 10%) across the #16 grid. Small neighborhoods stay thin: under the recommended rule Harbor Islands, Chinatown, Longwood and South Boston Waterfront have fewer than 5 surges in 2024, so their recall is noisy or undefined in 30-day fairness windows (#32).
+- **Harbor Islands has no population or ACS values** in the 2025 tables, so its six population-based static attributes are blank (not filled in, ADR-003). Its flood-zone shares are set.
+- **Alert-to-storm-group calls need review** (`docs/data/alert-map.csv`): blizzard counts for snow_ice only, severe thunderstorm and tropical storm for tree and flooding, coastal flood statements for flooding. Live alerts (#7) show each alert as last updated before the cutoff, the history as first sent (ADR-014 limits).
 - **DVC stage files in the Airflow containers (#18).** The containers now mount `.git`, `.dvc`, `.dvcignore` and `Data-Pipeline/data`, enough for `push_data`. `Data-Pipeline/dvc.yaml` and its `dvc.lock` are not mounted, so #18 must add them before a task runs `dvc repro` or pushes stage outputs.
 - Legacy storm groups cover only 6.9% of legacy requests (210,049 of 3,037,969), against about 15% in the pre-scoping check. The groups now live in `docs/data/category-map.csv` (`storm_group` column) and may be narrower than the first run's. Worth a look before #10 locks the unit.
 - **New-system times are Boston local, not UTC.** `open_date` ends in `+00`, but 1,283 cases resubmitted from the legacy system open a median 2.6 minutes before the legacy close time, in both EST and EDT. Real UTC would be 4 to 5 hours later. Converting from UTC would shift every new-system time 4 to 5 hours early and move 1,124 requests (1.6%) to the previous day. The pipeline treats them as local and re-checks this on every run (`map_311.check_clock`). Recorded in ADR-020, accepted by the team on 2026-10-16; CLAUDE.md is updated to match.
@@ -151,6 +156,32 @@ Command: `python Data-Pipeline/scripts/after_switch.py`. Data: legacy files 2015
 | Pruning Request, tree (109 days) | 27 / 179 | 0.80 (1.57%) | 0.17 (0%) | 0.14 (0%) |
 
 Storm labels (ADR-004 unit, 94,512 labeled cells): drop changes 1, exclude_from_baselines none. Snow Plowing and Emergency Responder Snow Plowing switched on 2026-06-23 with 2 test requests and held 50.5% of last winter's legacy snow requests, so drop could delete half of this winter's snow signal. Decision in ADR-021: keep.
+
+## W2-4 results (2026-10-25)
+
+Commands: `alert_history.py --download`, then `surge_labels.py --grid` and `feature_table.py` after `daily_counts.py`. Data: Analyze Boston files of 2026-10-25 (days 2015-01-01 to 2026-10-19), IEM alerts queried 2026-10-25, static layers loaded 2026-10-25.
+
+**Labels.** 103,440 cells (24 neighborhoods x 4,310 days), 94,560 labeled (91.4%). Labels start on 2016-01-06, the first day with 20 history days. Surge rate per rule, labeled cells only:
+
+| rule | surge rate | train 2015 to 2023 | validate 2024 | 2025 onward | snow_ice surges | tree surges | flooding surges | flooding only |
+|---|---|---|---|---|---|---|---|---|
+| sd, k 1.5, m 3 | 6.27% | 5.99% | 7.34% | 6.90% | 2,137 | 3,695 | 211 | 167 |
+| sd, k 1.5, m 4 | 5.22% | 4.91% | 6.27% | 6.01% | 2,022 | 2,885 | 89 | 68 |
+| sd, k 1.5, m 5 | 4.39% | 4.06% | 5.34% | 5.34% | 1,914 | 2,245 | 38 | 25 |
+| sd, k 1.75, m 3 | 5.63% | 5.38% | 6.71% | 6.17% | 1,981 | 3,241 | 211 | 168 |
+| sd, k 1.75, m 4 | 4.75% | 4.46% | 5.83% | 5.44% | 1,879 | 2,583 | 89 | 68 |
+| sd, k 1.75, m 5 | 4.06% | 3.74% | 5.07% | 4.93% | 1,784 | 2,056 | 38 | 25 |
+| sd, k 2, m 3 | 5.12% | 4.85% | 6.25% | 5.68% | 1,851 | 2,872 | 211 | 170 |
+| sd, k 2, m 4 | 4.35% | 4.06% | 5.45% | 5.04% | 1,764 | 2,316 | 89 | 68 |
+| **sd, k 2, m 5** | **3.76%** | **3.44%** | **4.82%** | **4.60%** | 1,684 | 1,871 | 38 | 25 |
+| top 10%, m 1 | 14.86% | 14.29% | 15.27% | 17.14% | 3,737 | 7,346 | 3,898 | 3,245 |
+| top 10%, m 3 | 8.12% | 7.59% | 8.96% | 10.00% | 2,871 | 4,773 | 211 | 154 |
+
+sd, k 2, m 3 gives the 4.85% training rate of ADR-004. Recommendation: **sd, k 2, m 5**, marked `chosen` in `Data-Pipeline/config/surge_rules.csv`. It has the lowest rate in the grid, keeps the snow surges (1,684 against 1,851 at m 3) and cuts flooding-only surges from 170 to 25, which matters while flooding has no live source. The cost: neighborhoods with fewer than 5 surges in 2024 go from 3 to 4 (Harbor Islands 0, Chinatown 0, Longwood 2, South Boston Waterfront 4). The team freezes the rule by ADR before Model Development.
+
+**NWS alerts (ADR-014).** 12 IEM bulk pulls for office BOX, 67,110 rows; 1,144 Boston alerts, one row per first bulletin, with the same counts per year and area as ADR-014 (2015: 70 zone, 13 county; 2026 to 2026-10-23: 46 and 7). All 45 alert types in the data map to a row of `docs/data/alert-map.csv`; no first-announced end comes before its first bulletin. With the 18:00 cutoff, the 2015 blizzard warning (first sent 2015-01-25 20:58 UTC, 15:58 in Boston) counts from 2015-01-26, not for 2015-01-25. Surge rate under the recommended rule on days when an alert was out the evening before: snow_ice 11.5%, tree 8.4%, flooding 6.2%, against 3.5% on days without one.
+
+**Feature table.** 103,440 rows, 25 features: 8 lags of snow_ice and tree (flooding is left out, ADR-003 live rule), 6 alert features (count and warning flag per storm group), 3 calendar fields and 8 static attributes. Two builds give byte-identical files. In the Airflow 3.3.2 image, `airflow tasks test daily_pipeline` ran `ingest_alert_history` (1.9 s), `surge_labels` (5.2 s) and `feature_table` (4.0 s).
 
 ## W2-3 results (2026-10-24)
 

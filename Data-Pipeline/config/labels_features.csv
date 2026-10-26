@@ -1,0 +1,5 @@
+setting,value,options,note
+label_groups,snow_ice;tree;flooding,any of snow_ice tree flooding separated by ;,storm groups whose surge makes a cell a surge (ADR-004 keeps flooding in the label; the team decides the flooding question)
+feature_groups,snow_ice;tree,any of snow_ice tree flooding separated by ;,storm groups with lagged 311 features; flooding is left out because it has no live source (ADR-003 live rule); snow_ice is #16's call under ADR-003
+feature_min_lag_days,2,whole number of 1 or more,a 311 feature for day D uses counts up to D minus this many days; 2 because the forecast is made the evening before D when D-1 is not complete
+forecast_cutoff_local,18:00,HH:MM Boston time,the forecast for day D is made at this time the evening before; an alert counts only if its first bulletin came earlier (ADR-014)

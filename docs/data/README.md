@@ -19,6 +19,24 @@ A category missing from this file maps to `unmapped` and is counted by `map_311.
 
 Written by `map_311.py`. For every shared category and storm group that has rows in both systems: the first new-system date (`switch_date`), the last legacy date, and how many legacy rows came after the switch. A note marks switch dates that fall on the first day of the new export, where the real switch may be earlier.
 
+# NWS alerts
+
+## alert-map.csv
+
+One row per NWS alert type (VTEC phenomena and significance), for `alert_history.py` (#16, ADR-014). Changed only by reviewed PR, like `category-map.csv`.
+
+| column | meaning |
+|---|---|
+| phenomena | VTEC phenomena code, for example `WS` (winter storm) or `CF` (coastal flood) |
+| significance | `W` warning, `A` watch, `Y` advisory, `S` statement |
+| alert_type | the alert's name |
+| storm_groups | `snow_ice`, `tree`, `flooding`, several separated by `;`, or `none` |
+| note | why, when it is not obvious |
+
+An alert type missing from this file is kept as `unmapped`, feeds no feature, and is named in the run's output; add a row for it. NWS renamed several types during 2015 to 2026 (ADR-014), so old and new names both have rows. Some rows list types Boston has not had yet, so a first one is mapped.
+
+Data: National Weather Service (public domain), archived by the Iowa Environmental Mesonet of Iowa State University. Alert-based values are not official NWS warnings.
+
 # Static layers
 
 ## static-layers.csv

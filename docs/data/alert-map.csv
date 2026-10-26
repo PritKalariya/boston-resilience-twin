@@ -1,0 +1,53 @@
+phenomena,significance,alert_type,storm_groups,note
+BZ,A,blizzard watch,snow_ice,up to 2017 in zone MAZ015 (ADR-014); blizzard wind may also bring tree requests
+BZ,W,blizzard warning,snow_ice,blizzard wind may also bring tree requests
+WS,A,winter storm watch,snow_ice,
+WS,W,winter storm warning,snow_ice,
+WW,Y,winter weather advisory,snow_ice,
+ZR,Y,freezing rain advisory,snow_ice,2015 only in zone MAZ015 (ADR-014)
+IS,W,ice storm warning,snow_ice,not in Boston rows 2015 to 2026; listed so a future alert is mapped
+SQ,W,snow squall warning,snow_ice,county MAC025 from 2019 (ADR-014)
+WI,Y,wind advisory,tree,wind brings down trees and limbs
+HW,A,high wind watch,tree,
+HW,W,high wind warning,tree,
+EW,W,extreme wind warning,tree,not in Boston rows 2015 to 2026; listed so a future alert is mapped
+TO,A,tornado watch,tree,
+TO,W,tornado warning,tree,county warning; starts when first sent so never known the evening before (ADR-014)
+SV,A,severe thunderstorm watch,tree;flooding,damaging wind and downpours
+SV,W,severe thunderstorm warning,tree;flooding,county warning; starts when first sent so never known the evening before (ADR-014)
+TR,A,tropical storm watch,tree;flooding,
+TR,W,tropical storm warning,tree;flooding,
+HU,A,hurricane watch,tree;flooding,not in Boston rows 2015 to 2026; listed so a future alert is mapped
+HU,W,hurricane warning,tree;flooding,not in Boston rows 2015 to 2026; listed so a future alert is mapped
+CF,A,coastal flood watch,flooding,
+CF,W,coastal flood warning,flooding,
+CF,Y,coastal flood advisory,flooding,
+CF,S,coastal flood statement,flooding,minor coastal flooding statement
+SS,A,storm surge watch,flooding,not in Boston rows 2015 to 2026; listed so a future alert is mapped
+SS,W,storm surge warning,flooding,not in Boston rows 2015 to 2026; listed so a future alert is mapped
+FA,A,flood watch,flooding,flash flood watches became flood watches after 2021 (ADR-014)
+FA,W,flood warning,flooding,areal flood warning (county)
+FA,Y,flood advisory,flooding,areal flood advisory (county)
+FF,A,flash flood watch,flooding,up to 2021 in zone MAZ015 (ADR-014)
+FF,W,flash flood warning,flooding,county warning; starts when first sent so never known the evening before (ADR-014)
+FL,W,flood warning (river),flooding,county river flood warning
+HT,Y,heat advisory,none,heat is not a storm group
+EH,A,excessive heat watch,none,up to 2024; extreme heat from 2025 (ADR-014)
+EH,W,excessive heat warning,none,up to 2024; extreme heat from 2025 (ADR-014)
+XH,A,extreme heat watch,none,from 2025 (ADR-014)
+XH,W,extreme heat warning,none,from 2025 (ADR-014)
+WC,A,wind chill watch,none,cold is not a storm group; wind chill up to 2023 (ADR-014)
+WC,W,wind chill warning,none,cold is not a storm group
+WC,Y,wind chill advisory,none,cold is not a storm group
+CW,Y,cold weather advisory,none,from 2026 (ADR-014)
+EC,A,extreme cold watch,none,not in Boston rows 2015 to 2026; listed so a future alert is mapped
+EC,W,extreme cold warning,none,not in Boston rows 2015 to 2026; listed so a future alert is mapped
+FG,Y,dense fog advisory,none,
+FR,Y,frost advisory,none,
+FZ,A,freeze watch,none,
+FZ,W,freeze warning,none,
+FW,A,fire weather watch,none,
+FW,W,red flag warning,none,
+RP,S,rip current statement,none,
+SU,Y,high surf advisory,none,surf and beach erosion; coastal flooding has its own CF alerts
+BH,S,beach hazards statement,none,

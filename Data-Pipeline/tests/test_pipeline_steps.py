@@ -334,6 +334,7 @@ def test_only_the_ingest_tasks_retry():
     assert steps.NETWORK == {
         "ingest_static_layers", "ingest_legacy_311", "ingest_new_311", "ingest_noaa_logan",
         "ingest_nws_forecasts", "ingest_nws_alerts", "ingest_tides", "ingest_open_meteo",
+        "ingest_alert_history",
     }
     assert steps.RETRIES == 2
     assert steps.RETRY_DELAY.total_seconds() == 300 and steps.RETRY_BACKOFF == 2.0
@@ -591,3 +592,35 @@ def test_scripts_do_not_shadow_installed_packages():
     }
     names = {path.stem for path in SCRIPTS_DIR.glob("*.py")}
     assert not names & taken
+
+
+def test_labels_and_features_read_the_full_builds_counts_and_write_the_run_folder(tmp_path):
+    # #16: labels need the 3 years before each day (ADR-005) and features the 28 days before,
+    # which a slice's own counts do not hold.
+    full_counts = run_paths(FULL, tmp_path).processed / "daily_counts.parquet"
+    slice_paths = run_paths(SLICE, tmp_path)
+    for step, out in (("surge_labels", "labels.parquet"), ("feature_table", "features.parquet")):
+        files = steps.step_files(step, SLICE, tmp_path)
+        assert files.data_in[0] == full_counts
+        assert files.data_out == [slice_paths.processed / out]
+        values = flag_values(script_args(step, SLICE, tmp_path))
+        assert (values["--start"], values["--end"]) == ("2025-01-01", "2025-12-31")
+    features = steps.step_files("feature_table", SLICE, tmp_path)
+    assert slice_paths.interim / "nws_alerts.parquet" in features.data_in
+    assert slice_paths.interim / "static" in features.config_in
+
+
+def test_alert_history_downloads_into_the_shared_raw_folder(tmp_path):
+    plan = steps.step_plan("ingest_alert_history", SLICE, tmp_path)
+    assert "--download" in plan.args
+    assert plan.refetch == run_paths(SLICE, tmp_path).raw / "nws_alerts"
+    assert plan.files.data_out == [run_paths(SLICE, tmp_path).interim / "nws_alerts.parquet"]
+
+
+def test_16_versioned_inputs_exist_in_the_repo():
+    assert Path(flag_values(script_args("ingest_alert_history", FULL))["--map"]).is_file()
+    for step in ("surge_labels", "feature_table"):
+        values = flag_values(script_args(step, FULL))
+        for flag in ("--rules", "--settings"):
+            if flag in values:
+                assert Path(values[flag]).is_file(), values[flag]

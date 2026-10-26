@@ -57,6 +57,9 @@ SCRIPTS = {
     "combine_311": "map_311",
     "spatial_join": "spatial_join",
     "daily_counts": "daily_counts",
+    "ingest_alert_history": "alert_history",
+    "surge_labels": "surge_labels",
+    "feature_table": "feature_table",
     "validate_raw": "validate_data",
     "validate_processed": "validate_data",
 }
@@ -69,7 +72,6 @@ PLANNED = {
     "ingest_nws_alerts": "#7",
     "ingest_tides": "#7",
     "ingest_open_meteo": "#8",
-    "labels_and_features": "#16",
     "schema_and_statistics": "#35",
     "bias_slicing": "#32",
 }
@@ -247,6 +249,37 @@ def step_plan(step: str, days: DateRange, root: Path = REPO) -> StepPlan:
                   "--start", days.start, *end, "--out", out],
             files=StepFiles(data_in=[located], config_in=[hoods, processing], data_out=[out]),
             hint="Run spatial_join for the same range first.",
+        )
+    if step == "ingest_alert_history":
+        # #16, ADR-014: one IEM bulk pull per year for office BOX into the shared raw folder; the
+        # prepared alerts cover every year whatever the range, since the features need the history.
+        raw_dir, alert_map = raw / "nws_alerts", root / "docs" / "data" / "alert-map.csv"
+        out = interim / "nws_alerts.parquet"
+        return StepPlan(
+            args=["--raw-dir", raw_dir, "--map", alert_map, "--out", out, "--download"],
+            files=StepFiles(config_in=[alert_map], data_out=[out]),
+            hint="Restore docs/data/alert-map.csv from git.",
+            refetch=raw_dir,
+        )
+    if step in ("surge_labels", "feature_table"):
+        # #16. A label needs the same weeks of the 3 years before its day (ADR-005) and a feature the
+        # 28 days before, so both read the full build's daily counts; a slice writes only its days.
+        counts = run_paths(DateRange(), root).processed / "daily_counts.parquet"
+        settings, end = config / "labels_features.csv", (["--end", days.end] if days.end else [])
+        if step == "surge_labels":
+            rules, out = config / "surge_rules.csv", paths.processed / "labels.parquet"
+            return StepPlan(
+                args=["--counts", counts, "--rules", rules, "--settings", settings,
+                      "--start", days.start, *end, "--out", out],
+                files=StepFiles(data_in=[counts], config_in=[rules, settings], data_out=[out]),
+                hint="Run daily_counts for the full build (start 2015-01-01, no end) first.",
+            )
+        alerts, static, out = interim / "nws_alerts.parquet", interim / "static", paths.processed / "features.parquet"
+        return StepPlan(
+            args=["--counts", counts, "--alerts", alerts, "--static-dir", static, "--settings", settings,
+                  "--start", days.start, *end, "--out", out],
+            files=StepFiles(data_in=[counts, alerts], config_in=[static, settings], data_out=[out]),
+            hint="Run daily_counts for the full build, ingest_alert_history and ingest_static_layers first.",
         )
     if step == "validate_raw":
         # #17. Only rows in are counted: the step writes a JSON of check results, not data.

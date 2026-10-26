@@ -65,10 +65,11 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Eight tasks run scripts: `ingest_static_layers`, `validate_raw`,
-  `parse_legacy_311`, `parse_new_311`, `combine_311`, `spatial_join`,
-  `validate_processed` and `daily_counts`.
-- The other 10 are placeholders. Each logs the issue that builds it
+- Eleven tasks run scripts: `ingest_static_layers`, `ingest_alert_history`,
+  `validate_raw`, `parse_legacy_311`, `parse_new_311`, `combine_311`,
+  `spatial_join`, `daily_counts`, `surge_labels`, `feature_table` and
+  `validate_processed`.
+- The other 9 are placeholders. Each logs the issue that builds it
   (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
 - Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
   hand.
@@ -365,6 +366,24 @@ python Data-Pipeline/scripts/daily_counts.py --start 2025-01-01 --end 2025-12-31
 ```
 
 `requests` counts every request kept under `after_switch_policy` (ADR-021); `baseline_requests` counts the ones baselines may use, which under `keep` is the same number. The run prints each step from the combined table to the counted total (unmapped, not storm-related, after_switch, each no-location reason, no date, outside the range) and stops if the counts do not add up to the total.
+
+## Surge labels and features (#16)
+
+Three scripts, each a `daily_pipeline` task (`ingest_alert_history`, `surge_labels`, `feature_table`):
+
+```bash
+python Data-Pipeline/scripts/alert_history.py --download   # NWS alert history (ADR-014): fetch missing years and the current one, then prepare
+python Data-Pipeline/scripts/surge_labels.py --grid        # labels under the chosen rule, plus the surge rate of every rule
+python Data-Pipeline/scripts/feature_table.py              # features per unit and day
+```
+
+**Alert history.** `alert_history.py` pulls the Iowa Environmental Mesonet bulk VTEC download for NWS office BOX one year at a time into `Data-Pipeline/data/raw/nws_alerts/box_<year>.csv`, as published: a finished year once, the current year on every run, every year with `--refresh`. A pull without IEM's columns (an error page) never replaces a stored year. It writes `Data-Pipeline/data/interim/nws_alerts.parquet`: one row per first bulletin for zone MAZ015 and county MAC025, with the first bulletin (`utc_prodissue`) and the first-announced end (`utc_init_expire`) only. The last-state fields are dropped, so no feature can use them (ADR-014). The run prints alerts per year and area, to compare with ADR-014, and names any alert type missing from `docs/data/alert-map.csv`; add a row for it in a reviewed PR.
+
+**Labels.** `surge_labels.py` compares each storm group's requests with its ADR-005 baseline (built from `baseline_requests`) under the rule marked `chosen` in `Data-Pipeline/config/surge_rules.csv`. A cell is a surge when any group in `label_groups` (`Data-Pipeline/config/labels_features.csv`) surges (ADR-004). With fewer than 20 history days there is no label: `surge` is blank, not false, so labels start on 2016-01-06. To change the rule, mark another row `chosen` in a reviewed PR; the rule is frozen by ADR before Model Development.
+
+**Features.** `feature_table.py` writes `Data-Pipeline/data/processed/features.parquet`, one row per unit and day: 311 lags up to day D minus `feature_min_lag_days`; NWS alerts first sent before `forecast_cutoff_local` (18:00 Boston time) the evening before D whose first-announced end is after D begins; calendar fields; static attributes from `Data-Pipeline/data/interim/static/`. It stops if a row uses a later 311 day or a cutoff that is not before D. Weather and tides join once #7 and #8 land.
+
+**Slices.** A label needs the 3 years before its day and a feature the 28 days before, so in a slice both tasks read the full build's `Data-Pipeline/data/processed/daily_counts.parquet` and write only the slice's days. Run the full build once before a slice.
 
 ## Versioned data (DVC)
 
