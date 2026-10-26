@@ -6,8 +6,10 @@ data). The defaults are the full build, written to Data-Pipeline/data/interim/
 and processed/. Any other range is a slice, written to
 Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/.
 
-Seven tasks run pipeline scripts. The others are placeholders: they log the
-issue that builds them and do nothing else. The last task, push_data, pushes
+Twelve tasks run pipeline scripts, four of them the weather and tide
+downloads (#7). The others are placeholders: they log the issue that builds
+them and do nothing else; an ingest task becomes real once its script is in
+pipeline_steps.SCRIPTS. The last task, push_data, pushes
 the DVC-tracked data to the team remote (dvc_push.py, #19); without bucket
 access it logs `dvc push skipped: ...` and succeeds.
 
@@ -119,8 +121,8 @@ def daily_pipeline():
         issue = steps.PLANNED[step]
         return planned.override(task_id=step, doc_md=f"Placeholder until {issue}.", **retries(step))(issue)
 
-    ingest = [
-        todo(step)
+    ingest = {
+        step: real(step) if step in steps.SCRIPTS else todo(step)
         for step in (
             "ingest_legacy_311",
             "ingest_new_311",
@@ -130,15 +132,17 @@ def daily_pipeline():
             "ingest_tides",
             "ingest_open_meteo",
         )
-    ]
+    }
+    # One after the other, legacy first: both write the 311 schedule state (#6).
+    ingest["ingest_legacy_311"] >> ingest["ingest_new_311"]
     static = real("ingest_static_layers")
     raw_checked = real("validate_raw")
     combined = real("combine_311")
     validated = real("validate_processed")
 
-    check_range() >> [*ingest, static] >> raw_checked
+    check_range() >> [*ingest.values(), static] >> raw_checked
     raw_checked >> [real("parse_legacy_311"), real("parse_new_311")] >> combined
-    [combined, static] >> real("spatial_join") >> todo("daily_counts") >> todo("labels_and_features") >> validated
+    [combined, static] >> real("spatial_join") >> real("daily_counts") >> todo("labels_and_features") >> validated
     validated >> [todo("schema_and_statistics"), todo("bias_slicing")] >> push_data()
 
 

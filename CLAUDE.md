@@ -67,15 +67,20 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `python Data-Pipeline/scripts/map_311.py`: apply `docs/data/category-map.csv`, combine both systems into `Data-Pipeline/data/interim/311_combined.parquet`, write `docs/data/change-points.csv`
 - `python Data-Pipeline/scripts/live_baselines.py`: test the 311 switch dates as change points and replay surge baseline methods across them (markdown for ADR-005); `--window-days 84` and `--drop-after-switch` for sensitivity
 - `python Data-Pipeline/scripts/static_layers.py [--download|--refresh]`: load the layers in `Data-Pipeline/config/static_layers.csv` to `Data-Pipeline/data/interim/static/` (EPSG:4326) and write `docs/data/static-layers.csv`; `--download` fetches missing files, `--refresh` all of them
+- `python Data-Pipeline/scripts/noaa_logan.py`: NOAA GHCN-D daily weather for Logan from 2015 to `Data-Pipeline/data/raw/weather/noaa_logan/<year>.json`, manifest in `Data-Pipeline/data/state/weather/noaa_logan/`; skips settled years (needs `NOAA_CDO_TOKEN`)
+- `python Data-Pipeline/scripts/tides.py`: Boston tide gauge 8443970, hourly observed and predicted from 2015, to `Data-Pipeline/data/raw/tides/`, manifests in `Data-Pipeline/data/state/tides/`; skips settled half-years
+- `python Data-Pipeline/scripts/nws.py forecasts|alerts`: save the current NWS gridpoint forecast or active alerts for Boston under `Data-Pipeline/data/raw/weather/` (needs `NWS_USER_AGENT`)
 - `python Data-Pipeline/scripts/compare_units.py`: compare candidate modeling units (empty-cell share, surge rate with the ADR-005 baseline) from `311_combined.parquet` and the static tracts and neighborhoods (markdown; about 4 minutes)
 - `python Data-Pipeline/scripts/spatial_join.py`: place every request in `311_combined.parquet` in a 2020 tract and its ADR-004 neighborhood by coordinates, write `Data-Pipeline/data/interim/311_located.parquet` and print the share with no location by year (needs the static layers)
 - `python Data-Pipeline/scripts/validate_data.py --stage raw|processed`: Great Expectations checks on the raw 311 files or on `311_combined.parquet` and `311_located.parquet` with the bounds in `Data-Pipeline/config/validation_bounds.csv`; writes results to `--out` and fails naming each failed check (the `validate_raw` and `validate_processed` DAG tasks)
+- `python Data-Pipeline/scripts/daily_counts.py [--start YYYY-MM-DD] [--end YYYY-MM-DD]`: storm-related requests per unit, day and storm group from `311_located.parquet`, zero-filled, with the `after_switch_policy` from `Data-Pipeline/config/processing.csv` (ADR-021); writes `Data-Pipeline/data/processed/daily_counts.parquet` and prints how the total reconciles with the combined table
 - `python Data-Pipeline/scripts/after_switch.py`: legacy rows opened after their category's switch date (`after_switch`) by category, the worst overlap windows and the storm surge labels under each policy (markdown for ADR-021); reads `after_switch_policy` from `Data-Pipeline/config/processing.csv`, needs the static layers (about 1.5 minutes)
 - `python -m pytest Data-Pipeline/tests`
 - `ruff check .`: lint as CI runs it (errors only, `ruff.toml`); install with `pip install ruff==0.17.2`. CI (`.github/workflows/ci.yml`) runs it and the tests on every PR
 - `gcloud auth application-default login`: Google credentials for DVC, once per machine. Human only (opens a browser)
 - `dvc remote list`, `dvc status -c`, `dvc pull`: show the remote (`gs://boston-resilience-twin-data/dvc`), compare the cache with it, fetch the data for the current commit
 - `python Data-Pipeline/scripts/dvc_push.py`: `dvc push`, or a `dvc push skipped: ...` log line and exit 0 without bucket access. Use it instead of bare `dvc push` in DAGs and scripts
+- `docker compose exec airflow-scheduler python /opt/airflow/repo/Data-Pipeline/scripts/alerts.py --test`: send one test failure alert, to Slack when `SLACK_ALERT_WEBHOOK` is set in `.env`, else to the log only (runbook "Pipeline alerts (Slack)")
 - `docker compose exec airflow-scheduler airflow tasks test daily_pipeline push_data`: run only the DAG's DVC push task (skips without credentials; runbook "Versioned data (DVC)")
 - `cd Deployment/terraform && terraform init`: configure the GCS state backend and providers (needs `gcloud auth application-default login`)
 - `terraform fmt -check && terraform validate`: format and syntax check, no cloud calls
@@ -83,6 +88,8 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `terraform apply -var-file=terraform.tfvars`: human only, never run by Claude Code
 - `gcloud compute instances start|stop airflow-vm --zone=us-east1-b`: VM power; Terraform does not manage run state
 - `read -rs VALUE && printf '%s' "$VALUE" | gcloud secrets versions add <secret> --data-file=-; unset VALUE`: add a secret value with no trailing newline and nothing in shell history (see runbook). Human only, never run by Claude Code
+- runbook "API keys in .env": fill `NOAA_CDO_TOKEN`, `CENSUS_API_KEY` and `NWS_USER_AGENT` in `.env` from Secret Manager. Human only (writes secret values), never run by Claude Code
+- `docker compose exec airflow-scheduler sh -c 'for k in NOAA_CDO_TOKEN CENSUS_API_KEY NWS_USER_AGENT; do [ -n "$(printenv $k)" ] && echo "$k set" || echo "$k empty"; done'`: check the API keys reached the containers without printing them
 - `docker compose config --quiet`: validate `docker-compose.yaml`; no output means valid
 - `docker compose up -d --build --wait`: start Airflow 3.3.2 (LocalExecutor) and Postgres 16 and wait until healthy, rebuilding the Airflow image first (fully cached, about 1 s, unless `Data-Pipeline/requirements.txt` changed; ADR-022); UI at http://localhost:8080, login airflow / airflow (local defaults)
 - `docker compose ps -a`: service state and health; `airflow-init` shows `Exited (0)` once the database is migrated

@@ -1,6 +1,10 @@
 # Status
 
+<<<<<<< HEAD
 Updated: 2026-10-25 by piyush1420. Edit this file in the PR that changes the state.
+=======
+Updated: 2026-10-26 by Kirtan. Edit this file in the PR that changes the state.
+>>>>>>> origin/main
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -12,12 +16,16 @@ Week 2: Processing (due 2026-10-18)
 | #2 Local dev environment and Python pin | Punith | 2026-10-13 | done | PR #55 merged. `docker compose up` runs Airflow 3.3.2 (LocalExecutor, Postgres 16); ADR-013 pins Python 3.12 |
 | #22 Daily DAG skeleton | Punith | 2026-10-18 | in review | `daily_pipeline`: 19 tasks; 7 run scripts (static layers, raw validation, legacy and new 311, combine, spatial join, processed validation), 11 are placeholders until #6, #7, #8, #15, #16, #35, #32; results below. Runs on the #69 image (ADR-022), no manual installs |
 | #36 Logging and error handling across tasks | Punith | 2026-10-22 | in review | Builds on #72. Every task logs run id, rows in and rows out; `ingest_*` tasks retry twice; missing or empty inputs fail before the script runs; a failed task writes the W3-3 alert to its log until #34 delivers it; results below |
+| #34 Anomaly detection and alerts | Kirtan | 2026-10-22 | in review | Failure alerts go to Slack through an incoming webhook (`SLACK_ALERT_WEBHOOK` in the gitignored `.env`; on the VM from Secret Manager with #64), and always to the task log. Checks reuse #17's suites (`ValidationFailed` names each failing check) and #35's statistics. Slice run 2025-01 with an injected 2025.csv missing `open_dt` (2026-10-25): `validate_raw` failed, later tasks `upstream_failed`, exactly one `ALERT` line in the run, naming `expect_column_to_exist(open_dt)`. Slack run 2026-10-26 (`alert-demo-slack`, webhook set): one alert, `alert sent to Slack`, no webhook URL in any log; screenshot in the README |
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
+| #4 API access and secrets | Kirtan | 2026-10-11 | in progress | `docs/data-access.md` has one check per API (NOAA CDO, Census, NWS). NOAA and Census keys stored and checked (200, 2026-10-20); `nws-user-agent` slot added in `secrets.tf`, waiting on Prit's review and apply, then its value and NWS check. Keys reach the Airflow containers from `.env` (`NOAA_CDO_TOKEN`, `CENSUS_API_KEY`, `NWS_USER_AGENT`); `credentials.require` fails a task naming a missing key (checked in the scheduler container, 2026-10-23). The pipeline needs no Census key so far (W1-9) |
+| #7 Observational weather ingestion | Kirtan | 2026-10-13 | in review | `noaa_logan.py`, `tides.py`, `nws.py` as the `ingest_noaa_logan`, `ingest_tides`, `ingest_nws_forecasts` and `ingest_nws_alerts` tasks; raw files as returned, rerun-safe (settled periods skipped, NWS snapshots named by issue time); a missing key fails before the script runs. Real runs through Airflow (2026-10-26): tides 48 half-years from 2015 in 29 s, every half complete (4,344, 4,368 or 4,416 hours), rerun 47 final and 1 unchanged; NWS forecast and alerts saved, rerun unchanged; NOAA 2015 to 2026 (through 2026-10-20, the usual lag), every element on every day except snow depth (SNWD: none from 2015 at Logan) and peak gust (WSF5: 8 missing days in 2015 to 2023, the count ADR-003 cites) |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
 | #11 Decision: live baselines for the new 311 format | Punith | 2026-10-13 | done | PR #63 merged; ADR-005: baseline = same weeks of the previous 3 years, both systems, by storm group |
 | #53 Policy for legacy rows after their category's switch date | Punith | 2026-10-20 | in review | ADR-021: keep. Setting `after_switch_policy` in `Data-Pipeline/config/processing.csv`, for #15 to apply; results below |
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | done | PR #52 merged; results below; new-system clock in ADR-020; flooding gap needs a team call |
 | #14 Spatial joins | Alekhya (built by Srikar for the Oct 25 deadline) | 2026-10-16 | in review | every request tagged with tract and unit by coordinates; 99.14% placed; results below |
+| #15 Daily counts | Srikar | 2026-10-17 | in review | neighborhood x day x storm group, zero-filled; 215,701 requests counted and reconciled; results below |
 | #20 Airflow on the VM | Prit | 2026-10-18 | done | PR #59 merged. Airflow stack on airflow-vm (LocalExecutor, Postgres 16; ADR-016); UI by SSH tunnel only; VM stopped. Runbook: "Airflow on the VM". After #58 merges, run the update step in the runbook on the VM |
 | #23 Write ADRs 001, 009, 010, 011, 012 | Prit | 2026-10-18 | done | PR #65 merged; ADRs in docs/decisions/ |
 | #29 Verify teammate IAM | Prit | 2026-10-15 | done | PR #51 merged. All 6 members granted, plus `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start and SSH verified; VM stopped. |
@@ -31,8 +39,15 @@ Week 2: Processing (due 2026-10-18)
 | #21 CI v1 | Kirtan | 2026-10-16 | in review | `.github/workflows/ci.yml`: Python 3.12 check, `ruff check .` (errors only), tests, on every PR and push to main; no secrets; `conftest.py` blocks network in tests (loopback and Unix sockets allowed, so `socketpair()` and asyncio work on Windows). On main as of 2026-10-25 (992b981, #78 in) plus this change, in plain `python:3.12-slim` as CI runs it: `ruff check .` clean, 234 tests pass and 1 skips (`test_spatial_join.py` needs the static layers on disk), install 24 s. Action pins checked against their tags (checkout v7.0.1, setup-python v7.0.0). Required-check setting needs a repo admin (runbook, "CI") |
 | #69 Airflow image with every pipeline dependency | Prit | 2026-10-22 | done | PR #74 merged; ADR-022: every Airflow service runs `brt-airflow:local` from `airflow.Dockerfile`, the ADR-013 base image plus `Data-Pipeline/requirements.txt` under Airflow's constraints. Cold `docker compose up -d --build --wait` 1m37s (image build plus stack start, base image already pulled), cached `docker compose build` 1.0s, image 3.44 GB on disk against the base image's 3.22 GB. Great Expectations 1.24.1, Fairlearn 0.15.0 and dvc[gs] 3.67.1 all dry-run clean against the constraints with pandas 3.0.5. Unblocks #22 and #37 |
 | #24 Write ADRs 002, 003 | Srikar | 2026-10-18 | in review | ADR-002 supporting sources, ADR-003 time-based split and feature-history rule; both record scoping decisions (dated 2026-10-04) |
+<<<<<<< HEAD
 | #19 DVC remote on GCS | Kirtan | 2026-10-15 | in review | Remote `gs://boston-resilience-twin-data/dvc` set in `.dvc/config` (repo root); dvc 3.67.1 and dvc-gs 3.1.0 pinned. `dvc_push.py` skips with a log line and exits 0 without bucket access (checked with no credentials, 2026-10-23). Round trip with team credentials checked in a scratch repo (push, `dvc pull` in a fresh clone, files match; test objects removed, 2026-10-23). `push_data`, the last task of `daily_pipeline`, runs it; the containers mount `.git` (read-only, since DVC needs a git repo), `.dvc` and `.dvcignore`. `airflow tasks test daily_pipeline push_data` without credentials: skip line, task success; with team credentials: `dvc push to gs://boston-resilience-twin-data/dvc: Everything is up to date.`, task success (2026-10-25). No data tracked yet: stages come with #18 |
 | #12 Decision: alert-history source for 2015 to 2023 | Piyush | 2026-10-14 | in review | ADR-014 revised to Option A+ after Punith's review (his re-review on PR #88 pending): NWS alert history from the Iowa Environmental Mesonet bulk download (office BOX, rows for Boston zone MAZ015 and county MAC025), with alerts in every year 2015 to 2026, so the alert feature meets ADR-003. Each alert counts from its first bulletin to its first-announced end and stops earlier only at a cancellation or upgrade IEM recorded before the 18:00 Boston cutoff (`utc_expire` = `utc_updated`); checked against the bulletins of all 584 cancelled or upgraded Boston rows, the rule never used a later bulletin. History and evening features both come from IEM with the same logic. #16 still needs the A+ code; evening scheduling is separate (#39); results below |
+=======
+| #19 DVC remote on GCS | Kirtan | 2026-10-15 | done | PR #79 merged. Remote `gs://boston-resilience-twin-data/dvc` set in `.dvc/config` (repo root); dvc 3.67.1 and dvc-gs 3.1.0 pinned. `dvc_push.py` skips with a log line and exits 0 without bucket access (checked with no credentials, 2026-10-23). Round trip with team credentials checked in a scratch repo (push, `dvc pull` in a fresh clone, files match; test objects removed, 2026-10-23). `push_data`, the last task of `daily_pipeline`, runs it; the containers mount `.git` (read-only, since DVC needs a git repo), `.dvc` and `.dvcignore`. `airflow tasks test daily_pipeline push_data` without credentials: skip line, task success; with team credentials: `dvc push to gs://boston-resilience-twin-data/dvc: Everything is up to date.`, task success (2026-10-25). No data tracked yet: stages come with #18 |
+| #28 Write ADR-008 | Kirtan | 2026-10-18 | done | PR #86 merged. ADR-008 monitoring tools: Cloud Monitoring for the services (VM, Cloud Run uptime, errors, latency), Evidently for data drift and rolling accuracy and fairness; no Grafana, Prometheus or W&B. Records the scoping decision (dated 2026-10-04); alert thresholds stay open until week 1 of the live run |
+| #26 Write ADR-006 | Piyush | 2026-10-18 | in review | ADR-006 model registry, proposed until Kirtan approves: the Vertex AI Model Registry in project 2 is the only registry; MLflow on the VM tracks experiments and agent traces, not models; Cloud Run serves, with no Vertex AI endpoint. A version is registered as `candidate`, served by a Cloud Run revision set to its version ID, and promoted by moving `production` to it while the version it replaces keeps `previous`; a rollback sends traffic back to that version's revision. Records the scoping choice of 2026-10-04 and adds the version flow; Google's docs checked 2026-10-26 (no charge for models kept in the registry). Open: where model files live, how CI runs and agent traces reach MLflow (ADR-016), and how CI/CD authenticates to project 2 |
+| #43 Data card for all sources | Kirtan | 2026-10-23 | in review | `docs/data/data-card.md`, linked from the README: each source's URL, license and attribution, vintage, update frequency, known issues, and coverage of the 2015 to 2023 training years (ADR-003). Facts checked against the sources on 2026-10-25 (Analyze Boston page, NCEI and CO-OPS metadata, the NWS points API) |
+>>>>>>> origin/main
 
 ## Blocked
 None.
@@ -165,6 +180,26 @@ Command: `python Data-Pipeline/scripts/after_switch.py`. Data: legacy files 2015
 | Pruning Request, tree (109 days) | 27 / 179 | 0.80 (1.57%) | 0.17 (0%) | 0.14 (0%) |
 
 Storm labels (ADR-004 unit, 94,512 labeled cells): drop changes 1, exclude_from_baselines none. Snow Plowing and Emergency Responder Snow Plowing switched on 2026-06-23 with 2 test requests and held 50.5% of last winter's legacy snow requests, so drop could delete half of this winter's snow signal. Decision in ADR-021: keep.
+
+## W2-3 results (2026-10-24)
+
+Command: `python Data-Pipeline/scripts/daily_counts.py` after `spatial_join.py`. `Data-Pipeline/data/processed/daily_counts.parquet` has one row per unit, day and storm group: 24 units x 4,301 days (2015-01-01 to 2026-10-10, the last full day of both systems) x 3 groups = 309,672 rows, 84.5% of them zero. It runs in about 3 seconds and peaks at 1.1 GB.
+
+How the total reconciles (`after_switch_policy` keep, so nothing is removed for after_switch):
+
+| step | requests |
+|---|---|
+| rows in the combined table (3,106,511 parsed, minus 1,283 resubmitted copies) | 3,105,228 |
+| unmapped category | -57 |
+| not storm-related | -2,888,393 |
+| no coordinates | -546 |
+| City Hall placeholder | -291 |
+| outside Boston's tracts | -213 |
+| tract 9815.02, in no neighborhood | -13 |
+| after the last full day | -14 |
+| counted | 215,701 |
+
+By storm group: snow_ice 122,585, tree 86,499, flooding 6,617. The total matches #66's comparison once its 291 placeholder rows are taken out (216,019 placed, less 291, 13 and 14).
 
 ## W2-2 results (2026-10-24)
 

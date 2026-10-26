@@ -1,4 +1,5 @@
 import logging
+import os
 import subprocess
 import sys
 
@@ -166,6 +167,8 @@ def test_script_exits_0_without_credentials(tmp_path):
         "HOME": str(tmp_path),
         "CLOUDSDK_CONFIG": str(tmp_path / "gcloud"),  # no gcloud login
         "NO_GCE_CHECK": "true",  # no metadata server lookup; google-auth reads only lowercase "true"
+        # Windows needs SYSTEMROOT for its socket setup (WinError 10106 without it).
+        **({"SYSTEMROOT": os.environ["SYSTEMROOT"]} if "SYSTEMROOT" in os.environ else {}),
     }
     result = subprocess.run(
         [sys.executable, dvc_push.__file__, "--repo", str(tmp_path)],

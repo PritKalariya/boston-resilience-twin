@@ -65,10 +65,10 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Seven tasks run scripts: `ingest_static_layers`, `validate_raw`,
-  `parse_legacy_311`, `parse_new_311`, `combine_311`, `spatial_join` and
-  `validate_processed`.
-- The other 11 are placeholders. Each logs the issue that builds it
+- Eight tasks run scripts: `ingest_static_layers`, `validate_raw`,
+  `parse_legacy_311`, `parse_new_311`, `combine_311`, `spatial_join`,
+  `validate_processed` and `daily_counts`.
+- The other 10 are placeholders. Each logs the issue that builds it
   (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
 - Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
   hand.
@@ -125,8 +125,54 @@ Logging and failures (#36):
   (0-byte) files in `Data-Pipeline/data/raw/static/`, so `--download` fetches
   them again.
 - A task that fails for good writes `ALERT <dag>.<task> failed in run <id>
-  (try <n>): <error>` to its own log (`Data-Pipeline/scripts/alerts.py`).
-  Slack or email delivery comes with #34.
+  (try <n>): <error>` to its own log (`Data-Pipeline/scripts/alerts.py`), and
+  posts the same line to Slack when a webhook is set (below). The callback
+  runs once, after the last try, so one failed task is one alert.
+
+### Pipeline alerts (Slack)
+
+Failure alerts go to Slack through an incoming webhook (#34). The URL is the
+credential: anyone who has it can post to the channel, so it lives only in the
+gitignored `.env` locally, never in chat, a ticket or the repo. On airflow-vm
+it comes from Secret Manager with #64. Without it, alerts stay in the task log
+and runs are unaffected. Before an alert is logged or posted, any API key from
+`.env` (or the webhook) that appears in it, as typed or URL-encoded, is replaced
+by its name, for example `key=<CENSUS_API_KEY>`.
+
+Set it up once (the webhook's owner; the team only needs to join the channel):
+
+1. In Slack, create an app for the workspace (api.slack.com/apps, "From
+   scratch"), turn on **Incoming Webhooks**, and add a webhook to the alert
+   channel. Invite the team to that channel.
+2. Copy the webhook URL and put it in `.env` as one line:
+   `SLACK_ALERT_WEBHOOK=https://hooks.slack.com/services/...`
+3. Recreate the stack so the containers see it: `docker compose up -d --wait`.
+4. Send a test alert:
+
+   ```bash
+   docker compose exec airflow-scheduler python /opt/airflow/repo/Data-Pipeline/scripts/alerts.py --test
+   ```
+
+   It logs `ALERT test alert ...` and `alert sent to Slack`, and the message
+   appears in the channel.
+
+To check the whole path, inject a bad file and run a slice: drop a required
+column (for example `open_dt`) from `Data-Pipeline/data/raw/311/2025.csv`,
+then trigger `daily_pipeline` with `{"start": "2025-01-01", "end":
+"2025-01-31"}`. `validate_raw` fails with `ValidationFailed`, the tasks after
+it are `upstream_failed`, and the run sends exactly one alert, from
+`validate_raw`, starting with `raw 2025.csv header:
+expect_column_to_exist(open_dt)`. Restore the file afterwards (re-download, or
+`dvc pull` once #18 tracks it).
+
+- **`... is not set (or not a Slack webhook)`.** The variable is empty in the
+  container, or does not start with `https://hooks.slack.com/`. Check `.env`,
+  then recreate the stack.
+- **`Slack refused the alert: HTTP 403` or `404`.** The webhook was revoked or
+  mistyped. Create a new one and replace the line in `.env`.
+- **`could not send the failure alert: ...` in a task log.** Slack could not
+  be reached; the task's own result is unchanged, and the alert is still in
+  the log line above it.
 
 ### Data validation (Great Expectations)
 
@@ -221,6 +267,35 @@ The VM does not use `.env` for secrets: they come from Secret Manager
 (ADR-015), set up in #20. However they are supplied, the JWT secret, API
 secret key and Fernet key must be identical in every container; the shared
 environment block in `docker-compose.yaml` passes one value to all of them.
+
+### API keys in .env
+
+Pipeline tasks read `NOAA_CDO_TOKEN`, `CENSUS_API_KEY` and `NWS_USER_AGENT`
+from the environment (docs/data-access.md). Locally they come from `.env`.
+A team member fills them from Secret Manager (needs `gcloud auth login`; the
+command names project 1, so another default gcloud project does not matter).
+It replaces any existing lines for the three keys and keeps the rest of
+`.env`:
+
+```bash
+touch .env && grep -vE "^(NOAA_CDO_TOKEN|CENSUS_API_KEY|NWS_USER_AGENT)=" .env > .env.tmp; mv .env.tmp .env
+for s in noaa-cdo-token census-api-key nws-user-agent; do
+  printf "%s='%s'\n" "$(echo "$s" | tr a-z- A-Z_)" "$(gcloud secrets versions access latest --secret="$s" --project=boston-resilience-twin)" >> .env
+done
+docker compose up -d --wait
+```
+
+The values never print to the terminal. Do not `cat .env` in a shared
+screen. To check that the containers see each key without printing it:
+
+```bash
+docker compose exec airflow-scheduler sh -c 'for k in NOAA_CDO_TOKEN CENSUS_API_KEY NWS_USER_AGENT; do [ -n "$(printenv $k)" ] && echo "$k set" || echo "$k empty"; done'
+```
+
+A secret slot with no version yet (for example `nws-user-agent` before its
+value is added) writes an empty value and gcloud prints `NOT_FOUND`; the task
+that needs it then fails naming the key. On Linux, write `AIRFLOW_UID` first:
+the README's `echo "AIRFLOW_UID=$(id -u)" > .env` overwrites the file.
 
 ### Troubleshooting
 
@@ -333,6 +408,66 @@ for a window where both systems logged many rows and the ratio under keep is
 well above 1 (requests entered twice), and in winter for Snow Plowing rows
 flagged `after_switch`.
 
+## Weather and tide downloads
+
+Four `daily_pipeline` tasks keep the raw weather and tide history (#7). They
+are `ingest_*` tasks, so they retry twice on a network error; a missing key
+fails at once, naming it.
+
+| Task | Script | Source | Stored under `Data-Pipeline/data/raw/` | Key |
+|---|---|---|---|---|
+| `ingest_noaa_logan` | `noaa_logan.py` | NOAA CDO API v2, GHCN-D Logan (USW00014739), daily from 2015 | `weather/noaa_logan/<year>.json` | `NOAA_CDO_TOKEN` |
+| `ingest_tides` | `tides.py` | CO-OPS Boston gauge 8443970, hourly observed and predicted from 2015, metres above MLLW, GMT | `tides/observed/` and `tides/predicted/`, `<year>-H1.json` and `-H2.json` | none |
+| `ingest_nws_forecasts` | `nws.py forecasts` | NWS gridpoint data, office BOX at City Hall | `weather/nws_forecasts/<UTC date>/<updateTime>.json` | `NWS_USER_AGENT` |
+| `ingest_nws_alerts` | `nws.py alerts` | NWS active alerts, zone MAZ015 and county MAC025 | `weather/nws_alerts/<UTC date>/<updated>.json` | `NWS_USER_AGENT` |
+
+Files are stored exactly as the source returned them (NOAA's pages are joined
+into one file per year, values unchanged). Reruns are safe:
+
+- **History (NOAA, tides).** A `_manifest.json` records each file's period,
+  download time and SHA-256. It lives in `Data-Pipeline/data/state/`
+  (`state/weather/noaa_logan/`, `state/tides/observed/` and `/predicted/`),
+  not in `raw/`: it changes every run, so a run with nothing new leaves `raw/`
+  byte for byte as it was and DVC records no new version. A period is final once it was downloaded
+  long enough after it ended for the source to stop revising it: NOAA 30 days,
+  tide observations 45 days (verified data lags about a month), predictions at
+  once. A final file is never fetched again; any other is fetched whole and
+  replaces its file only after its checks pass, so a failed run keeps the old
+  file. CO-OPS takes at most 365 days per request, hence the half-years.
+- **Snapshots (NWS).** NWS keeps no archive, so each run saves what is current,
+  named by NWS's own issue time. A rerun with nothing new writes nothing.
+
+Run one task, or a script directly from the repo root:
+
+```bash
+docker compose exec airflow-scheduler airflow tasks test daily_pipeline ingest_tides
+python Data-Pipeline/scripts/tides.py
+python Data-Pipeline/scripts/noaa_logan.py     # needs NOAA_CDO_TOKEN
+python Data-Pipeline/scripts/nws.py forecasts  # needs NWS_USER_AGENT
+```
+
+The first tide run fetches 48 half-years (about 30 s); after that a run
+fetches only the current half-years.
+
+Logan reports no snow depth (`SNWD`) from 2015 on, although the station has
+it in older years, so those files hold seven of the eight elements. Peak gust
+(`WSF5`) misses 8 days in 2015 to 2023, the gap ADR-003 counts.
+
+- **`<task> cannot start: NOAA_CDO_TOKEN not set` (or `NWS_USER_AGENT`).** The
+  key is empty in the container. Fill `.env` ("API keys in .env"), then
+  `docker compose up -d --wait`.
+- **NOAA `HTTP 400 ... Token parameter is required` or `not valid`.** The
+  token is missing or wrong; check it with docs/data-access.md.
+- **NOAA `HTTP 429` or `HTTP 503`.** CDO's rate limit or an outage; the task
+  retries, and allows 10,000 requests a day per token.
+- **NWS `HTTP 403`.** The user agent is empty or not accepted.
+- **`... has no data for a ... long over`.** A finished period came back empty,
+  which a source should never do; the run stops instead of storing nothing.
+  Check the source's status page and rerun later.
+- **`_manifest.json is not valid JSON`.** Fix it, or delete it (under
+  `Data-Pipeline/data/state/`): the source is then fetched again from 2015,
+  replacing files only where they changed.
+
 ## Static layers
 
 `Data-Pipeline/config/static_layers.csv` lists each static layer: file name, source URL, publisher, vintage, license, and the key column that must be present, unique and non-blank. To add or replace a layer, change a row there in a reviewed PR.
@@ -354,6 +489,17 @@ python Data-Pipeline/scripts/spatial_join.py
 ```
 
 The run adds `geoid20`, `unit` (the neighborhood a request is counted in) and `location`, and prints the share with no unit by year and system. `location` is `placed` or the reason there is no unit: `no_coordinates` (missing or not a number), `placeholder` (a default point listed in `Data-Pipeline/config/placeholder_locations.csv`, matched within about a metre), `outside_boston` (no 2020 tract) or `no_neighborhood` (tract 9815.02, which the city leaves out of every neighborhood). A latitude and longitude entered the wrong way round are swapped back and counted. If a new default point turns up (one spot holding thousands of requests with no neighborhood), add it to the placeholder file in a reviewed PR.
+
+## Daily counts
+
+`daily_counts.py` turns `311_located.parquet` into the table labels are built from (ADR-004): one row per unit, day and storm group, every day present and zero-filled, in `Data-Pipeline/data/processed/daily_counts.parquet`.
+
+```bash
+python Data-Pipeline/scripts/daily_counts.py                                     # 2015-01-01 to the last full day of both systems
+python Data-Pipeline/scripts/daily_counts.py --start 2025-01-01 --end 2025-12-31 # one year
+```
+
+`requests` counts every request kept under `after_switch_policy` (ADR-021); `baseline_requests` counts the ones baselines may use, which under `keep` is the same number. The run prints each step from the combined table to the counted total (unmapped, not storm-related, after_switch, each no-location reason, no date, outside the range) and stops if the counts do not add up to the total.
 
 ## Versioned data (DVC)
 
@@ -497,8 +643,9 @@ Terraform creates the secret slots empty. Values are added by hand and never
 go into a `.tf` file, a tfvars file, chat, the repo, or a ticket.
 
 Who can: the members listed in the `secret_writers` tfvars variable. They hold
-`roles/secretmanager.secretVersionAdder` on `noaa-cdo-token` and
-`census-api-key` only, which is the permission to add a new version. It is not
+`roles/secretmanager.secretVersionAdder` on each slot in `local.secret_ids`
+(`Deployment/terraform/secrets.tf`) only, which is the permission to add a
+new version. It is not
 project wide and it does not let them read the values back; reading is
 `roles/secretmanager.secretAccessor`, which every team member already has.
 

@@ -32,6 +32,12 @@ def test_loopback_is_allowed():
             client.connect(server.getsockname())
 
 
+def test_loopback_lookup_is_allowed_and_names_are_not():
+    assert socket.getaddrinfo("127.0.0.1", 80)
+    with pytest.raises(NetworkBlocked, match="localhost"):
+        socket.getaddrinfo("localhost", 80)  # a name goes through the resolver
+
+
 def test_socketpair_works():
     left, right = socket.socketpair()
     with left, right:
