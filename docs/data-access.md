@@ -35,12 +35,12 @@ Add each value with the command in the runbook ("Adding a secret value"). Only t
 
 ## Checking access
 
-Each command reads the credential from Secret Manager and passes it to curl on standard input, so it does not appear in shell history or the process list. Each prints only the HTTP status code; `200` means access works. Run them after `gcloud auth login` with project 1 set.
+Each command reads the credential from Secret Manager and passes it to curl on standard input, so it does not appear in shell history or the process list. Each prints only the HTTP status code; `200` means access works. Run them after `gcloud auth login`; each names project 1 (`--project=boston-resilience-twin`), so another default gcloud project does not matter.
 
 **NOAA CDO** (list one dataset):
 
 ```bash
-gcloud secrets versions access latest --secret=noaa-cdo-token | sed 's/^/token: /' \
+gcloud secrets versions access latest --secret=noaa-cdo-token --project=boston-resilience-twin | sed 's/^/token: /' \
   | curl -s -o /dev/null -w '%{http_code}\n' -H @- \
     'https://www.ncei.noaa.gov/cdo-web/api/v2/datasets?limit=1'
 ```
@@ -48,7 +48,7 @@ gcloud secrets versions access latest --secret=noaa-cdo-token | sed 's/^/token: 
 **Census** (2023 ACS 5-year total population, Suffolk County):
 
 ```bash
-gcloud secrets versions access latest --secret=census-api-key \
+gcloud secrets versions access latest --secret=census-api-key --project=boston-resilience-twin \
   | curl -s -G -o /dev/null -w '%{http_code}\n' --data-urlencode 'key@-' \
     -d 'get=NAME,B01003_001E' -d 'for=county:025' -d 'in=state:25' \
     'https://api.census.gov/data/2023/acs/acs5'
@@ -59,7 +59,7 @@ A bad key returns 302, not an error code, so anything other than `200` is a fail
 **NWS** (grid point for Boston City Hall; the forecast office is BOX):
 
 ```bash
-gcloud secrets versions access latest --secret=nws-user-agent | sed 's/^/User-Agent: /' \
+gcloud secrets versions access latest --secret=nws-user-agent --project=boston-resilience-twin | sed 's/^/User-Agent: /' \
   | curl -s -o /dev/null -w '%{http_code}\n' -H @- -H 'Accept: application/geo+json' \
     'https://api.weather.gov/points/42.3601,-71.0589'
 ```
@@ -72,7 +72,7 @@ To see the response body, replace `-o /dev/null -w '%{http_code}\n'` with `| hea
 |---|---|---|---|
 | NOAA CDO | 2026-10-20 | 200 | Kirtan |
 | Census | 2026-10-20 | 200 | Kirtan |
-| NWS | not yet run | | |
+| NWS | 2026-10-26 | 200 | Kirtan |
 
 ## If a request fails
 
