@@ -96,6 +96,8 @@ The containers restart whenever Docker starts (for example after a reboot) until
 
 **Optional overrides.** `.env` is for local development only. To change a dev default, such as the port, add the line to `.env` using the names in `.env.example`. Never commit `.env`. In Windows PowerShell 5.1, do not create `.env` with `>` or `Out-File`: they write UTF-16 and every compose command then fails.
 
+**API keys.** Tasks that call NOAA, Census or NWS read `NOAA_CDO_TOKEN`, `CENSUS_API_KEY` and `NWS_USER_AGENT` from `.env`. Without your own keys the stack still runs, and only the tasks that need a missing key fail, naming it. How to get them: `docs/data-access.md`.
+
 The VM gets its secrets from Secret Manager (ADR-015), set up in #20. The runbook (`docs/runbook.md`) has the operating steps and fixes for common problems.
 
 **Tests**
@@ -125,6 +127,14 @@ dvc pull
 
 The runbook ("Versioned data (DVC)") has the checks and fixes.
 
+### Pipeline alerts
+
+When a pipeline task fails for good, its failure callback sends one alert naming the DAG, the task, the run and the error. For a failed validation (`validate_raw`, `validate_processed`) the error lists each failing check. The alert always goes to the task log; with `SLACK_ALERT_WEBHOOK` set in `.env` it is also posted to the team's Slack channel. Setup and a test alert: runbook, "Pipeline alerts (Slack)".
+
+A slice run with an injected bad file (`2025.csv` without its `open_dt` column) fails `validate_raw` and sends exactly one alert, here after the test alert:
+
+![Slack: the test alert, then one pipeline alert naming daily_pipeline.validate_raw, run alert-demo-slack, and the failing check expect_column_to_exist(open_dt)](docs/images/slack-alert.png)
+
 ## Data quality
 
 Every pipeline run checks the raw and processed data (#17) and writes a schema and summary statistics of the processed tables (#35): `Data-Pipeline/data/processed/stats/`, with Great Expectations data docs at `Data-Pipeline/data/processed/stats/data_docs/index.html` and the shifts from the previous run in `drift.json`. How to read them and change the thresholds: [Schema and statistics](docs/runbook.md#schema-and-statistics-every-run) in the runbook.
@@ -132,3 +142,5 @@ Every pipeline run checks the raw and processed data (#17) and writes a schema a
 ## Data and licenses
 
 Boston 311 data is published on Analyze Boston under the PDDL. NWS, NOAA, and Census data are U.S. government works. Weather data by [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0).
+
+The [data card](docs/data/data-card.md) lists every source with its URL, license and attribution, vintage, update frequency, coverage of the training years and known issues.
