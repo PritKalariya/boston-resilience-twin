@@ -40,6 +40,11 @@ x-airflow-common:
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     # Pipeline DAGs import Data-Pipeline/scripts by module name (ADR-017, #22).
     PYTHONPATH: /opt/airflow/repo/Data-Pipeline/scripts
+    # API keys from .env (#4). Empty when unset, so the stack still starts;
+    # credentials.require fails the task that needs one, naming the key.
+    NOAA_CDO_TOKEN: ${NOAA_CDO_TOKEN:-}
+    CENSUS_API_KEY: ${CENSUS_API_KEY:-}
+    NWS_USER_AGENT: ${NWS_USER_AGENT:-}
     # Legacy 311 years parsed at once (#37). Put LEGACY_PARALLEL=2 in .env if memory is tight.
     LEGACY_PARALLEL: ${LEGACY_PARALLEL:-4}
   volumes:
