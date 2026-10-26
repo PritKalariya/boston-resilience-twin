@@ -1,3 +1,5 @@
+Every source, its license and its known issues: [data-card.md](data-card.md).
+
 # 311 category data
 
 ## category-map.csv

@@ -7,8 +7,14 @@
 
 x-airflow-common:
   &airflow-common
-  # Python 3.12 per ADR-013. The unsuffixed 3.3.2 tag is Python 3.13.
-  image: apache/airflow:3.3.2-python3.12
+  # Built from airflow.Dockerfile (ADR-022): the apache/airflow:3.3.2-python3.12
+  # base image (Python 3.12 per ADR-013; the unsuffixed 3.3.2 tag is Python 3.13)
+  # plus Data-Pipeline/requirements.txt. Rebuild with `docker compose up -d --build --wait`
+  # after changing that file; DAG and script changes need no rebuild.
+  image: brt-airflow:local
+  build:
+    context: .
+    dockerfile: airflow.Dockerfile
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
@@ -32,9 +38,30 @@ x-airflow-common:
     AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: '30'
     # Scheduler serves /health on port 8974 for its healthcheck.
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    # Pipeline DAGs import Data-Pipeline/scripts by module name (ADR-017, #22).
+    PYTHONPATH: /opt/airflow/repo/Data-Pipeline/scripts
+    # API keys from .env (#4). Empty when unset, so the stack still starts;
+    # credentials.require fails the task that needs one, naming the key.
+    NOAA_CDO_TOKEN: ${NOAA_CDO_TOKEN:-}
+    CENSUS_API_KEY: ${CENSUS_API_KEY:-}
+    NWS_USER_AGENT: ${NWS_USER_AGENT:-}
+    # Slack incoming webhook for failure alerts (#34), from .env. Empty: alerts go
+    # to the task log only. On the VM it comes from Secret Manager with #64.
+    SLACK_ALERT_WEBHOOK: ${SLACK_ALERT_WEBHOOK:-}
   volumes:
     - ./Data-Pipeline/dags:/opt/airflow/dags/data_pipeline
     - ./Data-Pipeline/logs:/opt/airflow/logs
+    # The repo layout under /opt/airflow/repo, so tasks build the same paths as on
+    # the host. Code, config and the category map are read-only; only data is written.
+    - ./Data-Pipeline/scripts:/opt/airflow/repo/Data-Pipeline/scripts:ro
+    - ./Data-Pipeline/config:/opt/airflow/repo/Data-Pipeline/config:ro
+    - ./docs/data:/opt/airflow/repo/docs/data:ro
+    - ./Data-Pipeline/data:/opt/airflow/repo/Data-Pipeline/data
+    # DVC for the push_data task (#19): DVC refuses to run outside a git repo, so
+    # .git is mounted read-only; .dvc is writable for DVC's cache and tmp files.
+    - ./.git:/opt/airflow/repo/.git:ro
+    - ./.dvc:/opt/airflow/repo/.dvc
+    - ./.dvcignore:/opt/airflow/repo/.dvcignore:ro
   # Linux: set AIRFLOW_UID to `id -u` in .env. The image requires group 0.
   user: "${AIRFLOW_UID:-50000}:0"
   # Cap container stdout logs (the VM disk is 30 GB).
@@ -71,14 +98,15 @@ services:
     <<: *airflow-common
     # One-shot. The image entrypoint migrates the DB and creates the UI admin
     # (_AIRFLOW_* below) but ignores migrate errors, so check-migrations sets the exit code.
-    # chown fixes log ownership on Linux; Windows bind mounts ignore it.
+    # chown fixes log and data ownership on Linux (the VM checkout is root-owned);
+    # Windows bind mounts ignore it.
     entrypoint: /bin/bash
     command:
       - -c
       - |
         /entrypoint airflow db check-migrations
         status=$$?
-        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/logs || echo "chown skipped"
+        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/logs /opt/airflow/repo/Data-Pipeline/data || echo "chown skipped"
         exit $$status
     environment:
       <<: *airflow-common-env

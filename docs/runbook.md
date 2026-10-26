@@ -8,16 +8,32 @@ that changes an operational step.
 `docker-compose.yaml` at the repo root runs Airflow 3.3.2 with LocalExecutor
 and a Postgres 16 metadata database: `postgres`, a one-shot `airflow-init`,
 `airflow-apiserver` (UI and API on 127.0.0.1:8080 only), `airflow-scheduler`
-(also runs the tasks), and `airflow-dag-processor`. The image is pinned to
-`apache/airflow:3.3.2-python3.12` (ADR-013). There is no triggerer: add the
-official triggerer service back when the first deferrable operator lands,
+(also runs the tasks), and `airflow-dag-processor`. There is no triggerer: add
+the official triggerer service back when the first deferrable operator lands,
 since a deferred task waits forever without one.
+
+Every Airflow service runs `brt-airflow:local`, built from `airflow.Dockerfile`
+at the repo root: the `apache/airflow:3.3.2-python3.12` base image (ADR-013)
+plus `Data-Pipeline/requirements.txt` installed under Airflow's constraints for
+that image (ADR-022). The requirements file is the only thing copied in; DAG
+and script code is bind-mounted (ADR-017).
+
+### Rebuild the image
+
+```bash
+docker compose up -d --build --wait
+```
+
+Run it after any change to `Data-Pipeline/requirements.txt`, including one that
+arrives with a `git pull`. DAG and script changes never need a rebuild. With
+the requirements unchanged the build is fully cached and adds about a second,
+so it is safe to use `--build` on every start.
 
 ### Start and check
 
 ```bash
 echo "AIRFLOW_UID=$(id -u)" > .env   # Linux only (the VM too), once per clone
-docker compose up -d --wait
+docker compose up -d --build --wait
 docker compose ps -a
 curl -fsS http://127.0.0.1:8080/api/v2/monitor/health
 ```
@@ -40,6 +56,187 @@ docker compose exec airflow-scheduler airflow dags list-runs hello
 
 `list-import-errors` prints `No data found` when every DAG file imports. The
 hello run reaches `success` within a minute.
+
+### Run the data pipeline DAG
+
+`Data-Pipeline/dags/daily_pipeline.py` chains ingestion, processing and
+validation, one task per module (#22). `docker-compose.yaml` mounts the repo
+under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
+`Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
+`PYTHONPATH`, so tasks import the scripts (ADR-017).
+
+- Eight tasks run scripts: `ingest_static_layers`, `validate_raw`,
+  `parse_legacy_311`, `parse_new_311`, `combine_311`, `spatial_join`,
+  `validate_processed` and `daily_counts`.
+- The other 10 are placeholders. Each logs the issue that builds it
+  (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
+- Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
+  hand.
+
+The DAG runs only when triggered. It takes two params, both inclusive:
+`start` (2015-01-01 or later) and `end` (empty: through the latest data).
+
+```bash
+docker compose exec airflow-scheduler airflow dags unpause daily_pipeline
+# One year, into Data-Pipeline/data/slices/2025-01-01_2025-12-31/
+docker compose exec airflow-scheduler airflow dags trigger daily_pipeline -r slice-2025 -c '{"start": "2025-01-01", "end": "2025-12-31"}'
+# Full build, into Data-Pipeline/data/interim/
+docker compose exec airflow-scheduler airflow dags trigger daily_pipeline -r full-build
+docker compose exec airflow-scheduler airflow dags list-runs daily_pipeline
+docker compose exec airflow-scheduler airflow tasks states-for-dag-run daily_pipeline slice-2025
+```
+
+In the UI, Trigger opens a form with the two dates. A slice never overwrites
+the full-build files that other scripts read; delete its folder in
+`Data-Pipeline/data/slices/` when you are done. A slice keeps only its days,
+in Boston local time (new-system times are already local, ADR-020): legacy
+rows are cut right after parsing, and the combined table after combining.
+The parsed new-system export stays whole, because combining needs every new
+case to set the switch dates and to drop resubmitted legacy copies. So a
+slice's `311_combined.parquet` holds the same rows as the full build has for
+those days. A run fails at `check_range`
+on a start before 2015, an end before the start, or an unknown conf key.
+Each task's log, with everything its script printed, is in
+`Data-Pipeline/logs/dag_id=daily_pipeline/run_id=<run>/task_id=<task>/`.
+On a laptop (2026-10-21), a one-year slice took 40 seconds and the full
+build about 2.5 minutes. The full build peaked at 3.4 GiB in the scheduler
+container, with `map_311.py` before #68.
+
+Logging and failures (#36):
+
+- Every task logs one line with its run id, rows in and rows out, for example
+  `run slice-2025 task combine_311: rows in 348,466, rows out 280,044 in 3.1 s`.
+  Placeholders log 0 and 0, and `check_range` logs n/a. CSV inputs are
+  counted as records, the way the parsers report `file_rows`
+  (`legacy_311.count_records`), and parquet files from their metadata;
+  `ingest_static_layers` counts only the layers in its config. Counting reads
+  each raw CSV once more: about 1 s per yearly file in the container on a
+  Windows laptop, 12 s for all 13 files.
+- The `ingest_*` tasks retry twice. Airflow's exponential backoff adds a
+  random spread, so the waits are about 5 to 10 minutes and then 10 to 15
+  (capped). Every other task fails at once.
+- A real step whose input file is missing or empty fails before its script
+  runs (`InputError`), naming the file and how to get it. The DAG raises it
+  as `AirflowFailException`, so even an `ingest_*` task fails at once instead
+  of retrying. A script error is logged as `run <id> task <task> failed:
+  <error>` and keeps its own type.
+- Before a step runs, its outputs are deleted, so a file left by an earlier
+  run cannot pass for new output. `ingest_static_layers` also deletes empty
+  (0-byte) files in `Data-Pipeline/data/raw/static/`, so `--download` fetches
+  them again.
+- A task that fails for good writes `ALERT <dag>.<task> failed in run <id>
+  (try <n>): <error>` to its own log (`Data-Pipeline/scripts/alerts.py`), and
+  posts the same line to Slack when a webhook is set (below). The callback
+  runs once, after the last try, so one failed task is one alert.
+
+### Pipeline alerts (Slack)
+
+Failure alerts go to Slack through an incoming webhook (#34). The URL is the
+credential: anyone who has it can post to the channel, so it lives only in the
+gitignored `.env` locally, never in chat, a ticket or the repo. On airflow-vm
+it comes from Secret Manager with #64. Without it, alerts stay in the task log
+and runs are unaffected. Before an alert is logged or posted, any API key from
+`.env` (or the webhook) that appears in it, as typed or URL-encoded, is replaced
+by its name, for example `key=<CENSUS_API_KEY>`.
+
+Set it up once (the webhook's owner; the team only needs to join the channel):
+
+1. In Slack, create an app for the workspace (api.slack.com/apps, "From
+   scratch"), turn on **Incoming Webhooks**, and add a webhook to the alert
+   channel. Invite the team to that channel.
+2. Copy the webhook URL and put it in `.env` as one line:
+   `SLACK_ALERT_WEBHOOK=https://hooks.slack.com/services/...`
+3. Recreate the stack so the containers see it: `docker compose up -d --wait`.
+4. Send a test alert:
+
+   ```bash
+   docker compose exec airflow-scheduler python /opt/airflow/repo/Data-Pipeline/scripts/alerts.py --test
+   ```
+
+   It logs `ALERT test alert ...` and `alert sent to Slack`, and the message
+   appears in the channel.
+
+To check the whole path, inject a bad file and run a slice: drop a required
+column (for example `open_dt`) from `Data-Pipeline/data/raw/311/2025.csv`,
+then trigger `daily_pipeline` with `{"start": "2025-01-01", "end":
+"2025-01-31"}`. `validate_raw` fails with `ValidationFailed`, the tasks after
+it are `upstream_failed`, and the run sends exactly one alert, from
+`validate_raw`, starting with `raw 2025.csv header:
+expect_column_to_exist(open_dt)`. Restore the file afterwards (re-download, or
+`dvc pull` once #18 tracks it).
+
+- **`... is not set (or not a Slack webhook)`.** The variable is empty in the
+  container, or does not start with `https://hooks.slack.com/`. Check `.env`,
+  then recreate the stack.
+- **`Slack refused the alert: HTTP 403` or `404`.** The webhook was revoked or
+  mistyped. Create a new one and replace the line in `.env`.
+- **`could not send the failure alert: ...` in a task log.** Slack could not
+  be reached; the task's own result is unchanged, and the alert is still in
+  the log line above it.
+
+### Data validation (Great Expectations)
+
+`validate_raw` runs before parsing and `validate_processed` after the
+processing steps (#17). Both run `Data-Pipeline/scripts/validate_data.py`
+with the bounds in `Data-Pipeline/config/validation_bounds.csv`; change a
+bound there in a reviewed PR, not in the code. Usage analytics are switched
+off (`GX_ANALYTICS_ENABLED=False`).
+
+- **Raw:** each legacy yearly file in the run's range, one at a time, and the
+  new-system export: the parsers' required columns and coordinates, case ids
+  present and unique, open times that parse, no non-zero offset on
+  new-system times (`new_311.has_other_offset`, ADR-020), the median open
+  hour (catches a switch to real UTC), the row count against
+  `published_311_counts.csv` (legacy years and the new-system export), and
+  coordinates inside Boston.
+- **Processed:** `311_combined.parquet` and `311_located.parquet`: expected
+  columns, unique case ids, known `source_system`, `storm_group`, `match`,
+  `location` and `unit` values, open times from 2015-01-01 to the run date,
+  the median open hour per system, the same row count in both tables, and the
+  share of requests placed in every year.
+
+Checks are blocking or warnings. A failed blocking check fails the task, so
+nothing after it runs. A warning is printed (`WARNING <table>: <check>`) and
+kept in the JSON, and the run goes on, because the parsers already handle
+it: an optional column missing (anything in `KEEP_COLUMNS` outside the
+parsers' `REQUIRED_COLUMNS` and the coordinates; the parsers fill it with
+blanks), or a few missing or repeated case ids (the parsers drop and count
+them). More than `case_id_ok_min` (0.1%) of ids missing or repeated blocks.
+`placed_per_year_min` leaves out years with fewer than
+`placed_min_year_rows` rows, so early January does not fail on a few rows.
+
+A failed blocking check fails the task. The task log ends
+with `ValidationFailed: <n> <stage> checks failed: <table>: <check>(<column>)
+observed <value>`, and every result is in
+`Data-Pipeline/data/interim/validation/raw.json` or `processed.json` (for a
+slice, under its folder in `Data-Pipeline/data/slices/`). To check by hand:
+
+```bash
+python Data-Pipeline/scripts/validate_data.py --stage raw
+python Data-Pipeline/scripts/validate_data.py --stage processed
+```
+
+What to do when one fails:
+
+- **`expect_column_to_exist` on a header.** The city renamed or dropped a
+  required column (as a warning: an optional one). Check the published file
+  before changing any parser.
+- **`expect_column_median_to_be_between(open_hour)` or `offset_ok`.** The
+  new-system clock may have changed. Rerun `map_311.check_clock` (it runs in
+  `combine_311`) and read ADR-020 before changing `new_311.CLOCK`.
+- **`expect_table_row_count_to_be_between` on a legacy file.** The download
+  is truncated or the city revised the file. Download it again, and update
+  `published_311_counts.csv` in a PR only if the city's count changed.
+- **`placed_share` or `in_boston`.** Coordinates went missing or were swapped
+  for many rows; look at the year in the JSON before rerunning.
+
+- **`ingest_static_layers` fails with `No module named 'geopandas'`.** The
+  containers run an image built before the geo packages were added (ADR-022).
+  Rebuild with `docker compose up -d --build --wait`.
+- **Linux: "Permission denied" in `Data-Pipeline/data`.** The stack ran
+  without `AIRFLOW_UID`, so `airflow-init` gave the folder to uid 50000. Set
+  `AIRFLOW_UID` (Start and check), then take it back:
+  `sudo chown -R "$(id -u):$(id -g)" Data-Pipeline/data`.
 
 ### Stop and reset
 
@@ -71,6 +268,35 @@ The VM does not use `.env` for secrets: they come from Secret Manager
 secret key and Fernet key must be identical in every container; the shared
 environment block in `docker-compose.yaml` passes one value to all of them.
 
+### API keys in .env
+
+Pipeline tasks read `NOAA_CDO_TOKEN`, `CENSUS_API_KEY` and `NWS_USER_AGENT`
+from the environment (docs/data-access.md). Locally they come from `.env`.
+A team member fills them from Secret Manager (needs `gcloud auth login`; the
+command names project 1, so another default gcloud project does not matter).
+It replaces any existing lines for the three keys and keeps the rest of
+`.env`:
+
+```bash
+touch .env && grep -vE "^(NOAA_CDO_TOKEN|CENSUS_API_KEY|NWS_USER_AGENT)=" .env > .env.tmp; mv .env.tmp .env
+for s in noaa-cdo-token census-api-key nws-user-agent; do
+  printf "%s='%s'\n" "$(echo "$s" | tr a-z- A-Z_)" "$(gcloud secrets versions access latest --secret="$s" --project=boston-resilience-twin)" >> .env
+done
+docker compose up -d --wait
+```
+
+The values never print to the terminal. Do not `cat .env` in a shared
+screen. To check that the containers see each key without printing it:
+
+```bash
+docker compose exec airflow-scheduler sh -c 'for k in NOAA_CDO_TOKEN CENSUS_API_KEY NWS_USER_AGENT; do [ -n "$(printenv $k)" ] && echo "$k set" || echo "$k empty"; done'
+```
+
+A secret slot with no version yet (for example `nws-user-agent` before its
+value is added) writes an empty value and gcloud prints `NOT_FOUND`; the task
+that needs it then fails naming the key. On Linux, write `AIRFLOW_UID` first:
+the README's `echo "AIRFLOW_UID=$(id -u)" > .env` overwrites the file.
+
 ### Troubleshooting
 
 - **Docker Desktop quits a few seconds after it starts (Windows).** Podman
@@ -90,10 +316,48 @@ environment block in `docker-compose.yaml` passes one value to all of them.
   volume line for its `dags/` folder in `docker-compose.yaml`, mounted at
   `/opt/airflow/dags/<component>` in snake_case (ADR-017); without it, Airflow
   never sees the folder.
+- **A DAG task fails with `ModuleNotFoundError` after a pull.** The image is
+  stale: someone added a package to `Data-Pipeline/requirements.txt` and your
+  containers still run the image built before it. Rebuild with
+  `docker compose up -d --build --wait`.
 - **DAGs still load from the old path after a pull.** A running stack keeps
   its old mounts until its containers are recreated. After pulling a change
   to `docker-compose.yaml`, such as the ADR-017 DAG mount, run
-  `docker compose down`, then `docker compose up -d --wait`.
+  `docker compose down`, then `docker compose up -d --build --wait`.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every pull request and every push to
+main: check Python is 3.12, `ruff check .` (errors only, rules in
+`ruff.toml`), install `Data-Pipeline/requirements.txt`, then
+`python -m pytest Data-Pipeline/tests`. It uses no secrets, and
+`Data-Pipeline/tests/conftest.py` blocks network access in every test, so a
+test that calls a live API or Cloud Storage fails with `NetworkBlocked`.
+The job is cancelled after 10 minutes; a normal run takes 1 to 2.
+
+Run the same checks locally before pushing:
+
+```bash
+ruff check .
+python -m pytest Data-Pipeline/tests
+```
+
+**Making the check required (repo admin, once).** After the workflow has run
+once on a pull request, open Settings, Branches, the rule for `main`, tick
+"Require status checks to pass before merging", search for
+`Lint and test (Python 3.12)`, add it, and save. If the job name in
+`ci.yml` ever changes, update the required check too, or every pull request
+waits for a check that never reports.
+
+- **`NetworkBlocked: test tried to look up ...` or `... tried to connect to ...`.**
+  The test reaches the internet; a request by host name usually fails at the
+  lookup. Connections to `127.0.0.1` and `::1` are allowed. Save a small
+  response under the test's fixtures, or patch in a
+  fake (see `test_pipeline_steps.py`, which replaces `static_layers.download`),
+  instead of calling the API.
+- **Lint fails with `F401` (unused import) or `F841` (unused variable).**
+  Remove it, or run `ruff check --fix .`.
+- **`Check Python is 3.12` fails.** `.python-version` changed; ADR-013 pins 3.12.
 
 ## Surge baseline re-check (ADR-005)
 
@@ -108,14 +372,101 @@ both 311 systems combined. Rerun the check when any of these happens:
 python Data-Pipeline/scripts/legacy_311.py
 python Data-Pipeline/scripts/new_311.py
 python Data-Pipeline/scripts/map_311.py --change-points Data-Pipeline/data/interim/change-points.csv
-python Data-Pipeline/scripts/live_baselines.py
+python Data-Pipeline/scripts/live_baselines.py --change-points Data-Pipeline/data/interim/change-points.csv
 ```
 
-`map_311.py` writes the switch dates to the gitignored data folder here, so
-the committed `docs/data/change-points.csv` only changes in a reviewed PR.
+`map_311.py` writes the switch dates to the gitignored data folder here and
+`live_baselines.py` reads them from there, so the committed
+`docs/data/change-points.csv` only changes in a reviewed PR.
 For snow, compare snow-day counts with the legacy range and look for
 unmapped or non-snow categories that jump on snow days; open a category-map
 PR if so, and update ADR-005.
+
+## After-switch policy (ADR-021)
+
+`map_311.py` flags legacy requests opened on or after their category's
+first new-system day (`after_switch`). ADR-021 keeps them. The setting is
+`after_switch_policy` in `Data-Pipeline/config/processing.csv`: `keep`
+(default), `drop`, or `exclude_from_baselines` (counted on their day, left
+out of baselines). Change it only in a reviewed PR that updates ADR-021,
+regenerates counts and labels, and reports the change in totals.
+
+Rerun the check after a new 311 export, after a category-map PR, and at the
+first snow of the winter:
+
+```bash
+python Data-Pipeline/scripts/legacy_311.py
+python Data-Pipeline/scripts/new_311.py
+python Data-Pipeline/scripts/map_311.py --change-points Data-Pipeline/data/interim/change-points.csv
+python Data-Pipeline/scripts/static_layers.py --download --manifest Data-Pipeline/data/interim/static-layers.csv
+python Data-Pipeline/scripts/after_switch.py
+```
+
+The `--manifest` path keeps the committed `docs/data/static-layers.csv` as
+it is. `after_switch.py` takes about 1.5 minutes and writes no files. Look
+for a window where both systems logged many rows and the ratio under keep is
+well above 1 (requests entered twice), and in winter for Snow Plowing rows
+flagged `after_switch`.
+
+## Weather and tide downloads
+
+Four `daily_pipeline` tasks keep the raw weather and tide history (#7). They
+are `ingest_*` tasks, so they retry twice on a network error; a missing key
+fails at once, naming it.
+
+| Task | Script | Source | Stored under `Data-Pipeline/data/raw/` | Key |
+|---|---|---|---|---|
+| `ingest_noaa_logan` | `noaa_logan.py` | NOAA CDO API v2, GHCN-D Logan (USW00014739), daily from 2015 | `weather/noaa_logan/<year>.json` | `NOAA_CDO_TOKEN` |
+| `ingest_tides` | `tides.py` | CO-OPS Boston gauge 8443970, hourly observed and predicted from 2015, metres above MLLW, GMT | `tides/observed/` and `tides/predicted/`, `<year>-H1.json` and `-H2.json` | none |
+| `ingest_nws_forecasts` | `nws.py forecasts` | NWS gridpoint data, office BOX at City Hall | `weather/nws_forecasts/<UTC date>/<updateTime>.json` | `NWS_USER_AGENT` |
+| `ingest_nws_alerts` | `nws.py alerts` | NWS active alerts, zone MAZ015 and county MAC025 | `weather/nws_alerts/<UTC date>/<updated>.json` | `NWS_USER_AGENT` |
+
+Files are stored exactly as the source returned them (NOAA's pages are joined
+into one file per year, values unchanged). Reruns are safe:
+
+- **History (NOAA, tides).** A `_manifest.json` records each file's period,
+  download time and SHA-256. It lives in `Data-Pipeline/data/state/`
+  (`state/weather/noaa_logan/`, `state/tides/observed/` and `/predicted/`),
+  not in `raw/`: it changes every run, so a run with nothing new leaves `raw/`
+  byte for byte as it was and DVC records no new version. A period is final once it was downloaded
+  long enough after it ended for the source to stop revising it: NOAA 30 days,
+  tide observations 45 days (verified data lags about a month), predictions at
+  once. A final file is never fetched again; any other is fetched whole and
+  replaces its file only after its checks pass, so a failed run keeps the old
+  file. CO-OPS takes at most 365 days per request, hence the half-years.
+- **Snapshots (NWS).** NWS keeps no archive, so each run saves what is current,
+  named by NWS's own issue time. A rerun with nothing new writes nothing.
+
+Run one task, or a script directly from the repo root:
+
+```bash
+docker compose exec airflow-scheduler airflow tasks test daily_pipeline ingest_tides
+python Data-Pipeline/scripts/tides.py
+python Data-Pipeline/scripts/noaa_logan.py     # needs NOAA_CDO_TOKEN
+python Data-Pipeline/scripts/nws.py forecasts  # needs NWS_USER_AGENT
+```
+
+The first tide run fetches 48 half-years (about 30 s); after that a run
+fetches only the current half-years.
+
+Logan reports no snow depth (`SNWD`) from 2015 on, although the station has
+it in older years, so those files hold seven of the eight elements. Peak gust
+(`WSF5`) misses 8 days in 2015 to 2023, the gap ADR-003 counts.
+
+- **`<task> cannot start: NOAA_CDO_TOKEN not set` (or `NWS_USER_AGENT`).** The
+  key is empty in the container. Fill `.env` ("API keys in .env"), then
+  `docker compose up -d --wait`.
+- **NOAA `HTTP 400 ... Token parameter is required` or `not valid`.** The
+  token is missing or wrong; check it with docs/data-access.md.
+- **NOAA `HTTP 429` or `HTTP 503`.** CDO's rate limit or an outage; the task
+  retries, and allows 10,000 requests a day per token.
+- **NWS `HTTP 403`.** The user agent is empty or not accepted.
+- **`... has no data for a ... long over`.** A finished period came back empty,
+  which a source should never do; the run stops instead of storing nothing.
+  Check the source's status page and rerun later.
+- **`_manifest.json is not valid JSON`.** Fix it, or delete it (under
+  `Data-Pipeline/data/state/`): the source is then fetched again from 2015,
+  replacing files only where they changed.
 
 ## Static layers
 
@@ -170,6 +521,103 @@ When something goes wrong:
 - `no full day with values in the 14 days up to ...`: ERA5 is late or the API is down. Try again later.
 - HTTP 429: the run stopped at once. Wait an hour and rerun; finished years are not downloaded again.
 - `docs/data/open-meteo.csv not written`: the run had a failure (fix it and rerun), or the file lost its attribution columns (restore it from git).
+
+## Spatial join (311 requests to tracts and neighborhoods)
+
+`spatial_join.py` places every request in `311_combined.parquet` by its coordinates, in a 2020 tract and the ADR-004 neighborhood that holds it, and writes `Data-Pipeline/data/interim/311_located.parquet`. It needs the static layers loaded first.
+
+```bash
+python Data-Pipeline/scripts/spatial_join.py
+```
+
+The run adds `geoid20`, `unit` (the neighborhood a request is counted in) and `location`, and prints the share with no unit by year and system. `location` is `placed` or the reason there is no unit: `no_coordinates` (missing or not a number), `placeholder` (a default point listed in `Data-Pipeline/config/placeholder_locations.csv`, matched within about a metre), `outside_boston` (no 2020 tract) or `no_neighborhood` (tract 9815.02, which the city leaves out of every neighborhood). A latitude and longitude entered the wrong way round are swapped back and counted. If a new default point turns up (one spot holding thousands of requests with no neighborhood), add it to the placeholder file in a reviewed PR.
+
+## Daily counts
+
+`daily_counts.py` turns `311_located.parquet` into the table labels are built from (ADR-004): one row per unit, day and storm group, every day present and zero-filled, in `Data-Pipeline/data/processed/daily_counts.parquet`.
+
+```bash
+python Data-Pipeline/scripts/daily_counts.py                                     # 2015-01-01 to the last full day of both systems
+python Data-Pipeline/scripts/daily_counts.py --start 2025-01-01 --end 2025-12-31 # one year
+```
+
+`requests` counts every request kept under `after_switch_policy` (ADR-021); `baseline_requests` counts the ones baselines may use, which under `keep` is the same number. The run prints each step from the combined table to the counted total (unmapped, not storm-related, after_switch, each no-location reason, no date, outside the range) and stops if the counts do not add up to the total.
+
+## Versioned data (DVC)
+
+The DVC remote is `gs://boston-resilience-twin-data/dvc` (`.dvc/config`), a
+folder of its own in the data bucket, apart from the raw pulls under `raw/`.
+Every team member and `airflow-vm-sa` hold `roles/storage.objectAdmin` on the
+bucket (ADR-015), so all of them can pull and push. Storage is about $0.02
+per GB a month; noncurrent versions are deleted after 30 days (#48).
+
+DVC reads Google Application Default Credentials, not the `gcloud` login.
+On a laptop, log in once:
+
+```bash
+gcloud auth application-default login
+```
+
+On `airflow-vm` the attached service account is picked up with no login.
+
+Check the remote from the repo root:
+
+```bash
+dvc remote list     # gcs  gs://boston-resilience-twin-data/dvc  (default)
+dvc status -c       # compares the local cache with the remote; fails without access
+dvc pull            # fetch the data the current commit points to
+```
+
+Push through the helper, not bare `dvc push`, in anything automated:
+
+```bash
+python Data-Pipeline/scripts/dvc_push.py
+```
+
+It skips the push, logs one line and exits 0 when there is no access:
+`dvc push skipped: no Google credentials ...` when no credentials are found,
+or `dvc push skipped: these credentials have no access ...` when the bucket
+refuses them (a grader's own Google account), followed by DVC's own error
+line. Any other failure, such as a full disk, a network error or a push that
+runs past 30 minutes, fails the run.
+
+**In Airflow** the last task of `daily_pipeline`, `push_data`, runs the same
+helper. DVC refuses to run outside a git repository, so `docker-compose.yaml`
+mounts `.git` (read-only), `.dvc` and `.dvcignore` at `/opt/airflow/repo`.
+After pulling a change to those mounts, run `docker compose down`, then
+`docker compose up -d --build --wait`. DVC is in the Airflow image (ADR-022),
+so a change to its pins in `Data-Pipeline/requirements.txt` also needs that
+rebuild. To run only the push task:
+
+```bash
+docker compose exec airflow-scheduler airflow tasks test daily_pipeline push_data
+```
+
+Inside the containers there are no Google credentials on a laptop, so it logs
+`dvc push skipped: no Google credentials ...` and succeeds. On `airflow-vm`
+the service account is picked up. To try a real push from a laptop, pass your
+login into a one-off container:
+
+```bash
+docker compose run --rm \
+  -v ~/.config/gcloud/application_default_credentials.json:/tmp/adc.json:ro \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/adc.json \
+  airflow-scheduler airflow tasks test daily_pipeline push_data
+```
+
+- **`push_data` fails with `/opt/airflow/repo is not a git repository`.** The
+  containers were started before the DVC mounts. Run `docker compose down`,
+  then `docker compose up -d --build --wait`.
+- **`dvc pull` fails with `Anonymous caller does not have storage.objects.get`.**
+  No Application Default Credentials. Run the login above.
+- **`does not have storage.objects.get` with your email.** Your account lacks
+  bucket access. Ask the project 1 owner to check `team_members` in tfvars.
+- **`UserWarning: ... without a quota project`** or the login's warning that it
+  cannot add `boston-resilience-twin` as the quota project. Harmless: Cloud
+  Storage does not need a quota project.
+- **`dvc: command not found`, or `No module named dvc` from `dvc_push.py`.** Run
+  `pip install -r Data-Pipeline/requirements.txt` in the Python 3.12 venv. In
+  Airflow, rebuild the image (above).
 
 ## Project 1 infrastructure (Terraform)
 
@@ -237,8 +685,9 @@ Terraform creates the secret slots empty. Values are added by hand and never
 go into a `.tf` file, a tfvars file, chat, the repo, or a ticket.
 
 Who can: the members listed in the `secret_writers` tfvars variable. They hold
-`roles/secretmanager.secretVersionAdder` on `noaa-cdo-token` and
-`census-api-key` only, which is the permission to add a new version. It is not
+`roles/secretmanager.secretVersionAdder` on each slot in `local.secret_ids`
+(`Deployment/terraform/secrets.tf`) only, which is the permission to add a
+new version. It is not
 project wide and it does not let them read the values back; reading is
 `roles/secretmanager.secretAccessor`, which every team member already has.
 
@@ -396,7 +845,7 @@ EOF
 Start the stack:
 
 ```bash
-cd /opt/boston-resilience-twin && sudo docker compose up -d --wait
+cd /opt/boston-resilience-twin && sudo docker compose up -d --build --wait
 ```
 
 The first start takes about 10 minutes on an e2-medium, half of it pulling the Airflow image. It is not hung.
@@ -411,7 +860,7 @@ cd /opt/boston-resilience-twin && sudo docker compose ps
 
 All four services (postgres, airflow-apiserver, airflow-scheduler, airflow-dag-processor) should show `(healthy)`.
 
-**Stop the VM, never the containers.** Running `docker compose stop` or `down` before a VM stop marks the containers as stopped by hand, and they stay down after the next start. If that happens, run `sudo docker compose up -d --wait`.
+**Stop the VM, never the containers.** Running `docker compose stop` or `down` before a VM stop marks the containers as stopped by hand, and they stay down after the next start. If that happens, run `sudo docker compose up -d --build --wait`.
 
 ### Open the UI (laptop)
 
@@ -426,7 +875,7 @@ Then browse to `http://localhost:18080` and log in with the compose defaults, `a
 ### Update after a merge to main
 
 ```bash
-cd /opt/boston-resilience-twin && sudo git pull --ff-only && sudo docker compose up -d --wait
+cd /opt/boston-resilience-twin && sudo git pull --ff-only && sudo docker compose up -d --build --wait
 ```
 
 The VM runs `main` only. Test branches on your laptop.

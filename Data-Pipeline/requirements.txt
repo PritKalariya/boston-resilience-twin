@@ -1,15 +1,26 @@
-# Pins for Data-Pipeline's host-side scripts and tests (ADR-013, ADR-017).
+# Pins for Data-Pipeline's scripts and tests. airflow.Dockerfile installs this
+# file into the image every Airflow service runs, so the same versions are used
+# on a laptop and in a task (ADR-013, ADR-017, ADR-022).
 # The -c line applies Airflow's constraints for the image in docker-compose.yaml
 # to every package that file lists, transitive ones included.
 # airflow and pendulum come from the Airflow image, not this file.
+# A new dependency takes its pin from that constraints file; if the file does
+# not list the package, pin the version the tests passed on.
+# After any change here, rebuild the image: docker compose up -d --build --wait
 -c https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt
 numpy==2.5.3
 pandas==3.0.5
 pyarrow==25.0.1
 
 # Not in the constraints file: pinned to the versions the tests passed on.
-# pyproj comes in through geopandas, iniconfig through pytest.
+# pyproj comes in through geopandas, iniconfig through pytest, altair through
+# great-expectations (ADR-022 dry run). dvc-gs brings gcsfs and google-auth,
+# which the constraints file pins.
+altair==6.3.0
+dvc==3.67.1
+dvc-gs==3.1.0
 geopandas==1.2.0
+great-expectations==1.24.1
 iniconfig==2.3.1
 pyogrio==0.13.0
 pyproj==3.8.0
