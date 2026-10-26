@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-25 by Alekhya. Edit this file in the PR that changes the state.
+Updated: 2026-10-25 by Kirtan. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -13,6 +13,7 @@ Week 2: Processing (due 2026-10-18)
 | #22 Daily DAG skeleton | Punith | 2026-10-18 | in review | `daily_pipeline`: 19 tasks; 7 run scripts (static layers, raw validation, legacy and new 311, combine, spatial join, processed validation), 11 are placeholders until #6, #7, #8, #15, #16, #35, #32; results below. Runs on the #69 image (ADR-022), no manual installs |
 | #36 Logging and error handling across tasks | Punith | 2026-10-22 | in review | Builds on #72. Every task logs run id, rows in and rows out; `ingest_*` tasks retry twice; missing or empty inputs fail before the script runs; a failed task writes the W3-3 alert to its log until #34 delivers it; results below |
 | #3 Terraform project 1 | Prit | 2026-10-11 | done | PR #30 merged; ADR-015 accepted |
+| #4 API access and secrets | Kirtan | 2026-10-11 | in progress | `docs/data-access.md` has one check per API (NOAA CDO, Census, NWS). NOAA and Census keys stored and checked (200, 2026-10-20); `nws-user-agent` slot added in `secrets.tf`, waiting on Prit's review and apply, then its value and NWS check. Keys reach the Airflow containers from `.env` (`NOAA_CDO_TOKEN`, `CENSUS_API_KEY`, `NWS_USER_AGENT`); `credentials.require` fails a task naming a missing key (checked in the scheduler container, 2026-10-23). The pipeline needs no Census key so far (W1-9) |
 | #5 Fix legacy 311 parser and re-measure counts | Srikar | 2026-10-11 | done | PR #45 merged; results below |
 | #11 Decision: live baselines for the new 311 format | Punith | 2026-10-13 | done | PR #63 merged; ADR-005: baseline = same weeks of the previous 3 years, both systems, by storm group |
 | #53 Policy for legacy rows after their category's switch date | Punith | 2026-10-20 | in review | ADR-021: keep. Setting `after_switch_policy` in `Data-Pipeline/config/processing.csv`, for #15 to apply; results below |
