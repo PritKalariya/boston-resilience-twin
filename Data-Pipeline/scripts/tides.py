@@ -9,7 +9,9 @@ Each product has its own folder under --raw-dir with one JSON file per
 half-year, exactly as CO-OPS returned it: the API refuses more than 365 days
 per request, so a leap year cannot be fetched whole. Verified observations lag
 about a month, so an observed half-year is final 45 days after it ends;
-predictions are final once the half-year is over. raw_fetch has the rerun rules.
+predictions are final once the half-year is over. The manifests that record
+this live in --state-dir, one folder per product, not in the raw folders
+(raw_fetch has the rerun rules).
 
     python Data-Pipeline/scripts/tides.py
 """
@@ -70,12 +72,12 @@ def check_answer(body: bytes, key: str, period: rf.Period) -> int | None:
     return len(rows)
 
 
-def refresh(raw_dir: Path, fetch, today: date, now: datetime) -> list[dict]:
+def refresh(raw_dir: Path, state_dir: Path, fetch, today: date, now: datetime) -> list[dict]:
     """Bring both products up to today. Returns one record per half-year."""
     records = []
     for folder_name, (params, key, settle_days) in PRODUCTS.items():
-        folder = raw_dir / folder_name
-        manifest = rf.load_manifest(folder)
+        folder, state = raw_dir / folder_name, state_dir / folder_name
+        manifest = rf.load_manifest(state)
         for period in rf.half_years(FIRST_DAY, today):
             filename = f"{period.name}.json"
             record = {"product": folder_name, "file": filename}
@@ -89,7 +91,7 @@ def refresh(raw_dir: Path, fetch, today: date, now: datetime) -> list[dict]:
                     raise rf.FetchError(f"{folder_name} {period.name}: CO-OPS has no data for a period long over")
                 records.append({**record, "action": "no data yet"})
                 continue
-            action = rf.store(folder, manifest, filename, period, body, now, rows=rows)
+            action = rf.store(folder, state, manifest, filename, period, body, now, rows=rows)
             records.append({**record, "action": action, "rows": rows})
     return records
 
@@ -97,10 +99,11 @@ def refresh(raw_dir: Path, fetch, today: date, now: datetime) -> list[dict]:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--raw-dir", type=Path, default=Path("Data-Pipeline/data/raw/tides"))
+    parser.add_argument("--state-dir", type=Path, default=Path("Data-Pipeline/data/state/tides"))
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     now = rf.utc_now()
-    records = refresh(args.raw_dir, lambda url: rf.get(url, {"User-Agent": APPLICATION}), now.date(), now)
+    records = refresh(args.raw_dir, args.state_dir, lambda url: rf.get(url, {"User-Agent": APPLICATION}), now.date(), now)
     changed = [r for r in records if r["action"] in ("downloaded", "updated")]
     print(f"tides {STATION}: {len(changed)} half-year files downloaded or updated, "
           f"{sum(r['action'] == 'final' for r in records)} final, "

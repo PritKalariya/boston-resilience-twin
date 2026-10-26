@@ -6,8 +6,8 @@ returned, under --raw-dir/<UTC date of the stamp>/<stamp>.json:
     forecasts  the raw gridpoint data for Boston City Hall (office BOX), found
                through /points: hourly rain, snowfall, gusts and temperature,
                the variables the Logan history has. Named by its updateTime.
-    alerts     the active alerts for forecast zone MAZ015 (Suffolk County),
-               named by the collection's updated time.
+    alerts     the active alerts for forecast zone MAZ015 and county MAC025
+               (Suffolk County), named by the collection's updated time.
 
 A snapshot is named by NWS's own issue time, so a rerun with nothing new finds
 the same file and writes nothing. Every request sends the identifying
@@ -30,7 +30,8 @@ from credentials import NWS_USER_AGENT, require
 
 API = "https://api.weather.gov"
 POINT = "42.3601,-71.0589"  # Boston City Hall
-ZONE = "MAZ015"  # Suffolk County
+ZONES = ("MAZ015", "MAC025")  # Boston's forecast zone and county (ADR-014); county-coded warnings
+# (severe thunderstorm, tornado, flash flood) only come back by county
 GRID_VALUES = ("quantitativePrecipitation", "snowfallAmount", "windGust", "temperature")
 
 log = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ def forecasts(raw_dir: Path, fetch) -> tuple[str, Path]:
 
 
 def alerts(raw_dir: Path, fetch) -> tuple[str, Path]:
-    body = fetch(f"{API}/alerts/active?zone={ZONE}")
+    body = fetch(f"{API}/alerts/active?zone={','.join(ZONES)}")
     data = rf.parse_json(body, "alerts")
     if not isinstance(data, dict) or data.get("type") != "FeatureCollection" or not isinstance(data.get("features"), list):
         raise rf.FetchError("alerts: the answer is not a FeatureCollection with a features list")

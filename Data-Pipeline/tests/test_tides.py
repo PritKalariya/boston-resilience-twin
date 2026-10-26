@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -38,19 +38,20 @@ class FakeCoops:
 
 def test_first_run_stores_each_half_year_for_both_products(tmp_path):
     fake = FakeCoops()
-    records = tides.refresh(tmp_path, fake, TODAY, NOW)
-    assert sorted(p.name for p in (tmp_path / "observed").glob("*.json")) == ["2015-H1.json", "2015-H2.json", "_manifest.json"]
-    assert sorted(p.name for p in (tmp_path / "predicted").glob("2015-*.json")) == ["2015-H1.json", "2015-H2.json"]
+    records = tides.refresh(tmp_path / "raw", tmp_path / "state", fake, TODAY, NOW)
+    assert sorted(p.name for p in (tmp_path / "raw" / "observed").iterdir()) == ["2015-H1.json", "2015-H2.json"]
+    assert sorted(rf.load_manifest(tmp_path / "state" / "observed")) == ["2015-H1.json", "2015-H2.json"]
+    assert sorted(p.name for p in (tmp_path / "raw" / "predicted").glob("2015-*.json")) == ["2015-H1.json", "2015-H2.json"]
     assert {r["action"] for r in records} == {"downloaded"}
     first = fake.calls[0]
     assert first["station"] == "8443970" and first["datum"] == "MLLW" and first["time_zone"] == "gmt"
     assert first["units"] == "metric"
-    assert (tmp_path / "observed" / "2015-H1.json").read_bytes() == answer("hourly_height", "20150101", "20150630")
+    assert (tmp_path / "raw" / "observed" / "2015-H1.json").read_bytes() == answer("hourly_height", "20150101", "20150630")
 
 
 def test_requests_stay_under_the_365_day_limit_in_a_leap_year(tmp_path):
     fake = FakeCoops()
-    tides.refresh(tmp_path, fake, date(2016, 12, 31), datetime(2016, 12, 31, tzinfo=timezone.utc))
+    tides.refresh(tmp_path / "raw", tmp_path / "state", fake, date(2016, 12, 31), datetime(2016, 12, 31, tzinfo=timezone.utc))
     for q in fake.calls:
         span = date.fromisoformat(f"{q['end_date'][:4]}-{q['end_date'][4:6]}-{q['end_date'][6:]}") - date.fromisoformat(
             f"{q['begin_date'][:4]}-{q['begin_date'][4:6]}-{q['begin_date'][6:]}")
@@ -58,10 +59,10 @@ def test_requests_stay_under_the_365_day_limit_in_a_leap_year(tmp_path):
 
 
 def test_rerun_skips_final_halves_and_refreshes_the_current_one(tmp_path):
-    tides.refresh(tmp_path, FakeCoops(), TODAY, NOW)
+    tides.refresh(tmp_path / "raw", tmp_path / "state", FakeCoops(), TODAY, NOW)
     later = date(2015, 9, 20)
     fake = FakeCoops()
-    records = tides.refresh(tmp_path, fake, later, datetime(2015, 9, 20, tzinfo=timezone.utc))
+    records = tides.refresh(tmp_path / "raw", tmp_path / "state", fake, later, datetime(2015, 9, 20, tzinfo=timezone.utc))
     by = {(r["product"], r["file"]): r["action"] for r in records}
     # H1 ended 2015-06-30: predicted is final at once, observed waits 45 days (downloaded 2015-09-15: final).
     assert by[("predicted", "2015-H1.json")] == "final"
@@ -71,9 +72,9 @@ def test_rerun_skips_final_halves_and_refreshes_the_current_one(tmp_path):
 
 
 def test_observed_half_is_not_final_until_it_settles(tmp_path):
-    tides.refresh(tmp_path, FakeCoops(), date(2015, 7, 10), datetime(2015, 7, 10, tzinfo=timezone.utc))
+    tides.refresh(tmp_path / "raw", tmp_path / "state", FakeCoops(), date(2015, 7, 10), datetime(2015, 7, 10, tzinfo=timezone.utc))
     fake = FakeCoops()
-    records = tides.refresh(tmp_path, fake, date(2015, 7, 20), datetime(2015, 7, 20, tzinfo=timezone.utc))
+    records = tides.refresh(tmp_path / "raw", tmp_path / "state", fake, date(2015, 7, 20), datetime(2015, 7, 20, tzinfo=timezone.utc))
     by = {(r["product"], r["file"]): r["action"] for r in records}
     assert by[("observed", "2015-H1.json")] == "unchanged"  # downloaded only 10 days after June 30
     assert by[("predicted", "2015-H1.json")] == "final"
@@ -82,16 +83,16 @@ def test_observed_half_is_not_final_until_it_settles(tmp_path):
 def test_no_data_yet_for_a_recent_half_is_skipped_not_stored(tmp_path):
     no_data = json.dumps({"error": {"message": "No data was found. This product may not be offered..."}}).encode()
     fake = FakeCoops({("hourly_height", "20150701"): no_data})
-    records = tides.refresh(tmp_path, fake, TODAY, NOW)
+    records = tides.refresh(tmp_path / "raw", tmp_path / "state", fake, TODAY, NOW)
     assert {"product": "observed", "file": "2015-H2.json", "action": "no data yet"} in records
-    assert not (tmp_path / "observed" / "2015-H2.json").exists()
+    assert not (tmp_path / "raw" / "observed" / "2015-H2.json").exists()
 
 
 def test_no_data_for_a_half_long_over_fails(tmp_path):
     no_data = json.dumps({"error": {"message": "No data was found."}}).encode()
     fake = FakeCoops({("hourly_height", "20150101"): no_data})
     with pytest.raises(rf.FetchError, match="no data for a period long over"):
-        tides.refresh(tmp_path, fake, TODAY, NOW)
+        tides.refresh(tmp_path / "raw", tmp_path / "state", fake, TODAY, NOW)
 
 
 @pytest.mark.parametrize("body, match", [
@@ -105,13 +106,28 @@ def test_no_data_for_a_half_long_over_fails(tmp_path):
 def test_bad_answers_fail_and_store_nothing(tmp_path, body, match):
     fake = FakeCoops({("hourly_height", "20150101"): body})
     with pytest.raises(rf.FetchError, match=match):
-        tides.refresh(tmp_path, fake, TODAY, NOW)
-    assert not (tmp_path / "observed" / "2015-H1.json").exists()
+        tides.refresh(tmp_path / "raw", tmp_path / "state", fake, TODAY, NOW)
+    assert not (tmp_path / "raw" / "observed" / "2015-H1.json").exists()
 
 
 def test_a_failed_rerun_keeps_the_stored_file(tmp_path):
-    tides.refresh(tmp_path, FakeCoops(), date(2015, 7, 10), datetime(2015, 7, 10, tzinfo=timezone.utc))
-    stored = (tmp_path / "observed" / "2015-H2.json").read_bytes()
+    tides.refresh(tmp_path / "raw", tmp_path / "state", FakeCoops(), date(2015, 7, 10), datetime(2015, 7, 10, tzinfo=timezone.utc))
+    stored = (tmp_path / "raw" / "observed" / "2015-H2.json").read_bytes()
     with pytest.raises(rf.FetchError):
-        tides.refresh(tmp_path, FakeCoops({("hourly_height", "20150701"): b"garbage"}), TODAY, NOW)
-    assert (tmp_path / "observed" / "2015-H2.json").read_bytes() == stored
+        tides.refresh(tmp_path / "raw", tmp_path / "state", FakeCoops({("hourly_height", "20150701"): b"garbage"}), TODAY, NOW)
+    assert (tmp_path / "raw" / "observed" / "2015-H2.json").read_bytes() == stored
+
+
+def files_in(folder):
+    return {p.relative_to(folder): (p.read_bytes(), p.stat().st_mtime_ns) for p in sorted(folder.rglob("*")) if p.is_file()}
+
+
+def test_a_rerun_with_nothing_new_leaves_raw_untouched(tmp_path):
+    raw, state = tmp_path / "raw", tmp_path / "state"
+    tides.refresh(raw, state, FakeCoops(), TODAY, NOW)
+    before = files_in(raw)
+    # The next day only the current halves are fetched again; their answers cover
+    # the same days here, so nothing in raw/ may change, only the manifests.
+    tides.refresh(raw, state, FakeCoops(), TODAY, NOW + timedelta(days=1))
+    assert files_in(raw) == before
+    assert not any(p.name.startswith("_") for p in before)

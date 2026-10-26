@@ -39,7 +39,7 @@ class FakeCdo:
 
 
 def refresh(tmp_path, fake, today=TODAY, now=NOW):
-    return noaa_logan.refresh(tmp_path, fake, today, now, pause=lambda s: None)
+    return noaa_logan.refresh(tmp_path / "raw", tmp_path / "state", fake, today, now, pause=lambda s: None)
 
 
 def test_pages_are_joined_into_one_file_per_year(tmp_path):
@@ -47,7 +47,7 @@ def test_pages_are_joined_into_one_file_per_year(tmp_path):
     records = refresh(tmp_path, fake)
     assert [c[:2] for c in fake.calls] == [(2015, 1), (2015, 1001), (2015, 2001), (2016, 1)]
     assert fake.calls[0][2] == sorted(noaa_logan.DATATYPES)
-    stored = json.loads((tmp_path / "2015.json").read_text())
+    stored = json.loads((tmp_path / "raw" / "2015.json").read_text())
     assert len(stored["results"]) == 2900 and stored["metadata"]["resultset"]["count"] == 2900
     assert stored["results"][1500]["value"] == 1500  # values unchanged, pages in order
     assert records == [{"file": "2015.json", "action": "downloaded", "rows": 2900},
@@ -76,7 +76,7 @@ def test_a_year_downloaded_too_soon_is_fetched_again(tmp_path):
 def test_no_data_yet_in_a_new_year_is_skipped(tmp_path):
     records = refresh(tmp_path, FakeCdo({2015: 2900, 2016: 0}), date(2016, 1, 3), datetime(2016, 1, 3, tzinfo=timezone.utc))
     assert records[1] == {"file": "2016.json", "action": "no data yet"}
-    assert not (tmp_path / "2016.json").exists()
+    assert not (tmp_path / "raw" / "2016.json").exists()
 
 
 def test_no_data_for_a_year_long_over_fails(tmp_path):
@@ -96,7 +96,7 @@ def test_no_data_for_a_year_long_over_fails(tmp_path):
 def test_bad_answers_fail_and_store_nothing(tmp_path, body, match):
     with pytest.raises(rf.FetchError, match=match):
         refresh(tmp_path, FakeCdo(overrides={(2015, 1): body}))
-    assert not (tmp_path / "2015.json").exists()
+    assert not (tmp_path / "raw" / "2015.json").exists()
 
 
 def test_a_lost_page_fails_the_count_check(tmp_path):
@@ -107,7 +107,7 @@ def test_a_lost_page_fails_the_count_check(tmp_path):
 
 def test_pages_are_spaced_for_the_rate_limit(tmp_path):
     pauses = []
-    noaa_logan.refresh(tmp_path, FakeCdo({2015: 2900, 2016: 10}), TODAY, NOW, pause=pauses.append)
+    noaa_logan.refresh(tmp_path / "raw", tmp_path / "state", FakeCdo({2015: 2900, 2016: 10}), TODAY, NOW, pause=pauses.append)
     assert pauses == [noaa_logan.PAUSE_SECONDS] * 2  # between the three 2015 pages
 
 
@@ -115,3 +115,13 @@ def test_missing_token_fails_naming_it(monkeypatch, tmp_path):
     monkeypatch.delenv("NOAA_CDO_TOKEN", raising=False)
     with pytest.raises(credentials.MissingCredentialError, match="NOAA_CDO_TOKEN is not set"):
         noaa_logan.main(["--raw-dir", str(tmp_path)])
+
+
+def test_a_rerun_with_nothing_new_leaves_raw_untouched(tmp_path):
+    refresh(tmp_path, FakeCdo({2015: 2900, 2016: 300}))
+    raw = tmp_path / "raw"
+    before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in raw.iterdir()}
+    refresh(tmp_path, FakeCdo({2015: 2900, 2016: 300}), now=NOW + timedelta(hours=1))
+    assert {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in raw.iterdir()} == before
+    assert sorted(before) == ["2015.json", "2016.json"]  # the manifest lives in state/
+    assert sorted(rf.load_manifest(tmp_path / "state")) == ["2015.json", "2016.json"]

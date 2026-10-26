@@ -121,8 +121,8 @@ def daily_pipeline():
         issue = steps.PLANNED[step]
         return planned.override(task_id=step, doc_md=f"Placeholder until {issue}.", **retries(step))(issue)
 
-    ingest = [
-        real(step) if step in steps.SCRIPTS else todo(step)
+    ingest = {
+        step: real(step) if step in steps.SCRIPTS else todo(step)
         for step in (
             "ingest_legacy_311",
             "ingest_new_311",
@@ -132,13 +132,15 @@ def daily_pipeline():
             "ingest_tides",
             "ingest_open_meteo",
         )
-    ]
+    }
+    # One after the other, legacy first: both write the 311 schedule state (#6).
+    ingest["ingest_legacy_311"] >> ingest["ingest_new_311"]
     static = real("ingest_static_layers")
     raw_checked = real("validate_raw")
     combined = real("combine_311")
     validated = real("validate_processed")
 
-    check_range() >> [*ingest, static] >> raw_checked
+    check_range() >> [*ingest.values(), static] >> raw_checked
     raw_checked >> [real("parse_legacy_311"), real("parse_new_311")] >> combined
     [combined, static] >> real("spatial_join") >> real("daily_counts") >> todo("labels_and_features") >> validated
     validated >> [todo("schema_and_statistics"), todo("bias_slicing")] >> push_data()

@@ -67,7 +67,7 @@ ADR-003 uses a day-level feature only if its source covers every training year, 
 - **License and attribution:** U.S. government work. Credit the National Weather Service.
 - **Vintage:** live only. Forecasts cover the next 7 days; alerts are the ones active at request time.
 - **Update frequency:** gridpoint forecasts update several times a day; alerts change as they are issued.
-- **Known issues:** every request needs an identifying `User-Agent` or it gets 403 (the team's value comes with #4, PR #77). No archive: a forecast that is not saved when it is current is gone, so `nws.py` (#7) stores a snapshot each run, named by NWS's issue time (`updateTime`, `updated`). Alert history for the training years has no source yet (#12).
+- **Known issues:** every request needs an identifying `User-Agent` or it gets 403 (the team's value comes with #4, PR #77). No archive: a forecast that is not saved when it is current is gone, so `nws.py` (#7) stores a snapshot each run, named by NWS's issue time (`updateTime`, `updated`). Alerts are requested for forecast zone MAZ015 and county MAC025 together: severe thunderstorm, tornado and flash flood warnings are coded by county and do not come back for a zone query (ADR-014). Alert history for the training years has no source yet (#12).
 
 ## NOAA tides, Boston Harbor gauge
 

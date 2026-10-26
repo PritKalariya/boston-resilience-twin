@@ -67,13 +67,14 @@ def test_is_final_needs_the_whole_period_and_the_settle_time():
 def test_store_writes_atomically_and_records_the_file(tmp_path):
     period = rf.Period("2015", date(2015, 1, 1), date(2015, 12, 31))
     now = datetime(2016, 2, 1, tzinfo=timezone.utc)
+    raw, state = tmp_path / "raw", tmp_path / "state"
     manifest = {}
-    assert rf.store(tmp_path, manifest, "2015.json", period, b"abc", now, rows=3) == "downloaded"
-    assert rf.store(tmp_path, manifest, "2015.json", period, b"abc", now) == "unchanged"
-    assert rf.store(tmp_path, manifest, "2015.json", period, b"abcd", now) == "updated"
-    assert (tmp_path / "2015.json").read_bytes() == b"abcd"
-    assert rf.load_manifest(tmp_path)["2015.json"]["sha256"] == rf.sha256(b"abcd")
-    assert not list(tmp_path.glob(".*.part"))
+    assert rf.store(raw, state, manifest, "2015.json", period, b"abc", now, rows=3) == "downloaded"
+    assert rf.store(raw, state, manifest, "2015.json", period, b"abc", now) == "unchanged"
+    assert rf.store(raw, state, manifest, "2015.json", period, b"abcd", now) == "updated"
+    assert (raw / "2015.json").read_bytes() == b"abcd"
+    assert rf.load_manifest(state)["2015.json"]["sha256"] == rf.sha256(b"abcd")
+    assert sorted(p.name for p in raw.iterdir()) == ["2015.json"]  # no manifest or .part left in raw/
 
 
 def test_a_broken_manifest_fails_with_how_to_fix_it(tmp_path):

@@ -252,13 +252,15 @@ def step_plan(step: str, days: DateRange, root: Path = REPO) -> StepPlan:
         )
     if step in ("ingest_noaa_logan", "ingest_nws_forecasts", "ingest_nws_alerts", "ingest_tides"):
         # #7. Raw downloads add to their folders and keep history, so they have no
-        # data_out to clear; a missing key fails before the script runs.
-        weather = raw / "weather"
+        # data_out to clear; a missing key fails before the script runs. Their
+        # manifests live in data/state/, shared by every date range like raw/.
+        weather, state = raw / "weather", raw.parent / "state"
         args, env = {
-            "ingest_noaa_logan": (["--raw-dir", weather / "noaa_logan"], ("NOAA_CDO_TOKEN",)),
+            "ingest_noaa_logan": (["--raw-dir", weather / "noaa_logan", "--state-dir", state / "weather" / "noaa_logan"],
+                                  ("NOAA_CDO_TOKEN",)),
             "ingest_nws_forecasts": (["forecasts", "--raw-dir", weather / "nws_forecasts"], ("NWS_USER_AGENT",)),
             "ingest_nws_alerts": (["alerts", "--raw-dir", weather / "nws_alerts"], ("NWS_USER_AGENT",)),
-            "ingest_tides": (["--raw-dir", raw / "tides"], ()),
+            "ingest_tides": (["--raw-dir", raw / "tides", "--state-dir", state / "tides"], ()),
         }[step]
         return StepPlan(args=args, files=StepFiles(), hint='Team members: fill .env with the runbook command ("API keys in .env").', env=env)
     if step == "validate_raw":

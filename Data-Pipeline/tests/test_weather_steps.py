@@ -15,15 +15,16 @@ def test_the_four_downloads_are_real_steps_and_retry():
 
 
 @pytest.mark.parametrize("step, args, env", [
-    ("ingest_noaa_logan", ["--raw-dir", "weather/noaa_logan"], ("NOAA_CDO_TOKEN",)),
+    ("ingest_noaa_logan", ["--raw-dir", "weather/noaa_logan", "--state-dir", "STATE/weather/noaa_logan"], ("NOAA_CDO_TOKEN",)),
     ("ingest_nws_forecasts", ["forecasts", "--raw-dir", "weather/nws_forecasts"], ("NWS_USER_AGENT",)),
     ("ingest_nws_alerts", ["alerts", "--raw-dir", "weather/nws_alerts"], ("NWS_USER_AGENT",)),
-    ("ingest_tides", ["--raw-dir", "tides"], ()),
+    ("ingest_tides", ["--raw-dir", "tides", "--state-dir", "STATE/tides"], ()),
 ])
 def test_plans_write_to_the_raw_folders_and_name_their_keys(tmp_path, step, args, env):
     plan = steps.step_plan(step, SLICE, tmp_path)
-    raw = tmp_path / "Data-Pipeline" / "data" / "raw"
-    assert [str(a).replace(f"{raw}/", "") for a in plan.args] == args
+    data = tmp_path / "Data-Pipeline" / "data"
+    shown = [str(a).replace(f"{data}/raw/", "").replace(f"{data}/state", "STATE") for a in plan.args]
+    assert shown == args
     assert plan.env == env
     assert plan.files.data_out == []  # raw history is never cleared before a run
 

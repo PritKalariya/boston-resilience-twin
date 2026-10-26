@@ -62,10 +62,10 @@ def test_alerts_snapshot_is_named_by_its_updated_time(tmp_path):
     assert json.loads(path.read_text())["type"] == "FeatureCollection"
 
 
-def test_alerts_ask_for_the_suffolk_zone(tmp_path):
+def test_alerts_ask_for_the_zone_and_the_county(tmp_path):
     fetch = fake_nws()
     nws.alerts(tmp_path, fetch)
-    assert fetch.calls == [f"{nws.API}/alerts/active?zone=MAZ015"]
+    assert fetch.calls == [f"{nws.API}/alerts/active?zone=MAZ015,MAC025"]
 
 
 def test_local_time_stamps_file_under_their_utc_date(tmp_path):

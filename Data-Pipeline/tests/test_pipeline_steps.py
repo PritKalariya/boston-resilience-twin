@@ -17,6 +17,7 @@ FULL = DateRange()
 SLICE = DateRange(date(2025, 1, 1), date(2025, 12, 31))
 OUTPUT_FLAGS = {"--out", "--out-dir", "--manifest", "--change-points"}
 INPUT_FLAGS = {"--raw-dir", "--raw", "--legacy", "--new", "--config", "--map", "--published"}
+STATE_FLAGS = {"--state-dir"}
 
 
 def flag_values(args):
@@ -106,7 +107,7 @@ def test_inputs_are_raw_files_run_outputs_or_versioned_config(tmp_path, step):
 @pytest.mark.parametrize("step", sorted(steps.SCRIPTS))
 def test_every_path_is_absolute(step):
     values = flag_values(script_args(step, SLICE))
-    assert all(Path(v).is_absolute() for flag, v in values.items() if flag in OUTPUT_FLAGS | INPUT_FLAGS)
+    assert all(Path(v).is_absolute() for flag, v in values.items() if flag in OUTPUT_FLAGS | INPUT_FLAGS | STATE_FLAGS)
 
 
 def test_versioned_inputs_exist_in_the_repo():

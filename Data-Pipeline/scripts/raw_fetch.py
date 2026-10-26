@@ -1,9 +1,12 @@
 """Shared helpers for the weather and tide downloads (#7).
 
 Each download keeps raw files exactly as the source returned them, one file per
-period, in its own folder under Data-Pipeline/data/raw/. A folder's
-_manifest.json records, per file, the period it covers, when it was downloaded
-and its SHA-256. A period counts as final once it was downloaded a set number
+period, in its own folder under Data-Pipeline/data/raw/; that folder holds
+nothing else. The bookkeeping lives apart, in the source's folder under
+Data-Pipeline/data/state/: its _manifest.json records, per file, the period it
+covers, when it was downloaded and its SHA-256. The manifest changes every run
+(the download time), so keeping it out of raw/ means a run with nothing new
+leaves raw/ byte for byte as it was, and DVC records no new version. A period counts as final once it was downloaded a set number
 of days after it ended (sources revise recent data), and a final file is never
 downloaded again. Any other period is downloaded whole and replaces its file
 only after the answer passes the caller's checks, so a rerun adds the newly
@@ -67,8 +70,8 @@ def sha256(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()
 
 
-def load_manifest(folder: Path) -> dict:
-    path = folder / MANIFEST
+def load_manifest(state_dir: Path) -> dict:
+    path = state_dir / MANIFEST
     if not path.exists():
         return {}
     try:
@@ -80,8 +83,8 @@ def load_manifest(folder: Path) -> dict:
     return manifest
 
 
-def save_manifest(folder: Path, manifest: dict) -> None:
-    write_atomic(folder / MANIFEST, (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode())
+def save_manifest(state_dir: Path, manifest: dict) -> None:
+    write_atomic(state_dir / MANIFEST, (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode())
 
 
 @dataclass(frozen=True)
@@ -120,8 +123,10 @@ def is_final(entry: dict | None, period: Period, settle_days: int) -> bool:
     return downloaded >= period.end + timedelta(days=settle_days)
 
 
-def store(folder: Path, manifest: dict, filename: str, period: Period, body: bytes, now: datetime, **extra) -> str:
-    """Write a checked answer and record it. Returns "unchanged", "updated" or "downloaded"."""
+def store(folder: Path, state_dir: Path, manifest: dict, filename: str, period: Period,
+          body: bytes, now: datetime, **extra) -> str:
+    """Write a checked answer to folder (only when it changed) and record it in
+    state_dir's manifest. Returns "unchanged", "updated" or "downloaded"."""
     target = folder / filename
     entry = {"start": period.start.isoformat(), "end": period.end.isoformat(),
              "downloaded_at": now.isoformat(timespec="seconds"), "bytes": len(body), "sha256": sha256(body), **extra}
@@ -131,7 +136,7 @@ def store(folder: Path, manifest: dict, filename: str, period: Period, body: byt
         action = "updated" if target.exists() else "downloaded"
         write_atomic(target, body)
     manifest[filename] = entry
-    save_manifest(folder, manifest)
+    save_manifest(state_dir, manifest)
     return action
 
 

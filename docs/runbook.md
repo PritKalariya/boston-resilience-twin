@@ -373,13 +373,16 @@ fails at once, naming it.
 | `ingest_noaa_logan` | `noaa_logan.py` | NOAA CDO API v2, GHCN-D Logan (USW00014739), daily from 2015 | `weather/noaa_logan/<year>.json` | `NOAA_CDO_TOKEN` |
 | `ingest_tides` | `tides.py` | CO-OPS Boston gauge 8443970, hourly observed and predicted from 2015, metres above MLLW, GMT | `tides/observed/` and `tides/predicted/`, `<year>-H1.json` and `-H2.json` | none |
 | `ingest_nws_forecasts` | `nws.py forecasts` | NWS gridpoint data, office BOX at City Hall | `weather/nws_forecasts/<UTC date>/<updateTime>.json` | `NWS_USER_AGENT` |
-| `ingest_nws_alerts` | `nws.py alerts` | NWS active alerts, zone MAZ015 | `weather/nws_alerts/<UTC date>/<updated>.json` | `NWS_USER_AGENT` |
+| `ingest_nws_alerts` | `nws.py alerts` | NWS active alerts, zone MAZ015 and county MAC025 | `weather/nws_alerts/<UTC date>/<updated>.json` | `NWS_USER_AGENT` |
 
 Files are stored exactly as the source returned them (NOAA's pages are joined
 into one file per year, values unchanged). Reruns are safe:
 
-- **History (NOAA, tides).** A folder's `_manifest.json` records each file's
-  period, download time and SHA-256. A period is final once it was downloaded
+- **History (NOAA, tides).** A `_manifest.json` records each file's period,
+  download time and SHA-256. It lives in `Data-Pipeline/data/state/`
+  (`state/weather/noaa_logan/`, `state/tides/observed/` and `/predicted/`),
+  not in `raw/`: it changes every run, so a run with nothing new leaves `raw/`
+  byte for byte as it was and DVC records no new version. A period is final once it was downloaded
   long enough after it ended for the source to stop revising it: NOAA 30 days,
   tide observations 45 days (verified data lags about a month), predictions at
   once. A final file is never fetched again; any other is fetched whole and
@@ -415,8 +418,9 @@ it in older years, so those files hold seven of the eight elements. Peak gust
 - **`... has no data for a ... long over`.** A finished period came back empty,
   which a source should never do; the run stops instead of storing nothing.
   Check the source's status page and rerun later.
-- **`_manifest.json is not valid JSON`.** Fix it, or delete it: the folder is
-  then fetched again from 2015, replacing files only where they changed.
+- **`_manifest.json is not valid JSON`.** Fix it, or delete it (under
+  `Data-Pipeline/data/state/`): the source is then fetched again from 2015,
+  replacing files only where they changed.
 
 ## Static layers
 

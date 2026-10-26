@@ -9,7 +9,8 @@ model trains on (ADR-003).
 One JSON file per year under --raw-dir. CDO pages at 1,000 rows, so a year
 takes about three requests; the file holds the first page's metadata and every
 page's results in order, with the values unchanged. NOAA revises recent days,
-so a year is final 30 days after it ends; raw_fetch has the rerun rules. CDO
+so a year is final 30 days after it ends; the manifest that records this
+lives in --state-dir, not in the raw folder (raw_fetch has the rerun rules). CDO
 allows 5 requests a second, so pages are spaced.
 
     python Data-Pipeline/scripts/noaa_logan.py
@@ -92,9 +93,9 @@ def fetch_year(period: rf.Period, fetch, pause=time.sleep) -> bytes | None:
     return (json.dumps({"metadata": first["metadata"], "results": results}, indent=1) + "\n").encode()
 
 
-def refresh(raw_dir: Path, fetch, today: date, now: datetime, pause=time.sleep) -> list[dict]:
+def refresh(raw_dir: Path, state_dir: Path, fetch, today: date, now: datetime, pause=time.sleep) -> list[dict]:
     """Bring the station up to today. Returns one record per year."""
-    manifest = rf.load_manifest(raw_dir)
+    manifest = rf.load_manifest(state_dir)
     records = []
     for period in rf.years(FIRST_DAY, today):
         filename = f"{period.name}.json"
@@ -108,18 +109,19 @@ def refresh(raw_dir: Path, fetch, today: date, now: datetime, pause=time.sleep) 
             records.append({"file": filename, "action": "no data yet"})
             continue
         rows = len(json.loads(body)["results"])
-        records.append({"file": filename, "action": rf.store(raw_dir, manifest, filename, period, body, now, rows=rows), "rows": rows})
+        records.append({"file": filename, "action": rf.store(raw_dir, state_dir, manifest, filename, period, body, now, rows=rows), "rows": rows})
     return records
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--raw-dir", type=Path, default=Path("Data-Pipeline/data/raw/weather/noaa_logan"))
+    parser.add_argument("--state-dir", type=Path, default=Path("Data-Pipeline/data/state/weather/noaa_logan"))
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     headers = {"token": require(NOAA_CDO_TOKEN), "User-Agent": "boston-resilience-twin"}
     now = rf.utc_now()
-    records = refresh(args.raw_dir, lambda url: rf.get(url, headers), now.date(), now)
+    records = refresh(args.raw_dir, args.state_dir, lambda url: rf.get(url, headers), now.date(), now)
     changed = [f"{r['file']} {r['action']}" + (f" ({r['rows']:,} values)" if "rows" in r else "")
                for r in records if r["action"] != "final"]
     print(f"NOAA {STATION}: " + (", ".join(changed) if changed else "every year final"))
