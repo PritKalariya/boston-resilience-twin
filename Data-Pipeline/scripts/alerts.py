@@ -27,6 +27,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -81,11 +82,19 @@ def slack_webhook() -> str | None:
     return url
 
 
+def slack_escape(text: str) -> str:
+    """Escape Slack's control characters, & first (docs.slack.dev, "Escaping text"),
+    so <CENSUS_API_KEY> or <NA> shows as written instead of as a link or mention."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def slack_text(message: str) -> str:
-    text = f":rotating_light: *Pipeline alert*\n{message}"
+    """The Slack message: escaped, then cut to SLACK_MAX_CHARS without splitting an
+    entity such as &amp;. The task log keeps the raw text."""
+    text = f":rotating_light: *Pipeline alert*\n{slack_escape(message)}"
     if len(text) > SLACK_MAX_CHARS:
         cut = "\n... (cut; the full alert is in the task log)"
-        text = text[: SLACK_MAX_CHARS - len(cut)] + cut
+        text = re.sub(r"&[a-z]*$", "", text[: SLACK_MAX_CHARS - len(cut)]) + cut
     return text
 
 

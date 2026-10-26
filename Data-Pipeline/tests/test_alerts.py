@@ -128,6 +128,29 @@ def test_blank_webhook_counts_as_unset(monkeypatch):
     assert alerts.slack_webhook() is None
 
 
+def test_slack_text_escapes_control_characters_and_the_log_keeps_them(monkeypatch, caplog):
+    monkeypatch.setenv("CENSUS_API_KEY", "abc123census456key")
+    monkeypatch.setenv(alerts.SLACK_WEBHOOK_ENV, WEBHOOK)
+    post = recorder()
+    with caplog.at_level(logging.ERROR, logger="alerts"):
+        alerts.send_alert("key=abc123census456key; value <NA> & <class 'float'>", post=post)
+    assert "key=<CENSUS_API_KEY>; value <NA> & <class 'float'>" in caplog.text  # raw in the log
+    assert alerts.slack_text(post.calls[0][1]).endswith(
+        "key=&lt;CENSUS_API_KEY&gt;; value &lt;NA&gt; &amp; &lt;class 'float'&gt;")
+
+
+def test_ampersand_is_escaped_first():
+    assert alerts.slack_escape("a &lt; b") == "a &amp;lt; b"
+
+
+def test_a_cut_never_splits_an_entity():
+    for pad in range(6):
+        text = alerts.slack_text("x" * (alerts.SLACK_MAX_CHARS - 80 + pad) + "&" * 50)
+        assert len(text) <= alerts.SLACK_MAX_CHARS
+        body = text.split("\n... (cut;")[0]
+        assert not body.endswith(("&", "&a", "&am", "&amp")), body[-6:]
+
+
 def test_long_alerts_are_cut_for_slack():
     text = alerts.slack_text("x" * 10_000)
     assert len(text) <= alerts.SLACK_MAX_CHARS
@@ -168,6 +191,15 @@ def test_post_to_slack_sends_the_webhook_json():
     assert path == "/services/T000/B000/xyz"
     assert content_type == "application/json"
     assert body == {"text": ":rotating_light: *Pipeline alert*\ndaily_pipeline.validate_raw failed"}
+
+
+def test_post_to_slack_sends_escaped_text():
+    server, url = serve(200)
+    try:
+        alerts.post_to_slack(url, "observed <NA> & more", timeout=5)
+    finally:
+        server.server_close()
+    assert SlackStub.received[0][2]["text"].endswith("observed &lt;NA&gt; &amp; more")
 
 
 def test_post_to_slack_raises_on_a_refused_webhook_without_the_url():
