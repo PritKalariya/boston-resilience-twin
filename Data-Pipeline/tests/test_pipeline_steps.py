@@ -16,7 +16,7 @@ SCRIPTS_DIR = Path(steps.__file__).resolve().parent
 FULL = DateRange()
 SLICE = DateRange(date(2025, 1, 1), date(2025, 12, 31))
 OUTPUT_FLAGS = {"--out", "--out-dir", "--manifest", "--change-points"}
-INPUT_FLAGS = {"--raw-dir", "--raw", "--legacy", "--new", "--config", "--map"}
+INPUT_FLAGS = {"--raw-dir", "--raw", "--legacy", "--new", "--config", "--map", "--published"}
 
 
 def flag_values(args):
@@ -84,7 +84,8 @@ def test_outputs_stay_in_the_run_folder(tmp_path, step, days):
     args = script_args(step, days, tmp_path)
     outputs = [Path(v) for flag, v in flag_values(args).items() if flag in OUTPUT_FLAGS]
     assert outputs
-    assert all(path.is_relative_to(run_paths(days, tmp_path).interim) for path in outputs)
+    paths = run_paths(days, tmp_path)
+    assert all(path.is_relative_to(paths.interim) or path.is_relative_to(paths.processed) for path in outputs)
     assert not any("gs://" in arg for arg in args)
 
 
@@ -104,9 +105,9 @@ def test_every_path_is_absolute(step):
 
 
 def test_versioned_inputs_exist_in_the_repo():
-    for step in ("ingest_static_layers", "combine_311"):
+    for step in ("ingest_static_layers", "combine_311", "validate_raw", "validate_processed"):
         values = flag_values(script_args(step, FULL))
-        for flag in ("--config", "--map"):
+        for flag in ("--config", "--map", "--published"):
             if flag in values:
                 assert Path(values[flag]).is_file(), values[flag]
 

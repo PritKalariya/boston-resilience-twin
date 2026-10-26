@@ -49,6 +49,11 @@ x-airflow-common:
     - ./Data-Pipeline/config:/opt/airflow/repo/Data-Pipeline/config:ro
     - ./docs/data:/opt/airflow/repo/docs/data:ro
     - ./Data-Pipeline/data:/opt/airflow/repo/Data-Pipeline/data
+    # DVC for the push_data task (#19): DVC refuses to run outside a git repo, so
+    # .git is mounted read-only; .dvc is writable for DVC's cache and tmp files.
+    - ./.git:/opt/airflow/repo/.git:ro
+    - ./.dvc:/opt/airflow/repo/.dvc
+    - ./.dvcignore:/opt/airflow/repo/.dvcignore:ro
   # Linux: set AIRFLOW_UID to `id -u` in .env. The image requires group 0.
   user: "${AIRFLOW_UID:-50000}:0"
   # Cap container stdout logs (the VM disk is 30 GB).
