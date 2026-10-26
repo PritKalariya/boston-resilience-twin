@@ -135,7 +135,9 @@ Failure alerts go to Slack through an incoming webhook (#34). The URL is the
 credential: anyone who has it can post to the channel, so it lives only in the
 gitignored `.env` locally, never in chat, a ticket or the repo. On airflow-vm
 it comes from Secret Manager with #64. Without it, alerts stay in the task log
-and runs are unaffected.
+and runs are unaffected. Before an alert is logged or posted, any API key from
+`.env` (or the webhook) that appears in it, as typed or URL-encoded, is replaced
+by its name, for example `key=<CENSUS_API_KEY>`.
 
 Set it up once (the webhook's owner; the team only needs to join the channel):
 

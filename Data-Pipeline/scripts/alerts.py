@@ -12,7 +12,11 @@ also posts the alert to that Slack incoming webhook. Without it, the task log
 is the only channel, which is the fallback #34's acceptance criteria name, and
 the run is not changed by it. On airflow-vm the webhook comes from Secret
 Manager with #64. The webhook URL is the credential, so it is never logged.
-Standard library only.
+
+Before an alert is logged or posted, the value of every credential in the
+environment (the API keys in credentials.KEYS and the webhook) is replaced by
+its name, so an error that quotes a request URL, such as a Census call with
+`key=...`, cannot leak a key into the log or Slack. Standard library only.
 
     python Data-Pipeline/scripts/alerts.py --test   # post one test alert
 """
@@ -24,10 +28,17 @@ import json
 import logging
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 
+from credentials import KEYS
+
 SLACK_WEBHOOK_ENV = "SLACK_ALERT_WEBHOOK"
+SECRET_ENV = (*KEYS, SLACK_WEBHOOK_ENV)
+# Shorter values are not masked: replacing a 3-character string everywhere
+# would mangle the message and hides nothing worth hiding.
+MIN_SECRET_CHARS = 8
 # Incoming webhooks live here; anything else is a typo, and sending pipeline
 # errors to an unknown address is worse than not sending them.
 SLACK_WEBHOOK_PREFIX = "https://hooks.slack.com/"
@@ -94,8 +105,21 @@ def post_to_slack(url: str, message: str, timeout: float = SLACK_TIMEOUT_SECONDS
         raise AlertNotSent(f"Slack answered HTTP {status}")
 
 
+def mask_secrets(message: str) -> str:
+    """Replace each credential's value, as typed and as URL-encoded, with <NAME>."""
+    for name in SECRET_ENV:
+        value = os.environ.get(name, "").strip()
+        if len(value) < MIN_SECRET_CHARS:
+            continue
+        # Longest form first, so a URL-encoded value is not left half replaced.
+        for form in sorted({value, urllib.parse.quote(value, safe=""), urllib.parse.quote_plus(value)}, key=len, reverse=True):
+            message = message.replace(form, f"<{name}>")
+    return message
+
+
 def send_alert(message: str, post=None) -> None:
     """Write the alert to the task log, and post it to Slack when a webhook is set."""
+    message = mask_secrets(message)
     log.error("ALERT %s", message)
     url = slack_webhook()
     if url is None:
@@ -110,7 +134,7 @@ def on_task_failure(context: Mapping) -> None:
     try:
         send_alert(alert_message(context))
     except Exception as e:
-        log.error("could not send the failure alert: %s", e)
+        log.error("could not send the failure alert: %s", mask_secrets(str(e)))
 
 
 def main(argv: list[str] | None = None) -> None:

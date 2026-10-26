@@ -186,3 +186,54 @@ def test_test_command_without_a_webhook_logs_only(monkeypatch, capsys, caplog):
         alerts.main(["--test"])
     assert "is not set" in capsys.readouterr().out
     assert caplog.messages[-1].startswith("ALERT test alert from alerts.py --test")
+
+
+# Masking credentials (Piyush's review of #77). Made-up values, never real keys.
+CENSUS_KEY = "abc123census456key"
+NWS_AGENT = "(boston-resilience-twin, someone@example.org)"
+
+
+def test_a_key_in_a_request_url_is_masked_in_the_log_and_slack(monkeypatch, caplog):
+    monkeypatch.setenv("CENSUS_API_KEY", CENSUS_KEY)
+    monkeypatch.setenv(alerts.SLACK_WEBHOOK_ENV, WEBHOOK)
+    post = recorder()
+    error = f"HTTPError: 500 Server Error for url: https://api.census.gov/data/2023/acs/acs5?get=NAME&key={CENSUS_KEY}"
+    with caplog.at_level(logging.ERROR, logger="alerts"):
+        alerts.send_alert(f"daily_pipeline.ingest_acs failed: {error}", post=post)
+    assert CENSUS_KEY not in caplog.text
+    assert "key=<CENSUS_API_KEY>" in caplog.text
+    assert CENSUS_KEY not in post.calls[0][1]
+    assert "key=<CENSUS_API_KEY>" in post.calls[0][1]
+
+
+def test_url_encoded_values_are_masked_too(monkeypatch):
+    monkeypatch.setenv("NWS_USER_AGENT", NWS_AGENT)
+    quoted = "%28boston-resilience-twin%2C%20someone%40example.org%29"
+    plus = "%28boston-resilience-twin%2C+someone%40example.org%29"
+    message = f"raw {NWS_AGENT} quoted {quoted} plus {plus}"
+    assert alerts.mask_secrets(message) == "raw <NWS_USER_AGENT> quoted <NWS_USER_AGENT> plus <NWS_USER_AGENT>"
+
+
+def test_the_webhook_itself_is_masked(monkeypatch):
+    monkeypatch.setenv(alerts.SLACK_WEBHOOK_ENV, WEBHOOK)
+    assert alerts.mask_secrets(f"posting to {WEBHOOK} failed") == "posting to <SLACK_ALERT_WEBHOOK> failed"
+
+
+def test_short_or_unset_values_are_left_alone(monkeypatch):
+    monkeypatch.setenv("NOAA_CDO_TOKEN", "abc")
+    monkeypatch.delenv("CENSUS_API_KEY", raising=False)
+    assert alerts.mask_secrets("abc failed in run abc") == "abc failed in run abc"
+
+
+def test_a_failed_send_does_not_leak_a_key_either(monkeypatch, caplog):
+    monkeypatch.setenv("NOAA_CDO_TOKEN", "noaa-token-0123456789")
+    monkeypatch.setenv(alerts.SLACK_WEBHOOK_ENV, WEBHOOK)
+
+    def down(url, message):
+        raise RuntimeError("proxy said: bad header token noaa-token-0123456789")
+
+    monkeypatch.setattr(alerts, "post_to_slack", down)
+    with caplog.at_level(logging.ERROR, logger="alerts"):
+        alerts.on_task_failure(failed_context())
+    assert "noaa-token-0123456789" not in caplog.text
+    assert caplog.messages[-1] == "could not send the failure alert: proxy said: bad header token <NOAA_CDO_TOKEN>"
