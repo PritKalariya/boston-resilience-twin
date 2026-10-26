@@ -276,11 +276,13 @@ def test_repo_settings():
         "feature_groups": ["snow_ice", "tree"],
         "feature_min_lag_days": 2,
         "forecast_cutoff_local": "18:00",
+        "forecast_issue_margin_hours": 6,
+        "observed_weather_lag_days": 2,
     }
 
 
 SETTINGS_OK = {"label_groups": "snow_ice;tree;flooding", "feature_groups": "snow_ice;tree", "feature_min_lag_days": "2",
-               "forecast_cutoff_local": "18:00"}
+               "forecast_cutoff_local": "18:00", "forecast_issue_margin_hours": "6", "observed_weather_lag_days": "2"}
 
 
 @pytest.mark.parametrize(
@@ -295,6 +297,11 @@ SETTINGS_OK = {"label_groups": "snow_ice;tree;flooding", "feature_groups": "snow
         ({"forecast_cutoff_local": "6pm"}, "HH:MM"),
         ({"forecast_cutoff_local": "24:00"}, "HH:MM"),
         ({"forecast_cutoff_local": None}, "missing settings"),
+        ({"forecast_issue_margin_hours": "25"}, "0 to 24"),
+        ({"forecast_issue_margin_hours": "six"}, "0 to 24"),
+        ({"forecast_issue_margin_hours": None}, "missing settings"),
+        ({"observed_weather_lag_days": "1"}, "2 or more"),
+        ({"observed_weather_lag_days": None}, "missing settings"),
     ],
 )
 def test_bad_settings_are_rejected(tmp_path, change, message):

@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -25,11 +26,16 @@ from feature_table import (
     feature_names,
     lag_features,
     static_attributes,
+    written_days,
 )
+from open_meteo_forecast import DAYS_BEFORE, VALUES, columns
+from weather_features import STATION, weather_columns
 
 CONFIG = Path(__file__).resolve().parents[1] / "config"
+CATALOG = CONFIG / "feature_catalog.csv"
 GROUPS = ["snow_ice", "tree"]
 LAG = 2
+TIDE_COLUMNS = ["tide_pred_hours", "tide_pred_max_m"]
 
 
 def counts_table(units=("East", "West"), days=120, start="2016-01-01"):
@@ -47,13 +53,31 @@ def counts_table(units=("East", "West"), days=120, start="2016-01-01"):
 
 
 def alerts_table(*alerts):
-    """Prepared alerts like alert_history.py writes: (storm_groups, significance, first bulletin, first end) in UTC."""
+    """Prepared alerts like alert_history.py writes: (storm_groups, significance, first bulletin, first end
+    [, cancelled or upgraded]) in UTC."""
     rows = [{
         "ugc": "MAZ015", "area": "zone", "phenomena": "WS", "significance": significance, "alert_type": "test",
         "storm_groups": groups, "eventid": i, "vtec_year": 2016, "product_id": f"p{i}",
         "first_bulletin_utc": pd.Timestamp(first, tz="UTC"), "first_end_utc": pd.Timestamp(end, tz="UTC"),
-    } for i, (groups, significance, first, end) in enumerate(alerts)]
-    return pd.DataFrame(rows, columns=ALERT_COLUMNS)
+        "ended_early_utc": pd.Timestamp(early[0], tz="UTC") if early else pd.NaT,
+    } for i, (groups, significance, first, end, *early) in enumerate(alerts)]
+    df = pd.DataFrame(rows, columns=ALERT_COLUMNS)
+    return df.assign(ended_early_utc=pd.to_datetime(df["ended_early_utc"], utc=True))
+
+
+def weather_frame(days, source=None, lag=2):
+    """One row per day like weather_features: observed to 2023, forecast after (or `source` everywhere)."""
+    days = pd.DatetimeIndex(days)
+    frame = pd.DataFrame({"date": days})
+    frame["wx_source"] = np.where(days <= pd.Timestamp("2023-12-31"), "observed", "forecast") if source is None else source
+    frame["wx_known_by_utc"] = pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns, UTC]")
+    for i, column in enumerate(weather_columns(lag)[2:]):
+        frame[column] = float(i)
+    return frame
+
+
+def tide_frame(days):
+    return pd.DataFrame({"date": pd.DatetimeIndex(days), "tide_pred_hours": 24, "tide_pred_max_m": 3.0})
 
 
 def make_static_dir(path, units=("East", "West"), population_units=None):
@@ -176,6 +200,13 @@ def test_alert_features_follow_the_cutoff_and_are_the_same_for_every_unit():
     assert len(on_day.drop_duplicates()) == 1
 
 
+def test_an_alert_cancelled_before_the_cutoff_is_left_out_of_the_table():
+    # Cancelled at 20:00 UTC on 14 February, before that evening's 23:00 UTC cutoff (ADR-014 A+).
+    alerts = alerts_table(("snow_ice", "W", "2016-02-14 12:00", "2016-02-17 12:00", "2016-02-14 20:00"))
+    table = build_features(counts_table(), GROUPS, LAG, alerts=alerts)
+    assert row(table, "East", "2016-02-15")["alert_snow_ice_count"] == 0
+
+
 def test_full_table_has_every_feature_group(tmp_path):
     static = static_attributes(make_static_dir(tmp_path / "static"))
     alerts = alerts_table(("flooding", "W", "2016-02-14 12:00", "2016-02-16 00:00"))
@@ -184,6 +215,73 @@ def test_full_table_has_every_feature_group(tmp_path):
                                    *STATIC_FEATURES]
     assert len(table) == 2 * 120 and not table.duplicated(["unit", "date"]).any()
     assert table.groupby("unit")[STATIC_FEATURES].nunique().max().max() == 1
+
+
+# Weather and tides
+
+
+def test_weather_and_tides_join_by_date_and_are_the_same_for_every_unit():
+    counts = counts_table()
+    days = written_days(counts)
+    table = build_features(counts, GROUPS, LAG, weather=weather_frame(days), tides=tide_frame(days))
+    assert list(table.columns) == [*KEYS, *CALENDAR, *feature_names(GROUPS), *weather_columns(LAG), *TIDE_COLUMNS]
+    on_day = table[table["date"] == "2016-02-15"][[*weather_columns(LAG), *TIDE_COLUMNS]]
+    assert len(on_day) == 2 and len(on_day.drop_duplicates()) == 1
+
+
+def test_observed_weather_of_its_own_day_is_refused_after_the_training_years():
+    counts = counts_table(start="2023-12-01", days=60)
+    days = written_days(counts)
+    build_features(counts, GROUPS, LAG, weather=weather_frame(days))  # observed to 2023, forecast after
+    with pytest.raises(AssertionError, match="observed weather of their own day"):
+        build_features(counts, GROUPS, LAG, weather=weather_frame(days, source="observed"))
+
+
+def test_a_forecast_that_became_available_after_the_cutoff_is_refused():
+    counts = counts_table(start="2023-12-01", days=60)
+    weather = weather_frame(written_days(counts))
+    jan10 = weather["date"] == pd.Timestamp("2024-01-10")  # cutoff 2024-01-09 23:00 UTC
+    weather.loc[jan10, "wx_known_by_utc"] = pd.Timestamp("2024-01-09 23:00", tz="UTC")
+    build_features(counts, GROUPS, LAG, weather=weather)  # at the cutoff itself is fine
+    weather.loc[jan10, "wx_known_by_utc"] = pd.Timestamp("2024-01-09 23:01", tz="UTC")
+    with pytest.raises(AssertionError, match="after its cutoff"):
+        build_features(counts, GROUPS, LAG, weather=weather)
+
+
+def test_weather_or_tides_without_a_written_day_are_refused():
+    counts = counts_table()
+    days = written_days(counts)
+    with pytest.raises(ValueError, match="weather has no row for 1 of the days"):
+        build_features(counts, GROUPS, LAG, weather=weather_frame(days[1:]))
+    with pytest.raises(ValueError, match="tides has no row"):
+        build_features(counts, GROUPS, LAG, tides=tide_frame(days[:-1]))
+    with pytest.raises(ValueError, match="two rows for a day"):
+        build_features(counts, GROUPS, LAG, weather=pd.concat([weather_frame(days), weather_frame(days[:1])]))
+    # Days before start are not written, so they need no weather.
+    part = build_features(counts, GROUPS, LAG, start="2016-02-01", weather=weather_frame(days[days >= "2016-02-01"]))
+    assert len(part) == 2 * (120 - 31)
+
+
+def test_feature_catalog_matches_the_full_table(tmp_path):
+    catalog = pd.read_csv(CATALOG, dtype=str, keep_default_na=False)
+    assert list(catalog.columns) == ["feature", "group", "source", "coverage_start", "history_rule", "live_rule",
+                                     "use_in_model", "note"]
+    assert not catalog["feature"].duplicated().any() and (catalog[["feature", "note"]] != "").all().all()
+    assert set(catalog["history_rule"]) <= {"pass", "fail", "n/a"}
+    assert set(catalog["live_rule"]) <= {"pass", "fail", "depends", "n/a"}
+    assert set(catalog["use_in_model"]) <= {"yes", "no", "excluded"}
+    model = catalog[catalog["use_in_model"] == "yes"]
+    assert not (model[["history_rule", "live_rule"]] == "fail").any().any()  # a model feature passes both rules
+
+    settings = feature_table.load_settings(CONFIG / "labels_features.csv")
+    counts = counts_table()
+    days = written_days(counts)
+    table = build_features(counts, settings["feature_groups"], settings["feature_min_lag_days"], alerts=alerts_table(),
+                           static=static_attributes(make_static_dir(tmp_path / "static")),
+                           weather=weather_frame(days, lag=settings["observed_weather_lag_days"]), tides=tide_frame(days))
+    in_table = catalog.loc[catalog["use_in_model"] != "excluded", "feature"]
+    assert sorted(table.columns) == sorted(in_table)
+    assert not set(catalog.loc[catalog["use_in_model"] == "excluded", "feature"]) & set(table.columns)
 
 
 # Static attributes
@@ -254,3 +352,57 @@ def test_main_writes_the_full_table(tmp_path, monkeypatch, capsys):
     assert set(STATIC_FEATURES) <= set(written.columns)
     printed = capsys.readouterr().out
     assert "D - 2" in printed and "18:00" in printed and "not yet in the table" in printed
+
+
+def write_json(folder, name, body):
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{name}.json").write_text(json.dumps(body))
+    return folder
+
+
+def raw_sources(tmp_path):
+    """#7's Logan files (precipitation 2.5 mm every day), #8's set c from 2024-01-21 (0.5 mm every hour)
+    and #7's tide predictions (1 m, with a 3.5 m peak at 15:00 UTC on 2024-01-10)."""
+    noaa = tmp_path / "noaa_logan"
+    for year, start, end in ((2023, "2023-12-01", "2023-12-31"), (2024, "2024-01-01", "2024-02-29")):
+        results = [{"date": f"{day:%Y-%m-%d}T00:00:00", "datatype": datatype, "station": STATION,
+                    "attributes": ",,W,2400", "value": 2.5}
+                   for day in pd.date_range(start, end) for datatype in ("PRCP", "SNOW", "TMAX", "TMIN", "AWND", "WSF5")]
+        write_json(noaa, year, {"metadata": {}, "results": results})
+    hours = pd.date_range("2024-01-21 00:00", "2024-02-29 23:00", freq="h")
+    hourly = {"time": [f"{hour:%Y-%m-%dT%H:%M}" for hour in hours],
+              **{column: [0.5 if column.startswith("precipitation") else 1.0] * len(hours) for column in columns()}}
+    units = {f"{name}_previous_day{n}": unit for name, unit, *_ in VALUES.values() for n in DAYS_BEFORE}
+    forecast = write_json(tmp_path / "set_c", 2024, {"utc_offset_seconds": 0, "hourly_units": units, "hourly": hourly})
+    peak = pd.Timestamp("2024-01-10 15:00")
+    tides = tmp_path / "predicted"
+    for name, start, end in (("2023-H2", "2023-12-01", "2023-12-31"), ("2024-H1", "2024-01-01", "2024-02-29")):
+        rows = [{"t": f"{hour:%Y-%m-%d %H:%M}", "v": "3.500" if hour == peak else "1.000"}
+                for hour in pd.date_range(f"{start} 00:00", f"{end} 23:00", freq="h")]
+        write_json(tides, name, {"predictions": rows})
+    return noaa, forecast, tides
+
+
+def test_main_adds_weather_and_tides_from_the_raw_files(tmp_path, monkeypatch, capsys):
+    counts_table(start="2023-12-20", days=45).to_parquet(tmp_path / "counts.parquet", index=False)  # to 2024-02-02
+    alerts_table().to_parquet(tmp_path / "alerts.parquet", index=False)
+    noaa, forecast, tides = raw_sources(tmp_path)
+    out = tmp_path / "features.parquet"
+    argv = ["feature_table.py", "--counts", str(tmp_path / "counts.parquet"), "--alerts", str(tmp_path / "alerts.parquet"),
+            "--static-dir", str(make_static_dir(tmp_path / "static")), "--settings", str(CONFIG / "labels_features.csv"),
+            "--noaa-dir", str(noaa), "--forecast-dir", str(forecast), "--tides-dir", str(tides), "--out", str(out)]
+    monkeypatch.setattr(sys, "argv", argv)
+    feature_table.main()
+    written = pd.read_parquet(out)
+    assert len(written) == 2 * 45
+    dec31, jan10, jan25 = (row(written, "East", day) for day in ("2023-12-31", "2024-01-10", "2024-01-25"))
+    assert (dec31["wx_source"], dec31["wx_precip_mm"]) == ("observed", 2.5)
+    assert jan10["wx_source"] == "forecast" and pd.isna(jan10["wx_precip_mm"])  # before set c: missing, not observed
+    assert (jan25["wx_precip_mm"], jan25["wx_tmax_c"]) == (12.0, 1.0)
+    assert (jan10["tide_pred_max_m"], jan25["tide_pred_max_m"], jan25["tide_pred_hours"]) == (3.5, 1.0, 24)
+    printed = capsys.readouterr().out
+    assert "forecast days missing, kept missing: wx_precip_mm 20" in printed and "not yet in the table" not in printed
+
+    monkeypatch.setattr(sys, "argv", [arg for arg in argv if arg not in ("--forecast-dir", str(forecast))])
+    with pytest.raises(SystemExit):
+        feature_table.main()

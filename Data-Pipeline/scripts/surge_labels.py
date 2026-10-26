@@ -38,7 +38,8 @@ from measure_311 import markdown
 
 RULE_COLUMNS = ["rule_id", "rule", "k", "m", "chosen", "note"]
 RULE_KINDS = ("sd", "q90")
-SETTINGS = ("label_groups", "feature_groups", "feature_min_lag_days", "forecast_cutoff_local")
+SETTINGS = ("label_groups", "feature_groups", "feature_min_lag_days", "forecast_cutoff_local",
+            "forecast_issue_margin_hours", "observed_weather_lag_days")
 KEY = ["unit", "date", "storm_group"]
 BASE_COLUMNS = ["mean", "sd", "q90", "n"]
 SPEC_RANGE = (0.013, 0.029)  # the spec's pre-scoping surge rate range
@@ -120,7 +121,7 @@ def parse_clock(value: str, name: str) -> str:
 
 
 def load_settings(path: Path | str) -> dict:
-    """label_groups, feature_groups, feature_min_lag_days and forecast_cutoff_local from the #16 settings file."""
+    """Every setting in SETTINGS from the #16 settings file, checked."""
     df = pd.read_csv(path, dtype=str, keep_default_na=False)
     if not {"setting", "value"} <= set(df.columns):
         raise ValueError(f"{path} needs the columns setting and value")
@@ -135,11 +136,19 @@ def load_settings(path: Path | str) -> dict:
     lag = values["feature_min_lag_days"]
     if not lag.isdigit() or int(lag) < 1:
         raise ValueError(f"feature_min_lag_days must be a whole number of 1 or more, got {lag!r}")
+    margin = values["forecast_issue_margin_hours"]
+    if not margin.isdigit() or int(margin) > 24:
+        raise ValueError(f"forecast_issue_margin_hours must be a whole number of hours from 0 to 24, got {margin!r}")
+    weather_lag = values["observed_weather_lag_days"]
+    if not weather_lag.isdigit() or int(weather_lag) < 2:
+        raise ValueError(f"observed_weather_lag_days must be a whole number of 2 or more, got {weather_lag!r}")
     return {
         "label_groups": parse_groups(values["label_groups"], "label_groups"),
         "feature_groups": parse_groups(values["feature_groups"], "feature_groups"),
         "feature_min_lag_days": int(lag),
         "forecast_cutoff_local": parse_clock(values["forecast_cutoff_local"], "forecast_cutoff_local"),
+        "forecast_issue_margin_hours": int(margin),
+        "observed_weather_lag_days": int(weather_lag),
     }
 
 
