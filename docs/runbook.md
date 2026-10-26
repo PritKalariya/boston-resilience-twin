@@ -71,7 +71,8 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 - The other 10 are placeholders. Each logs the issue that builds it
   (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
 - Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
-  hand.
+  hand, with the download loop in `Data-Pipeline/README.md` ("Get the raw
+  data").
 
 The DAG runs only when triggered. It takes two params, both inclusive:
 `start` (2015-01-01 or later) and `end` (empty: through the latest data).
