@@ -35,6 +35,7 @@ from __future__ import annotations
 import csv
 import importlib
 import logging
+import os
 import sys
 import time
 from collections.abc import Mapping
@@ -62,15 +63,15 @@ SCRIPTS = {
     "feature_table": "feature_table",
     "validate_raw": "validate_data",
     "validate_processed": "validate_data",
+    "ingest_noaa_logan": "noaa_logan",
+    "ingest_nws_forecasts": "nws",
+    "ingest_nws_alerts": "nws",
+    "ingest_tides": "tides",
 }
 # Task id -> the issue that builds it; a placeholder in the DAG until then.
 PLANNED = {
     "ingest_legacy_311": "#6",
     "ingest_new_311": "#6",
-    "ingest_noaa_logan": "#7",
-    "ingest_nws_forecasts": "#7",
-    "ingest_nws_alerts": "#7",
-    "ingest_tides": "#7",
     "ingest_open_meteo": "#8",
     "schema_and_statistics": "#35",
     "bias_slicing": "#32",
@@ -187,6 +188,7 @@ class StepPlan:
     files: StepFiles
     hint: str
     refetch: Path | None = None
+    env: tuple[str, ...] = ()  # credentials the script needs (#4), checked before it runs
 
 
 def configured_layers(config: Path) -> list[str]:
@@ -281,6 +283,19 @@ def step_plan(step: str, days: DateRange, root: Path = REPO) -> StepPlan:
             files=StepFiles(data_in=[counts, alerts], config_in=[static, settings], data_out=[out]),
             hint="Run daily_counts for the full build, ingest_alert_history and ingest_static_layers first.",
         )
+    if step in ("ingest_noaa_logan", "ingest_nws_forecasts", "ingest_nws_alerts", "ingest_tides"):
+        # #7. Raw downloads add to their folders and keep history, so they have no
+        # data_out to clear; a missing key fails before the script runs. Their
+        # manifests live in data/state/, shared by every date range like raw/.
+        weather, state = raw / "weather", raw.parent / "state"
+        args, env = {
+            "ingest_noaa_logan": (["--raw-dir", weather / "noaa_logan", "--state-dir", state / "weather" / "noaa_logan"],
+                                  ("NOAA_CDO_TOKEN",)),
+            "ingest_nws_forecasts": (["forecasts", "--raw-dir", weather / "nws_forecasts"], ("NWS_USER_AGENT",)),
+            "ingest_nws_alerts": (["alerts", "--raw-dir", weather / "nws_alerts"], ("NWS_USER_AGENT",)),
+            "ingest_tides": (["--raw-dir", raw / "tides", "--state-dir", state / "tides"], ()),
+        }[step]
+        return StepPlan(args=args, files=StepFiles(), hint='Team members: fill .env with the runbook command ("API keys in .env").', env=env)
     if step == "validate_raw":
         # #17. Only rows in are counted: the step writes a JSON of check results, not data.
         raw_dir, bounds, published = raw / "311", config / "validation_bounds.csv", config / "published_311_counts.csv"
@@ -330,7 +345,10 @@ def check_inputs(step: str, plan: StepPlan) -> None:
     needed = plan.files.data_in + plan.files.config_in
     missing = [path for path in needed if not path.exists()]
     empty = [path for path in needed if path.is_file() and path.stat().st_size == 0]
+    unset = [name for name in plan.env if not os.environ.get(name, "").strip()]
     problems = []
+    if unset:
+        problems.append(f"{', '.join(unset)} not set (add to .env, names in .env.example; docs/data-access.md)")
     if missing:
         problems.append("missing " + ", ".join(str(path) for path in missing))
     if empty:

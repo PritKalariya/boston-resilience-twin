@@ -6,8 +6,11 @@ data). The defaults are the full build, written to Data-Pipeline/data/interim/
 and processed/. Any other range is a slice, written to
 Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/.
 
-Eleven tasks run pipeline scripts. The others are placeholders: they log the
-issue that builds them and do nothing else. The last task, push_data, pushes
+Fifteen tasks run pipeline scripts: four of them the weather and tide
+downloads (#7) and three the alert history, labels and features (#16). The
+others are placeholders: they log the issue that builds them and do nothing
+else; an ingest task becomes real once its script is in
+pipeline_steps.SCRIPTS. The last task, push_data, pushes
 the DVC-tracked data to the team remote (dvc_push.py, #19); without bucket
 access it logs `dvc push skipped: ...` and succeeds.
 
@@ -119,8 +122,8 @@ def daily_pipeline():
         issue = steps.PLANNED[step]
         return planned.override(task_id=step, doc_md=f"Placeholder until {issue}.", **retries(step))(issue)
 
-    ingest = [
-        todo(step)
+    ingest = {
+        step: real(step) if step in steps.SCRIPTS else todo(step)
         for step in (
             "ingest_legacy_311",
             "ingest_new_311",
@@ -130,7 +133,9 @@ def daily_pipeline():
             "ingest_tides",
             "ingest_open_meteo",
         )
-    ]
+    }
+    # One after the other, legacy first: both write the 311 schedule state (#6).
+    ingest["ingest_legacy_311"] >> ingest["ingest_new_311"]
     static = real("ingest_static_layers")
     alert_history = real("ingest_alert_history")
     raw_checked = real("validate_raw")
@@ -138,7 +143,7 @@ def daily_pipeline():
     counts = real("daily_counts")
     validated = real("validate_processed")
 
-    check_range() >> [*ingest, static, alert_history] >> raw_checked
+    check_range() >> [*ingest.values(), static, alert_history] >> raw_checked
     raw_checked >> [real("parse_legacy_311"), real("parse_new_311")] >> combined
     [combined, static] >> real("spatial_join") >> counts
     counts >> [real("surge_labels"), real("feature_table")] >> validated
