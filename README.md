@@ -127,6 +127,14 @@ dvc pull
 
 The runbook ("Versioned data (DVC)") has the checks and fixes.
 
+### Pipeline alerts
+
+When a pipeline task fails for good, its failure callback sends one alert naming the DAG, the task, the run and the error. For a failed validation (`validate_raw`, `validate_processed`) the error lists each failing check. The alert always goes to the task log; with `SLACK_ALERT_WEBHOOK` set in `.env` it is also posted to the team's Slack channel. Setup and a test alert: runbook, "Pipeline alerts (Slack)".
+
+A slice run with an injected bad file (`2025.csv` without its `open_dt` column) fails `validate_raw` and sends exactly one alert, here after the test alert:
+
+![Slack: the test alert, then one pipeline alert naming daily_pipeline.validate_raw, run alert-demo-slack, and the failing check expect_column_to_exist(open_dt)](docs/images/slack-alert.png)
+
 ## Pipeline performance (#37)
 
 Full builds of `daily_pipeline` (2015 to 2026) on a laptop, 2026-10-24: Docker Desktop with 16 GB, the `brt-airflow:local` image, `map_311.py` after #68, and the raw 311 files of 2026-10-19.

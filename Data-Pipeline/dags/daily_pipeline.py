@@ -6,12 +6,14 @@ data). The defaults are the full build, written to Data-Pipeline/data/interim/
 and processed/. Any other range is a slice, written to
 Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/.
 
-Eight tasks run pipeline scripts. parse_legacy_311 runs once per legacy year,
-at most LEGACY_PARALLEL at a time (4 unless .env sets it), and
-merge_legacy_311 joins the years (#37). The others are placeholders: they log
-the issue that builds them and do nothing else. The last task, push_data,
-pushes the DVC-tracked data to the team remote (dvc_push.py, #19); without
-bucket access it logs `dvc push skipped: ...` and succeeds.
+Twelve tasks run pipeline scripts, four of them the weather and tide
+downloads (#7). parse_legacy_311 runs once per legacy year, at most
+LEGACY_PARALLEL at a time (4 unless .env sets it), and merge_legacy_311 joins
+the years (#37). The others are placeholders: they log the issue that builds
+them and do nothing else; an ingest task becomes real once its script is in
+pipeline_steps.SCRIPTS. The last task, push_data, pushes
+the DVC-tracked data to the team remote (dvc_push.py, #19); without bucket
+access it logs `dvc push skipped: ...` and succeeds.
 
 Every task logs its run id, rows in and rows out (#36). The ingest tasks retry
 twice, about 5 to 10 minutes and then 10 to 15 minutes apart (exponential
@@ -127,8 +129,8 @@ def daily_pipeline():
         issue = steps.PLANNED[step]
         return planned.override(task_id=step, doc_md=f"Placeholder until {issue}.", **retries(step))(issue)
 
-    ingest = [
-        todo(step)
+    ingest = {
+        step: real(step) if step in steps.SCRIPTS else todo(step)
         for step in (
             "ingest_legacy_311",
             "ingest_new_311",
@@ -138,7 +140,9 @@ def daily_pipeline():
             "ingest_tides",
             "ingest_open_meteo",
         )
-    ]
+    }
+    # One after the other, legacy first: both write the 311 schedule state (#6).
+    ingest["ingest_legacy_311"] >> ingest["ingest_new_311"]
     years = check_range()
     static = real("ingest_static_layers")
     raw_checked = real("validate_raw")
@@ -153,7 +157,7 @@ def daily_pipeline():
     combined = real("combine_311")
     validated = real("validate_processed")
 
-    years >> [*ingest, static] >> raw_checked
+    years >> [*ingest.values(), static] >> raw_checked
     raw_checked >> [parse_legacy, parse_new]
     parse_legacy >> merged
     [merged, parse_new] >> combined
