@@ -56,6 +56,7 @@ SCRIPTS = {
     "parse_new_311": "new_311",
     "combine_311": "map_311",
     "spatial_join": "spatial_join",
+    "daily_counts": "daily_counts",
     "validate_raw": "validate_data",
     "validate_processed": "validate_data",
 }
@@ -68,7 +69,6 @@ PLANNED = {
     "ingest_nws_alerts": "#7",
     "ingest_tides": "#7",
     "ingest_open_meteo": "#8",
-    "daily_counts": "#15",
     "labels_and_features": "#16",
     "schema_and_statistics": "#35",
     "bias_slicing": "#32",
@@ -197,7 +197,7 @@ def configured_layers(config: Path) -> list[str]:
 
 def step_plan(step: str, days: DateRange, root: Path = REPO) -> StepPlan:
     """The table of real steps. Each path is named once and used for the arguments
-    and the checks, so a step that #6, #7, #8 or #15 adds is one more block. Every
+    and the checks, so a step that #6, #7 or #8 adds is one more block. Every
     path is explicit, because the scripts' defaults are relative to the working
     directory."""
     if step not in SCRIPTS:
@@ -237,6 +237,16 @@ def step_plan(step: str, days: DateRange, root: Path = REPO) -> StepPlan:
                   "--out", out, "--change-points", interim / "change-points.csv"],
             files=StepFiles(data_in=[legacy, new], config_in=[category_map], data_out=[out]),
             hint="Run parse_legacy_311 and parse_new_311 for the same range first.",
+        )
+    if step == "daily_counts":
+        located, out = interim / "311_located.parquet", paths.processed / "daily_counts.parquet"
+        hoods, processing = interim / "static" / "neighborhoods_by_tract20.parquet", config / "processing.csv"
+        end = ["--end", days.end] if days.end else []
+        return StepPlan(
+            args=["--located", located, "--neighborhoods", hoods, "--config", processing,
+                  "--start", days.start, *end, "--out", out],
+            files=StepFiles(data_in=[located], config_in=[hoods, processing], data_out=[out]),
+            hint="Run spatial_join for the same range first.",
         )
     if step == "validate_raw":
         # #17. Only rows in are counted: the step writes a JSON of check results, not data.
