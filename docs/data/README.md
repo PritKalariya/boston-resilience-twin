@@ -75,11 +75,11 @@ Set c from 2024-01-21 to early December 2024 has no rain or snowfall, only preci
 
 In sets a and b, rain plus showers plus snowfall as water (cm times 10 / 7) adds up to precipitation in every year. ECMWF moves shower rain out of `rain` into `showers` during 2025, so `precipitation`, or rain plus showers, is the value that means the same in every year. NOAA's PRCP, used in training, is total precipitation.
 
-Each set folder also has `_manifest.json` (download time, last hour stored, grid point, hours with data per value) and `_runs.jsonl` (one line per run).
+Each set also has `_manifest.json` (download time, start date, last hour stored, grid point, hours with data per value, whether the last day is complete) and `_runs.jsonl` (one line per run) under `Data-Pipeline/data/state/open_meteo/<set>/`, so the raw folder holds only the year files.
 
 ## open-meteo.csv
 
-Written by `open_meteo.py`, one row per stored file. The data card (#43) can take these rows as they are.
+Written by `open_meteo.py`, one row per stored file. The data card (#43) can take these rows as they are. It is written only after a run with no failure and only when it changes; with `--only`, the other sets keep their rows.
 
 | column | meaning |
 |---|---|

@@ -1,6 +1,10 @@
 import csv
 import io
 import json
+import logging
+import re
+import shutil
+import urllib.error
 import urllib.parse
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -99,15 +103,43 @@ def weather_sets(tmp_path):
 
 
 def run(tmp_path, client, now=NOW, **kwargs):
-    return run_download(weather_sets(tmp_path), tmp_path / "raw", client, now=now, **kwargs)
+    return run_download(weather_sets(tmp_path), tmp_path / "raw", client, state_root=tmp_path / "state", now=now, **kwargs)
 
 
 def year_files(root):
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*.json")) if not p.name.startswith("_")}
 
 
+def files_in(folder):
+    """Every file under folder with its bytes and modification time."""
+    return {p.relative_to(folder).as_posix(): (p.read_bytes(), p.stat().st_mtime_ns) for p in sorted(folder.rglob("*")) if p.is_file()}
+
+
 def manifest(tmp_path, name):
-    return json.loads((tmp_path / "raw" / name / "_manifest.json").read_text())
+    return json.loads((tmp_path / "state" / name / "_manifest.json").read_text())
+
+
+def rows_of(path):
+    with open(path, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def main_args(tmp_path, *extra):
+    config = write_config(tmp_path, HISTORY_ROW, FORECAST_ROW)
+    return ["--config", str(config), "--raw-dir", str(tmp_path / "raw"), "--state-dir", str(tmp_path / "state"),
+            "--attribution", str(tmp_path / "open-meteo.csv"), *extra]
+
+
+def use(monkeypatch, client, now=NOW):
+    """Run main() with this client and this clock."""
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now if tz else now.replace(tzinfo=None)
+
+    monkeypatch.setattr(open_meteo, "OpenMeteoClient", lambda pause: client)
+    monkeypatch.setattr(open_meteo, "datetime", Clock)
 
 
 def answer(end=date(2025, 1, 2), **changes):
@@ -355,8 +387,9 @@ def test_first_run_stores_every_year_byte_for_byte(tmp_path):
     assert history["last_hour"] == "2026-10-16T23:00"  # the last full day ERA5 has
     assert history["files"]["2024.json"]["first_hour"] == "2024-11-01T00:00"
 
-    runs = (tmp_path / "raw" / "first_hours_ecmwf_ifs" / "_runs.jsonl").read_text().splitlines()
+    runs = (tmp_path / "state" / "first_hours_ecmwf_ifs" / "_runs.jsonl").read_text().splitlines()
     assert [f["action"] for f in json.loads(runs[0])["files"]] == ["downloaded"] * 3
+    assert all(re.fullmatch(r"\d{4}\.json", p.name) for p in (tmp_path / "raw").rglob("*") if p.is_file())
 
 
 def test_rerun_on_the_same_day_downloads_nothing(tmp_path):
@@ -418,7 +451,7 @@ def test_network_error_keeps_the_stored_files(tmp_path):
 def test_dry_run_writes_nothing(tmp_path):
     client = FakeOpenMeteo()
     result = run(tmp_path, client, dry_run=True)
-    assert not (tmp_path / "raw").exists()
+    assert not (tmp_path / "raw").exists() and not (tmp_path / "state").exists()
     assert {f["action"] for s in result["sets"] for f in s["files"]} == {"would_download"}
     assert len(client.urls) == 1  # only the ERA5 end check
 
@@ -432,10 +465,10 @@ def test_changed_settings_need_a_new_name_or_force(tmp_path):
     client = FakeOpenMeteo()
     run(tmp_path, client, only=["history_era5"])
     moved = read_config(write_config(tmp_path, HISTORY_ROW.replace("42.36057", "42.5")), today=NOW.date())
-    result = run_download(moved, tmp_path / "raw", client, now=NOW)
+    result = run_download(moved, tmp_path / "raw", client, state_root=tmp_path / "state", now=NOW)
     assert result["failed"] == ["history_era5"]
     assert "other settings" in result["sets"][0]["reason"]
-    result = run_download(moved, tmp_path / "raw", client, now=NOW, force=True)
+    result = run_download(moved, tmp_path / "raw", client, state_root=tmp_path / "state", now=NOW, force=True)
     assert result["failed"] == []
     assert manifest(tmp_path, "history_era5")["settings"]["latitude"] == 42.5
 
@@ -443,7 +476,7 @@ def test_changed_settings_need_a_new_name_or_force(tmp_path):
 def test_broken_manifest_fails_the_set_and_says_how_to_fix_it(tmp_path):
     client = FakeOpenMeteo()
     run(tmp_path, client)
-    (tmp_path / "raw" / "history_era5" / "_manifest.json").write_text("{not json")
+    (tmp_path / "state" / "history_era5" / "_manifest.json").write_text("{not json")
     result = run(tmp_path, client)
     assert result["failed"] == ["history_era5"]
     assert "delete it to download the set again" in result["sets"][0]["reason"]
@@ -454,7 +487,7 @@ def test_broken_manifest_fails_the_set_and_says_how_to_fix_it(tmp_path):
 def test_attribution_rows_credit_every_file(tmp_path):
     client = FakeOpenMeteo()
     run(tmp_path, client)
-    rows = attribution_rows(weather_sets(tmp_path), tmp_path / "raw")
+    rows = attribution_rows(weather_sets(tmp_path), tmp_path / "state")
     assert [r["file"] for r in rows] == [
         "history_era5/2024.json", "history_era5/2025.json", "history_era5/2026.json",
         "first_hours_ecmwf_ifs/2024.json", "first_hours_ecmwf_ifs/2025.json", "first_hours_ecmwf_ifs/2026.json",
@@ -470,16 +503,70 @@ def test_attribution_rows_credit_every_file(tmp_path):
     assert rows[2]["credit"] == "Copernicus 2026"  # the download year goes into the Copernicus line
 
 
-def test_main_writes_the_attribution_file_and_exits_1_on_failure(tmp_path, monkeypatch):
+def test_main_exits_1_and_writes_no_attribution_after_a_failure(tmp_path, monkeypatch):
     client = FakeOpenMeteo()
     client.answer_with = b""
-    monkeypatch.setattr(open_meteo, "OpenMeteoClient", lambda pause: client)
-    out = tmp_path / "open-meteo.csv"
-    config = write_config(tmp_path, HISTORY_ROW, FORECAST_ROW)
+    use(monkeypatch, client)
     with pytest.raises(SystemExit) as stop:
-        open_meteo.main(["--config", str(config), "--raw-dir", str(tmp_path / "raw"), "--attribution", str(out)])
+        open_meteo.main(main_args(tmp_path))
     assert stop.value.code == 1
-    assert out.read_text() == ",".join(ATTRIBUTION_COLUMNS) + "\n"
+    assert not (tmp_path / "open-meteo.csv").exists()
+
+
+def test_main_writes_the_attribution_file_after_a_clean_run(tmp_path, monkeypatch, capsys):
+    use(monkeypatch, FakeOpenMeteo())
+    open_meteo.main(main_args(tmp_path))
+    rows = rows_of(tmp_path / "open-meteo.csv")
+    assert len(rows) == 6 and list(rows[0]) == ATTRIBUTION_COLUMNS
+    assert "wrote 6 rows" in capsys.readouterr().out
+
+
+def test_only_keeps_the_rows_of_the_other_sets(tmp_path, monkeypatch):
+    client = FakeOpenMeteo()
+    use(monkeypatch, client)
+    open_meteo.main(main_args(tmp_path))
+    before = rows_of(tmp_path / "open-meteo.csv")
+    # A teammate who has only set b: no history folders here at all.
+    shutil.rmtree(tmp_path / "state" / "history_era5")
+    shutil.rmtree(tmp_path / "raw" / "history_era5")
+    use(monkeypatch, client, now=NOW + timedelta(days=1))
+    open_meteo.main(main_args(tmp_path, "--only", "first_hours_ecmwf_ifs"))
+    after = rows_of(tmp_path / "open-meteo.csv")
+    assert [r["file"] for r in after] == [r["file"] for r in before]
+    assert [r for r in after if r["set"] == "history_era5"] == [r for r in before if r["set"] == "history_era5"]
+    assert next(r for r in after if r["file"] == "first_hours_ecmwf_ifs/2026.json")["last_hour"] == "2026-10-22T23:00"
+
+
+def test_a_set_with_no_stored_files_here_keeps_its_rows(tmp_path):
+    run(tmp_path, FakeOpenMeteo(), only=["first_hours_ecmwf_ifs"])
+    kept = {column: "x" for column in ATTRIBUTION_COLUMNS} | {"set": "history_era5", "file": "history_era5/2021.json"}
+    rows = attribution_rows(weather_sets(tmp_path), tmp_path / "state", existing=[kept])
+    assert rows[0] == kept
+    assert [r["set"] for r in rows[1:]] == ["first_hours_ecmwf_ifs"] * 3
+
+
+def test_a_failed_run_leaves_the_attribution_file_alone(tmp_path, monkeypatch, capsys):
+    client = FakeOpenMeteo()
+    use(monkeypatch, client)
+    open_meteo.main(main_args(tmp_path))
+    attribution = tmp_path / "open-meteo.csv"
+    written = (attribution.read_bytes(), attribution.stat().st_mtime_ns)
+    client.answer_with = b""
+    use(monkeypatch, client, now=NOW + timedelta(days=1))
+    with pytest.raises(SystemExit):
+        open_meteo.main(main_args(tmp_path))
+    assert (attribution.read_bytes(), attribution.stat().st_mtime_ns) == written
+    assert "not written: the run had failures" in capsys.readouterr().out
+
+
+def test_an_attribution_file_with_other_columns_is_not_overwritten(tmp_path, monkeypatch):
+    use(monkeypatch, FakeOpenMeteo())
+    attribution = tmp_path / "open-meteo.csv"
+    attribution.write_text("set,file\nx,y\n")
+    with pytest.raises(SystemExit) as stop:
+        open_meteo.main(main_args(tmp_path))
+    assert stop.value.code == 1
+    assert attribution.read_text() == "set,file\nx,y\n"
 
 
 # Day-before forecasts (set c)
@@ -490,7 +577,7 @@ def day_before(tmp_path):
 
 def test_day_before_set_stores_both_offsets_through_yesterday(tmp_path):
     client = FakeOpenMeteo(value_starts=SNOW_STARTS)
-    result = run_download(day_before(tmp_path), tmp_path / "raw", client, now=NOW)
+    result = run_download(day_before(tmp_path), tmp_path / "raw", client, state_root=tmp_path / "state", now=NOW)
     assert result["failed"] == []
     assert len(client.urls) == 3  # 2024, 2025 and 2026; `yesterday` needs no end check
     stored = year_files(tmp_path / "raw")
@@ -510,10 +597,10 @@ def test_day_before_set_stores_both_offsets_through_yesterday(tmp_path):
 def test_day_before_rerun_on_the_same_day_sends_no_request(tmp_path):
     client = FakeOpenMeteo(value_starts=SNOW_STARTS)
     sets = day_before(tmp_path)
-    run_download(sets, tmp_path / "raw", client, now=NOW)
+    run_download(sets, tmp_path / "raw", client, state_root=tmp_path / "state", now=NOW)
     before = year_files(tmp_path / "raw")
     client.urls.clear()
-    result = run_download(sets, tmp_path / "raw", client, now=NOW)
+    result = run_download(sets, tmp_path / "raw", client, state_root=tmp_path / "state", now=NOW)
     assert client.urls == [] and result["failed"] == []
     assert year_files(tmp_path / "raw") == before
 
@@ -541,9 +628,299 @@ def test_day_before_answer_empty_malformed_or_missing_a_value(tmp_path, broken, 
 
 def test_day_before_attribution_marks_validation_and_where_values_start(tmp_path):
     sets = day_before(tmp_path)
-    run_download(sets, tmp_path / "raw", FakeOpenMeteo(value_starts=SNOW_STARTS), now=NOW)
-    rows = attribution_rows(sets, tmp_path / "raw")
+    run_download(sets, tmp_path / "raw", FakeOpenMeteo(value_starts=SNOW_STARTS), state_root=tmp_path / "state", now=NOW)
+    rows = attribution_rows(sets, tmp_path / "state")
     assert [r["validation_test"] for r in rows] == ["yes"] * 3
     assert (rows[0]["credit"], rows[0]["credit_url"]) == ("NOAA NCEP", "https://example.org/n")
     assert "snowfall_previous_day1 (mm, 606 of 1128 hours, 2024-12-06T18:00 to 2024-12-31T23:00)" in rows[0]["values_with_data"]
     assert rows[1]["values_with_data"].startswith("temperature_2m_previous_day1 (mm); temperature_2m_previous_day2 (mm); ")
+
+
+# The last day of a `yesterday` year (review: a year is not complete just because every hour came back)
+
+FORECAST_HOST = "historical-forecast-api.open-meteo.com"
+NEW_YEAR = datetime(2026, 1, 1, 3, 0, tzinfo=timezone.utc)  # yesterday is 2025-12-31
+
+
+def first_hours(tmp_path):
+    return read_config(write_config(tmp_path, FORECAST_ROW), today=NEW_YEAR.date())
+
+
+def test_a_partial_december_31_is_fetched_again_after_new_year(tmp_path):
+    sets = first_hours(tmp_path)
+    client = FakeOpenMeteo(data_until={FORECAST_HOST: "2025-12-31T20:00"})  # 21:00 to 23:00 not out yet
+    first = run_download(sets, tmp_path / "raw", client, state_root=tmp_path / "state", now=NEW_YEAR)
+    assert first["failed"] == []
+    entry = manifest(tmp_path, "first_hours_ecmwf_ifs")["files"]["2025.json"]
+    assert (entry["final_day_complete"], entry["final_day_gaps"]) == (False, ["precipitation", "rain"])
+    assert "checked again until they are filled" in first["sets"][0]["files"][1]["reason"]
+
+    client.data_until = {}  # the rest of 31 December is out now
+    second = run_download(sets, tmp_path / "raw", client, state_root=tmp_path / "state", now=NEW_YEAR + timedelta(days=1))
+    actions = {f["file"]: f["action"] for f in second["sets"][0]["files"]}
+    assert actions == {"2024.json": "skipped", "2025.json": "updated", "2026.json": "downloaded"}
+    entry = manifest(tmp_path, "first_hours_ecmwf_ifs")["files"]["2025.json"]
+    assert (entry["final_day_complete"], entry["final_day_gaps"]) == (True, [])
+    stored = json.loads((tmp_path / "raw" / "first_hours_ecmwf_ifs" / "2025.json").read_text())["hourly"]
+    assert stored["rain"][-1] == 0.5
+    assert stored["showers"][-1] is None  # a value with no data at all stays missing and does not hold the day back
+
+    client.urls.clear()
+    run_download(sets, tmp_path / "raw", client, state_root=tmp_path / "state", now=NEW_YEAR + timedelta(days=2))
+    assert not any("start_date=2025" in u for u in client.urls)  # complete now: not fetched again
+
+
+def run_2025(tmp_path, client, days):
+    """Run set b `days` after NEW_YEAR. Returns the 2025 result, whether 2025 was asked for, and its entry."""
+    client.urls.clear()
+    result = run_download(first_hours(tmp_path), tmp_path / "raw", client, state_root=tmp_path / "state",
+                          now=NEW_YEAR + timedelta(days=days))
+    assert result["failed"] == []
+    row = next(f for f in result["sets"][0]["files"] if f["file"] == "2025.json")
+    asked = any("start_date=2025" in u for u in client.urls)
+    return row, asked, manifest(tmp_path, "first_hours_ecmwf_ifs")["files"]["2025.json"]
+
+
+def test_a_last_day_that_stays_incomplete_is_checked_every_week_after_the_retry_days(tmp_path):
+    client = FakeOpenMeteo(data_until={FORECAST_HOST: "2025-12-31T20:00"})  # 21:00 to 23:00 never come out
+    run_2025(tmp_path, client, 0)
+    path = tmp_path / "raw" / "first_hours_ecmwf_ifs" / "2025.json"
+    written = (path.read_bytes(), path.stat().st_mtime_ns)
+    row, asked, entry = run_2025(tmp_path, client, 6)  # 2026-01-07, the last day of daily retries
+    assert asked and row["action"] == "unchanged" and entry["final_day_checked"] == "2026-01-07"
+    row, asked, entry = run_2025(tmp_path, client, 7)  # from now on, a week after the last check
+    assert not asked and row["action"] == "skipped"
+    assert "still has gaps in ['precipitation', 'rain'], next check on or after 2026-01-14" in row["reason"]
+    row, asked, entry = run_2025(tmp_path, client, 13)
+    assert asked and row["action"] == "unchanged" and entry["final_day_checked"] == "2026-01-14"
+    assert (entry["final_day_complete"], entry["final_day_gaps"]) == (False, ["precipitation", "rain"])
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == written  # the same answer never rewrites the file
+
+
+def test_a_december_31_published_more_than_seven_days_late_is_picked_up(tmp_path):
+    client = FakeOpenMeteo(data_until={FORECAST_HOST: "2025-12-31T20:00"})
+    run_2025(tmp_path, client, 0)
+    row, asked, entry = run_2025(tmp_path, client, 10)  # past the daily retries: checked, still incomplete
+    assert asked and row["action"] == "unchanged" and entry["final_day_complete"] is False
+    client.data_until = {}  # Open-Meteo publishes 21:00 to 23:00 eleven days after year-end
+    row, asked, entry = run_2025(tmp_path, client, 11)  # the next check is a week after the last one
+    assert not asked and entry["final_day_complete"] is False
+    row, asked, entry = run_2025(tmp_path, client, 17)  # 2026-01-18
+    assert asked and row["action"] == "updated"
+    assert (entry["final_day_complete"], entry["final_day_gaps"]) == (True, [])
+    assert "final_day_checked" not in entry
+    stored = json.loads((tmp_path / "raw" / "first_hours_ecmwf_ifs" / "2025.json").read_text())["hourly"]
+    assert stored["rain"][-1] == 0.5
+    assert stored["showers"][-1] is None  # a value with no data at all is still not a gap
+    row, asked, _ = run_2025(tmp_path, client, 30)
+    assert not asked and row["action"] == "skipped"  # complete now: not fetched again
+
+
+def test_an_older_entry_without_the_flag_is_judged_by_its_last_hours():
+    entry = {"last_hour": "2025-12-31T23:00", "downloaded_at": "2026-01-01T03:00:00+00:00", "values": {
+        "rain": {"hours_with_data": 8757, "last": "2025-12-31T20:00"},
+        "showers": {"hours_with_data": 0, "last": None},
+    }}
+    assert not open_meteo.final_day_complete(entry)
+    assert open_meteo.next_final_day_check(entry) == date(2026, 1, 8)  # no check date yet: a week after the download
+    entry["values"]["rain"]["last"] = "2025-12-31T23:00"
+    assert open_meteo.final_day_complete(entry)
+
+
+# Folders and reruns (DVC: raw holds only the downloads; nothing unchanged is rewritten)
+
+def test_raw_holds_only_year_files_and_state_holds_the_manifests_and_run_logs(tmp_path, monkeypatch):
+    use(monkeypatch, FakeOpenMeteo())
+    open_meteo.main(main_args(tmp_path))
+    assert all(re.fullmatch(r"\d{4}\.json", name.split("/")[-1]) for name in files_in(tmp_path / "raw"))
+    assert sorted(files_in(tmp_path / "state")) == [
+        "first_hours_ecmwf_ifs/_manifest.json", "first_hours_ecmwf_ifs/_runs.jsonl",
+        "history_era5/_manifest.json", "history_era5/_runs.jsonl",
+    ]
+
+
+def test_a_rerun_with_nothing_new_rewrites_no_raw_file_and_no_attribution(tmp_path, monkeypatch, capsys):
+    use(monkeypatch, FakeOpenMeteo())
+    open_meteo.main(main_args(tmp_path))
+    raw, attribution = files_in(tmp_path / "raw"), tmp_path / "open-meteo.csv"
+    written = (attribution.read_bytes(), attribution.stat().st_mtime_ns)
+    capsys.readouterr()
+    open_meteo.main(main_args(tmp_path))
+    assert files_in(tmp_path / "raw") == raw
+    assert (attribution.read_bytes(), attribution.stat().st_mtime_ns) == written
+    assert "unchanged (6 rows)" in capsys.readouterr().out
+
+
+def test_an_answer_with_the_same_bytes_leaves_the_file_and_its_entry_alone(tmp_path):
+    client = FakeOpenMeteo()
+    run(tmp_path, client, only=["first_hours_ecmwf_ifs"])
+    before, entry = files_in(tmp_path / "raw"), manifest(tmp_path, "first_hours_ecmwf_ifs")["files"]["2026.json"]
+    result = run(tmp_path, client, only=["first_hours_ecmwf_ifs"], force=True)
+    assert {f["action"] for f in result["sets"][0]["files"]} == {"unchanged"}
+    assert files_in(tmp_path / "raw") == before
+    assert manifest(tmp_path, "first_hours_ecmwf_ifs")["files"]["2026.json"] == entry
+
+
+def test_a_manifest_left_in_the_raw_folder_is_read_in_place(tmp_path, caplog):
+    client = FakeOpenMeteo()
+    sets = weather_sets(tmp_path)
+    run_download(sets, tmp_path / "raw", client, state_root=tmp_path / "raw", now=NOW)  # the layout before the review
+    old = (tmp_path / "raw" / "first_hours_ecmwf_ifs" / "_manifest.json").read_bytes()
+    client.urls.clear()
+    with caplog.at_level(logging.WARNING, logger="open_meteo"):
+        result = run_download(sets, tmp_path / "raw", client, state_root=tmp_path / "state", now=NOW)
+    assert result["failed"] == [] and len(client.urls) == 1  # only the ERA5 end check: nothing downloaded again
+    assert (tmp_path / "raw" / "first_hours_ecmwf_ifs" / "_manifest.json").read_bytes() == old
+    assert "move it there" in caplog.text
+
+
+# Network (review: stop on HTTP 429, retry 5xx, keep the status)
+
+def http_error(code, body=b"", unreadable=False):
+    class Unreadable(io.BytesIO):
+        def read(self, *args):
+            raise ConnectionResetError("reset while reading the body")
+
+    return urllib.error.HTTPError("https://archive-api.open-meteo.com/v1/archive", code, "error", {},
+                                  Unreadable() if unreadable else io.BytesIO(body))
+
+
+def answers(monkeypatch, *outcomes):
+    """urlopen that gives these outcomes in turn: bytes for an answer, or an exception to raise."""
+    calls, queue = [], list(outcomes)
+
+    def urlopen(request, timeout=None):
+        calls.append(request.full_url)
+        outcome = queue.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return io.BytesIO(outcome)
+
+    monkeypatch.setattr(open_meteo.urllib.request, "urlopen", urlopen)
+    return calls
+
+
+def client_with_waits(sleeps):
+    return open_meteo.OpenMeteoClient(pause=0, waits=(5, 15), sleep=sleeps.append)
+
+
+URL = "https://archive-api.open-meteo.com/v1/archive?x=1"
+
+
+def test_a_server_error_is_tried_again_after_a_wait(monkeypatch):
+    calls, sleeps = answers(monkeypatch, http_error(502), http_error(503), b"{}"), []
+    assert client_with_waits(sleeps).get(URL) == b"{}"
+    assert len(calls) == 3 and [s for s in sleeps if s] == [5, 15]
+
+
+def test_a_lasting_server_error_fails_with_its_status(monkeypatch):
+    calls, sleeps = answers(monkeypatch, http_error(502), http_error(502), http_error(502)), []
+    with pytest.raises(open_meteo.ApiError, match="HTTP 502") as error:
+        client_with_waits(sleeps).get(URL)
+    assert error.value.status == 502 and len(calls) == 3
+
+
+def test_http_429_fails_at_once_without_waiting(monkeypatch):
+    calls = answers(monkeypatch, http_error(429, b'{"error": true, "reason": "Minutely API request limit exceeded"}'))
+    sleeps = []
+    with pytest.raises(open_meteo.RateLimited, match="HTTP 429: Minutely API request limit exceeded"):
+        client_with_waits(sleeps).get(URL)
+    assert len(calls) == 1 and not [s for s in sleeps if s]
+
+
+def test_the_status_is_kept_when_the_error_body_cannot_be_read(monkeypatch):
+    answers(monkeypatch, http_error(502, unreadable=True))
+    client = open_meteo.OpenMeteoClient(pause=0, waits=(), sleep=lambda seconds: None)
+    with pytest.raises(open_meteo.ApiError, match=r"HTTP 502: the error body could not be read \(ConnectionResetError\)") as error:
+        client.get(URL)
+    assert error.value.status == 502
+
+
+def test_a_client_error_is_not_tried_again(monkeypatch):
+    calls = answers(monkeypatch, http_error(400, b'{"error": true, "reason": "Cannot initialize WeatherVariable"}'))
+    with pytest.raises(open_meteo.ApiError, match="HTTP 400: Cannot initialize WeatherVariable"):
+        client_with_waits([]).get(URL)
+    assert len(calls) == 1
+
+
+class LimitAfter(FakeOpenMeteo):
+    """Answers `ok` requests, then HTTP 429 for every later one."""
+
+    def __init__(self, ok, **kwargs):
+        super().__init__(**kwargs)
+        self.ok = ok
+
+    def get(self, url):
+        if len(self.urls) >= self.ok:
+            self.urls.append(url)
+            raise open_meteo.RateLimited(429, "HTTP 429: Minutely API request limit exceeded")
+        return super().get(url)
+
+
+def test_http_429_stops_the_run(tmp_path):
+    client = LimitAfter(ok=2)  # the ERA5 end check and history 2024, then the limit
+    result = run(tmp_path, client)
+    assert len(client.urls) == 3  # no request after the 429
+    history, first = result["sets"]
+    assert [f["action"] for f in history["files"]] == ["downloaded", "failed", "not_tried"]
+    assert first["reason"].startswith("not tried: the run stopped after HTTP 429")
+    assert result["stopped"].startswith("HTTP 429") and "first_hours_ecmwf_ifs" in result["failed"]
+    assert set(manifest(tmp_path, "history_era5")["files"]) == {"2024.json"}
+
+
+# Manifest and config checks (review: malformed entries, a moved start date)
+
+def edit_manifest(tmp_path, name, change):
+    path = tmp_path / "state" / name / "_manifest.json"
+    data = json.loads(path.read_text())
+    change(data)
+    path.write_text(json.dumps(data))
+
+
+@pytest.mark.parametrize(
+    "change, message",
+    [
+        (lambda m: m["files"]["2025.json"].pop("sha256"), "entry '2025.json' lacks ['sha256']"),
+        (lambda m: m["files"]["2025.json"].update(hours="many"), "entry '2025.json' has hours 'many'"),
+        (lambda m: m["files"]["2025.json"].update(sha256="abc"), "entry '2025.json' has no valid sha256"),
+        (lambda m: m["files"]["2025.json"].update(last_hour="yesterday"), "is not a time"),
+        (lambda m: m["files"]["2025.json"].update(values=[]), "has values without hours_with_data"),
+        (lambda m: m["files"]["2025.json"].update(final_day_checked="soon"), "has final_day_checked 'soon', which is not a date"),
+        (lambda m: m["files"].update({"2025.json": "lost"}), "entry '2025.json' is not an object"),
+        (lambda m: m.update(files=[]), "'files' is not an object"),
+    ],
+)
+def test_a_malformed_manifest_fails_the_set_with_a_clear_message(tmp_path, change, message):
+    client = FakeOpenMeteo()
+    run(tmp_path, client)
+    edit_manifest(tmp_path, "first_hours_ecmwf_ifs", change)
+    result = run(tmp_path, client)
+    assert result["failed"] == ["first_hours_ecmwf_ifs"]
+    assert message in result["sets"][1]["reason"]
+
+
+def later_start(tmp_path):
+    return read_config(write_config(tmp_path, FORECAST_ROW.replace("2024-11-01", "2025-03-01")), today=NOW.date())
+
+
+def test_a_later_start_needs_force_and_force_drops_the_earlier_years(tmp_path):
+    client = FakeOpenMeteo()
+    run(tmp_path, client, only=["first_hours_ecmwf_ifs"])
+    result = run_download(later_start(tmp_path), tmp_path / "raw", client, state_root=tmp_path / "state", now=NOW)
+    assert result["failed"] == ["first_hours_ecmwf_ifs"]
+    assert "start moved from 2024-11-01 to 2025-03-01" in result["sets"][0]["reason"]
+    result = run_download(later_start(tmp_path), tmp_path / "raw", client, state_root=tmp_path / "state", now=NOW, force=True)
+    assert result["failed"] == [] and result["sets"][0]["dropped"] == ["2024.json"]
+    m = manifest(tmp_path, "first_hours_ecmwf_ifs")
+    assert sorted(m["files"]) == ["2025.json", "2026.json"] and m["start"] == "2025-03-01"
+    assert m["files"]["2025.json"]["first_hour"] == m["first_hour"] == "2025-03-01T00:00"
+    assert sorted(files_in(tmp_path / "raw")) == ["first_hours_ecmwf_ifs/2025.json", "first_hours_ecmwf_ifs/2026.json"]
+
+
+def test_a_manifest_without_a_start_uses_its_earliest_hour(tmp_path):
+    client = FakeOpenMeteo()
+    run(tmp_path, client, only=["first_hours_ecmwf_ifs"])
+    edit_manifest(tmp_path, "first_hours_ecmwf_ifs", lambda m: m.pop("start"))
+    result = run_download(later_start(tmp_path), tmp_path / "raw", client, state_root=tmp_path / "state", now=NOW)
+    assert "start moved from 2024-11-01 to 2025-03-01" in result["sets"][0]["reason"]
+    assert run(tmp_path, client, only=["first_hours_ecmwf_ifs"])["failed"] == []  # the unchanged config still runs

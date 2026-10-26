@@ -23,7 +23,7 @@ Week 2: Processing (due 2026-10-18)
 | #9 Static layers | Alekhya | 2026-10-13 | done | PR #62 merged; results below |
 | #10 Decision: lock the modeling unit | Alekhya | 2026-10-13 | done | PR #66 merged; ADR-004 proposed (team sign-off pending): neighborhood x day, 24 tract-built neighborhoods, surge in any storm group |
 | #31 Repo layout and pipeline pins | Prit | 2026-10-16 | done | PR #58 merged; ADR-017: one shared Airflow stack at the root, each component mounts its `dags/` at `/opt/airflow/dags/<component>` in snake_case; `Data-Pipeline/requirements.txt` pinned, 94 tests pass in a clean Python 3.12 venv |
-| #8 Open-Meteo history and archived forecasts | Piyush | 2026-10-13 | in review | PR #76. Set a (ERA5 history) and set b (ECMWF IFS first-hours data) from 2021-01-01; set c (GFS day-before forecasts, for validation and test) from 2024-01-21; results below |
+| #8 Open-Meteo history and archived forecasts | Piyush | 2026-10-13 | in review | PR #76. Set a (ERA5 history) and set b (ECMWF IFS first-hours data) from 2021-01-01; set c (GFS day-before forecasts, for validation and test) from 2024-01-21. Kirtan's review fixes in (2026-10-26): a `yesterday` year whose last day has gaps stays marked incomplete and is fetched again daily for 7 days, then weekly until complete; manifests and run logs moved to `data/state/open_meteo/` (old ones read in place, move in the runbook); the attribution file is written only after a run with no failure, only when it changes, and keeps the other sets' rows with `--only`; HTTP 429 stops the run and 5xx is retried; manifest entries and a later start date are checked; results below |
 
 ## Blocked
 None.
@@ -60,6 +60,8 @@ Command: `python Data-Pipeline/scripts/open_meteo.py`. Data: Open-Meteo at Bosto
 | c `day_before_ncep_gfs_global` | `ncep_gfs_global` | 2024-01-21 00:00 to 2026-10-22 23:00, the day before the download | 24,144 | 42.349503, -71.015625 (about 1.3 km) | all 6 values, 1 and 2 days ahead, in every hour, except rain and snowfall before 2024-12-06 18:00 (1 day) and 2024-12-07 18:00 (2 days) |
 
 Set c: `python Data-Pipeline/scripts/open_meteo.py --only day_before_ncep_gfs_global`, downloaded 2026-10-23 03:09 UTC in 3 requests (about 85 API calls); a rerun sent no request and skipped all 3 files. Its start came from one-day and two-week checks on 2026-10-22 (10 requests).
+
+After Kirtan's review and the year-end fix (2026-10-26): `python -m pytest Data-Pipeline/tests` gave 176 passed (82 in `test_open_meteo.py`), and `ruff check` (0.17.2, the CI rules) is clean for the #8 files. `--dry-run` on the local files (before the year-end fix) read the three old manifests in place, all 15 entries passed the new manifest checks, every finished year was skipped, and no file changed; the attribution rows rebuilt from those manifests are byte-identical to `docs/data/open-meteo.csv`. Read again with the final code (no network), all 15 entries pass the manifest checks and have a complete last day, so none is due for a weekly check.
 
 ## W1-10 results (2026-10-20)
 
