@@ -65,9 +65,10 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Six tasks run scripts: `ingest_static_layers`, `parse_legacy_311`,
-  `parse_new_311`, `combine_311`, `spatial_join` and `daily_counts`.
-- The other 12 are placeholders. Each logs the issue that builds it
+- Eight tasks run scripts: `ingest_static_layers`, `validate_raw`,
+  `parse_legacy_311`, `parse_new_311`, `combine_311`, `spatial_join`,
+  `validate_processed` and `daily_counts`.
+- The other 10 are placeholders. Each logs the issue that builds it
   (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
 - Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
   hand.
@@ -126,6 +127,62 @@ Logging and failures (#36):
 - A task that fails for good writes `ALERT <dag>.<task> failed in run <id>
   (try <n>): <error>` to its own log (`Data-Pipeline/scripts/alerts.py`).
   Slack or email delivery comes with #34.
+
+### Data validation (Great Expectations)
+
+`validate_raw` runs before parsing and `validate_processed` after the
+processing steps (#17). Both run `Data-Pipeline/scripts/validate_data.py`
+with the bounds in `Data-Pipeline/config/validation_bounds.csv`; change a
+bound there in a reviewed PR, not in the code. Usage analytics are switched
+off (`GX_ANALYTICS_ENABLED=False`).
+
+- **Raw:** each legacy yearly file in the run's range, one at a time, and the
+  new-system export: the parsers' required columns and coordinates, case ids
+  present and unique, open times that parse, no non-zero offset on
+  new-system times (`new_311.has_other_offset`, ADR-020), the median open
+  hour (catches a switch to real UTC), the row count against
+  `published_311_counts.csv` (legacy years and the new-system export), and
+  coordinates inside Boston.
+- **Processed:** `311_combined.parquet` and `311_located.parquet`: expected
+  columns, unique case ids, known `source_system`, `storm_group`, `match`,
+  `location` and `unit` values, open times from 2015-01-01 to the run date,
+  the median open hour per system, the same row count in both tables, and the
+  share of requests placed in every year.
+
+Checks are blocking or warnings. A failed blocking check fails the task, so
+nothing after it runs. A warning is printed (`WARNING <table>: <check>`) and
+kept in the JSON, and the run goes on, because the parsers already handle
+it: an optional column missing (anything in `KEEP_COLUMNS` outside the
+parsers' `REQUIRED_COLUMNS` and the coordinates; the parsers fill it with
+blanks), or a few missing or repeated case ids (the parsers drop and count
+them). More than `case_id_ok_min` (0.1%) of ids missing or repeated blocks.
+`placed_per_year_min` leaves out years with fewer than
+`placed_min_year_rows` rows, so early January does not fail on a few rows.
+
+A failed blocking check fails the task. The task log ends
+with `ValidationFailed: <n> <stage> checks failed: <table>: <check>(<column>)
+observed <value>`, and every result is in
+`Data-Pipeline/data/interim/validation/raw.json` or `processed.json` (for a
+slice, under its folder in `Data-Pipeline/data/slices/`). To check by hand:
+
+```bash
+python Data-Pipeline/scripts/validate_data.py --stage raw
+python Data-Pipeline/scripts/validate_data.py --stage processed
+```
+
+What to do when one fails:
+
+- **`expect_column_to_exist` on a header.** The city renamed or dropped a
+  required column (as a warning: an optional one). Check the published file
+  before changing any parser.
+- **`expect_column_median_to_be_between(open_hour)` or `offset_ok`.** The
+  new-system clock may have changed. Rerun `map_311.check_clock` (it runs in
+  `combine_311`) and read ADR-020 before changing `new_311.CLOCK`.
+- **`expect_table_row_count_to_be_between` on a legacy file.** The download
+  is truncated or the city revised the file. Download it again, and update
+  `published_311_counts.csv` in a PR only if the city's count changed.
+- **`placed_share` or `in_boston`.** Coordinates went missing or were swapped
+  for many rows; look at the year in the JSON before rerunning.
 
 - **`ingest_static_layers` fails with `No module named 'geopandas'`.** The
   containers run an image built before the geo packages were added (ADR-022).
@@ -192,6 +249,40 @@ environment block in `docker-compose.yaml` passes one value to all of them.
   its old mounts until its containers are recreated. After pulling a change
   to `docker-compose.yaml`, such as the ADR-017 DAG mount, run
   `docker compose down`, then `docker compose up -d --build --wait`.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every pull request and every push to
+main: check Python is 3.12, `ruff check .` (errors only, rules in
+`ruff.toml`), install `Data-Pipeline/requirements.txt`, then
+`python -m pytest Data-Pipeline/tests`. It uses no secrets, and
+`Data-Pipeline/tests/conftest.py` blocks network access in every test, so a
+test that calls a live API or Cloud Storage fails with `NetworkBlocked`.
+The job is cancelled after 10 minutes; a normal run takes 1 to 2.
+
+Run the same checks locally before pushing:
+
+```bash
+ruff check .
+python -m pytest Data-Pipeline/tests
+```
+
+**Making the check required (repo admin, once).** After the workflow has run
+once on a pull request, open Settings, Branches, the rule for `main`, tick
+"Require status checks to pass before merging", search for
+`Lint and test (Python 3.12)`, add it, and save. If the job name in
+`ci.yml` ever changes, update the required check too, or every pull request
+waits for a check that never reports.
+
+- **`NetworkBlocked: test tried to look up ...` or `... tried to connect to ...`.**
+  The test reaches the internet; a request by host name usually fails at the
+  lookup. Connections to `127.0.0.1` and `::1` are allowed. Save a small
+  response under the test's fixtures, or patch in a
+  fake (see `test_pipeline_steps.py`, which replaces `static_layers.download`),
+  instead of calling the API.
+- **Lint fails with `F401` (unused import) or `F841` (unused variable).**
+  Remove it, or run `ruff check --fix .`.
+- **`Check Python is 3.12` fails.** `.python-version` changed; ADR-013 pins 3.12.
 
 ## Surge baseline re-check (ADR-005)
 
@@ -274,6 +365,82 @@ python Data-Pipeline/scripts/daily_counts.py --start 2025-01-01 --end 2025-12-31
 ```
 
 `requests` counts every request kept under `after_switch_policy` (ADR-021); `baseline_requests` counts the ones baselines may use, which under `keep` is the same number. The run prints each step from the combined table to the counted total (unmapped, not storm-related, after_switch, each no-location reason, no date, outside the range) and stops if the counts do not add up to the total.
+
+## Versioned data (DVC)
+
+The DVC remote is `gs://boston-resilience-twin-data/dvc` (`.dvc/config`), a
+folder of its own in the data bucket, apart from the raw pulls under `raw/`.
+Every team member and `airflow-vm-sa` hold `roles/storage.objectAdmin` on the
+bucket (ADR-015), so all of them can pull and push. Storage is about $0.02
+per GB a month; noncurrent versions are deleted after 30 days (#48).
+
+DVC reads Google Application Default Credentials, not the `gcloud` login.
+On a laptop, log in once:
+
+```bash
+gcloud auth application-default login
+```
+
+On `airflow-vm` the attached service account is picked up with no login.
+
+Check the remote from the repo root:
+
+```bash
+dvc remote list     # gcs  gs://boston-resilience-twin-data/dvc  (default)
+dvc status -c       # compares the local cache with the remote; fails without access
+dvc pull            # fetch the data the current commit points to
+```
+
+Push through the helper, not bare `dvc push`, in anything automated:
+
+```bash
+python Data-Pipeline/scripts/dvc_push.py
+```
+
+It skips the push, logs one line and exits 0 when there is no access:
+`dvc push skipped: no Google credentials ...` when no credentials are found,
+or `dvc push skipped: these credentials have no access ...` when the bucket
+refuses them (a grader's own Google account), followed by DVC's own error
+line. Any other failure, such as a full disk, a network error or a push that
+runs past 30 minutes, fails the run.
+
+**In Airflow** the last task of `daily_pipeline`, `push_data`, runs the same
+helper. DVC refuses to run outside a git repository, so `docker-compose.yaml`
+mounts `.git` (read-only), `.dvc` and `.dvcignore` at `/opt/airflow/repo`.
+After pulling a change to those mounts, run `docker compose down`, then
+`docker compose up -d --build --wait`. DVC is in the Airflow image (ADR-022),
+so a change to its pins in `Data-Pipeline/requirements.txt` also needs that
+rebuild. To run only the push task:
+
+```bash
+docker compose exec airflow-scheduler airflow tasks test daily_pipeline push_data
+```
+
+Inside the containers there are no Google credentials on a laptop, so it logs
+`dvc push skipped: no Google credentials ...` and succeeds. On `airflow-vm`
+the service account is picked up. To try a real push from a laptop, pass your
+login into a one-off container:
+
+```bash
+docker compose run --rm \
+  -v ~/.config/gcloud/application_default_credentials.json:/tmp/adc.json:ro \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/adc.json \
+  airflow-scheduler airflow tasks test daily_pipeline push_data
+```
+
+- **`push_data` fails with `/opt/airflow/repo is not a git repository`.** The
+  containers were started before the DVC mounts. Run `docker compose down`,
+  then `docker compose up -d --build --wait`.
+- **`dvc pull` fails with `Anonymous caller does not have storage.objects.get`.**
+  No Application Default Credentials. Run the login above.
+- **`does not have storage.objects.get` with your email.** Your account lacks
+  bucket access. Ask the project 1 owner to check `team_members` in tfvars.
+- **`UserWarning: ... without a quota project`** or the login's warning that it
+  cannot add `boston-resilience-twin` as the quota project. Harmless: Cloud
+  Storage does not need a quota project.
+- **`dvc: command not found`, or `No module named dvc` from `dvc_push.py`.** Run
+  `pip install -r Data-Pipeline/requirements.txt` in the Python 3.12 venv. In
+  Airflow, rebuild the image (above).
 
 ## Project 1 infrastructure (Terraform)
 

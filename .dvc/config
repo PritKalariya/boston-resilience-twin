@@ -1,0 +1,5 @@
+[core]
+    remote = gcs
+    analytics = false
+['remote "gcs"']
+    url = gs://boston-resilience-twin-data/dvc
