@@ -65,10 +65,14 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Eight tasks run scripts: `ingest_static_layers`, `validate_raw`,
-  `parse_legacy_311`, `parse_new_311`, `combine_311`, `spatial_join`,
-  `validate_processed` and `daily_counts`.
-- The other 10 are placeholders. Each logs the issue that builds it
+- Twelve tasks run scripts: `ingest_static_layers`, the weather and tide
+  downloads (`ingest_noaa_logan`, `ingest_nws_forecasts`, `ingest_nws_alerts`
+  and `ingest_tides`, #7), `validate_raw`, `parse_legacy_311`,
+  `parse_new_311`, `combine_311`, `spatial_join`, `validate_processed` and
+  `daily_counts`. `parse_legacy_311` runs once per legacy year, at most 4 at
+  a time by default (`LEGACY_PARALLEL`), and `merge_legacy_311` joins the
+  years with `legacy_311.read_years`' rule for repeated case ids (#37).
+- The other 6 are placeholders. Each logs the issue that builds it
   (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
 - Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
   hand.
@@ -98,9 +102,16 @@ those days. A run fails at `check_range`
 on a start before 2015, an end before the start, or an unknown conf key.
 Each task's log, with everything its script printed, is in
 `Data-Pipeline/logs/dag_id=daily_pipeline/run_id=<run>/task_id=<task>/`.
-On a laptop (2026-10-21), a one-year slice took 40 seconds and the full
-build about 2.5 minutes. The full build peaked at 3.4 GiB in the scheduler
-container, with `map_311.py` before #68.
+On a laptop (2026-10-24, the `brt-airflow:local` image, #68 in), the full
+build took 73 s with the legacy years side by side, against 124 s one after
+another, and peaked at 2.5 GiB in the scheduler container (`docker stats`).
+The README's "Pipeline performance" section has the Gantt charts and numbers.
+To parse fewer years at once, for example 2 on the VM if #61 shows memory is
+tight, put `LEGACY_PARALLEL=2` in `.env` next to `docker-compose.yaml` and run
+`docker compose up -d --build --wait`. Without it the DAG runs 4, and
+Airflow's parallelism (4) caps any higher value. A value that is not a whole
+number of 1 or more stops the DAG from importing; `list-import-errors` shows
+why.
 
 Logging and failures (#36):
 
