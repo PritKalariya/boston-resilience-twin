@@ -8,9 +8,9 @@ Every source the project uses or plans to use: where it comes from, its license 
 |---|---|---|---|
 | [Boston 311, legacy yearly files](#boston-311-service-requests) | Target and lagged demand, 2015 to 2026 | PDDL | Parsed (`legacy_311.py`); files downloaded by hand until #6 |
 | [Boston 311, new system](#boston-311-service-requests) | Target and lagged demand from 2025-08-01 | PDDL | Parsed (`new_311.py`); export downloaded by hand until #6 |
-| [NOAA GHCN-D, Boston Logan](#noaa-ghcn-d-boston-logan) | Observed weather for training | U.S. government work | File placed by hand for `measure_311.py`; ingestion is #7 |
-| [NWS forecasts and alerts](#nws-forecasts-and-alerts) | Live forecast weather; alerts start the event DAG | U.S. government work | Not ingested yet (#7) |
-| [NOAA tides, Boston gauge](#noaa-tides-boston-harbor-gauge) | Coastal water level and surge | U.S. government work | Not ingested yet (#7) |
+| [NOAA GHCN-D, Boston Logan](#noaa-ghcn-d-boston-logan) | Observed weather for training | U.S. government work | Downloaded daily (`noaa_logan.py`, `ingest_noaa_logan`, #7) to `raw/weather/noaa_logan/` |
+| [NWS forecasts and alerts](#nws-forecasts-and-alerts) | Live forecast weather; alerts start the event DAG | U.S. government work | Snapshots each run (`nws.py`, `ingest_nws_forecasts` and `ingest_nws_alerts`, #7) to `raw/weather/` |
+| [NOAA tides, Boston gauge](#noaa-tides-boston-harbor-gauge) | Coastal water level and surge | U.S. government work | Downloaded daily (`tides.py`, `ingest_tides`, #7) to `raw/tides/` |
 | [Open-Meteo](#open-meteo) | Forecast weather for validation and test | CC BY 4.0, attribution required | In review (#8, PR #76) |
 | [City and Census geography and population](#city-geography-population-and-climate-ready-boston) | Units, fairness slices, flood context | PDDL | Loaded (`static_layers.py`, #9) |
 
@@ -22,8 +22,9 @@ ADR-003 uses a day-level feature only if its source covers every training year, 
 |---|---|---|
 | 311 legacy files | 2011 onward (2015 onward used) | Yes |
 | 311 new system | 2025-08-01 onward | No: new-system-only fields cannot be features |
-| GHCN-D Logan: rain, snow, max temperature | 1936 onward | Yes |
-| GHCN-D Logan: gusts | 1996 onward; 8 missing gust days in the training years (ADR-003) | Yes, gaps counted and reported |
+| GHCN-D Logan: rain, snow, max and min temperature, average wind | 1936 onward; every day of 2015 to 2026 present (#7 download) | Yes |
+| GHCN-D Logan: snow depth (SNWD) | None at Logan from 2015, though the station has it in older years | No: not a feature |
+| GHCN-D Logan: gusts | 1996 onward; WSF5 misses 8 days in the training years (4 in 2015, 1 in 2020, 3 in 2021; ADR-003), WSF2 none | Yes, gaps counted and reported |
 | NWS forecasts | Live only | No: live input, not a training feature |
 | NWS alerts | Live; history for 2015 to 2023 is #12 (ADR-014) | Not yet: drop the feature if #12 finds no history |
 | Tides, Boston gauge | 1921 onward | Yes |
@@ -56,9 +57,9 @@ ADR-003 uses a day-level feature only if its source covers every training year, 
 
 - **URL:** station USW00014739 (Boston Logan International Airport) in the Global Historical Climatology Network Daily, through the NOAA Climate Data Online API v2, https://www.ncei.noaa.gov/cdo-web/api/v2/ (free token; setup comes with #4, PR #77). Station data: https://www.ncei.noaa.gov/access/services/data/v1?dataset=daily-summaries&stations=USW00014739
 - **License and attribution:** U.S. government work, no restrictions. Credit NOAA National Centers for Environmental Information.
-- **Vintage:** 1936-01-01 to 2026-10-20 at the check, so about 5 days behind today. Elements used: PRCP (rain), SNOW, SNWD, TMAX, TMIN, AWND, WSF2 and WSF5 (gusts, from 1996).
+- **Vintage:** 1936-01-01 to 2026-10-20 at the check, so about 5 days behind today. Elements downloaded: PRCP (rain), SNOW, TMAX, TMIN, AWND, WSF2 and WSF5 (gusts, from 1996); SNWD is requested too but Logan reports none from 2015. Stored as returned under `raw/weather/noaa_logan/<year>.json`; a year is final 30 days after it ends.
 - **Update frequency:** daily, a few days behind; recent days can be revised.
-- **Known issues:** 8 missing gust days in the training years (ADR-003), counted and reported, not filled. Observed weather in training makes backtests upper bounds (ADR-003). Daily values follow the station's local standard-time day, not the Boston calendar day used for 311; #16 decides how to align them.
+- **Known issues:** WSF5 (peak gust) misses 8 days in the training years (4 in 2015, 1 in 2020, 3 in 2021; ADR-003), counted and reported, not filled; 2024 and 2025 miss 3 each. No snow depth from 2015. Observed weather in training makes backtests upper bounds (ADR-003). Daily values follow the station's local standard-time day, not the Boston calendar day used for 311; #16 decides how to align them.
 
 ## NWS forecasts and alerts
 
@@ -66,7 +67,7 @@ ADR-003 uses a day-level feature only if its source covers every training year, 
 - **License and attribution:** U.S. government work. Credit the National Weather Service.
 - **Vintage:** live only. Forecasts cover the next 7 days; alerts are the ones active at request time.
 - **Update frequency:** gridpoint forecasts update several times a day; alerts change as they are issued.
-- **Known issues:** every request needs an identifying `User-Agent` or it gets 403 (the team's value comes with #4, PR #77). No archive: a forecast that is not saved when it is current is gone, so ingestion (#7) stores a snapshot each run. Alert history for the training years has no source yet (#12).
+- **Known issues:** every request needs an identifying `User-Agent` or it gets 403 (the team's value comes with #4, PR #77). No archive: a forecast that is not saved when it is current is gone, so `nws.py` (#7) stores a snapshot each run, named by NWS's issue time (`updateTime`, `updated`). Alerts are requested for forecast zone MAZ015 and county MAC025 together: severe thunderstorm, tornado and flash flood warnings are coded by county and do not come back for a zone query (ADR-014). Alert history for the training years has no source yet (#12).
 
 ## NOAA tides, Boston Harbor gauge
 
@@ -74,7 +75,7 @@ ADR-003 uses a day-level feature only if its source covers every training year, 
 - **License and attribution:** U.S. government work. Credit NOAA Center for Operational Oceanographic Products and Services (CO-OPS).
 - **Vintage:** established 1921-05-03. Tidal datums on the 1983 to 2001 epoch, in feet unless metric is requested.
 - **Update frequency:** observed water level every 6 minutes, hourly heights after verification; predictions are published ahead.
-- **Known issues:** times come back in GMT, local standard time or local time with daylight saving depending on the request, so the request must name one. Recent data is preliminary until verified. Surge is observed minus predicted, so both products are needed (#7).
+- **Known issues:** times come back in GMT, local standard time or local time with daylight saving depending on the request, so the request must name one. Recent data is preliminary until verified. Surge is observed minus predicted, so `tides.py` (#7) downloads both, in metres above MLLW and GMT, in half-year files (CO-OPS refuses more than 365 days per request). Verified hourly data lags about a month (on 2026-10-26 it ended 2026-09-30).
 
 ## Open-Meteo
 
