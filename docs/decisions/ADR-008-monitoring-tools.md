@@ -24,13 +24,15 @@ Scoping listed more tools than the team could run: Grafana, Prometheus and W&B W
 
 **Evidently** (open source, run as a pipeline task on the VM) watches the data and the model:
 
-- Drift reports on weather, request mix and volume against the training reference.
-- Rolling accuracy and fairness on the graded forecasts: F1, precision, recall and the worst-group recall gap.
+- Drift reports on weather, request mix and volume against the training reference. Request mix is measured on the storm groups after `docs/data/category-map.csv`, not on raw 311 categories, so renamed, merged and split categories (ADR-020, ADR-005) do not read as drift.
+- Rolling accuracy on the graded forecasts: F1, precision and recall, with the worst-group recall gap reported next to them.
 - Its results go to the same Slack and email alerts and to the retraining trigger.
+
+**The worst-group recall gap is computed with Fairlearn**, not Evidently: `MetricFrame` over the 24 ADR-004 neighborhoods, the same code as the bias slicing in #32, run in the grading task. Evidently only reports and alerts on it, so there is one definition for the controller, the alerts and the README. Following ADR-004, the worst-group metric leaves out any neighborhood with no surges in the window (Harbor Islands, so far) and reports that it did.
 
 **Not used:** Grafana, Prometheus, W&B Weave, and MLflow as a model registry (Vertex AI Model Registry is the only registry, ADR-006). MLflow stays for experiment tracking and agent traces, which the spec counts as tracking, not a third monitoring tool.
 
-Alert thresholds are not set here. The spec sets them after week 1 of the live run.
+Alert thresholds are not set here. The spec sets them after week 1 of the live run. That covers when monitoring alerts, not the fairness target: the worst-group recall gap's threshold is frozen before Model Development (spec, metrics table) and is not reopened by the alert thresholds.
 
 ## Alternatives considered
 | Option | Cost | Effort | Failure behavior |
@@ -44,7 +46,8 @@ Alert thresholds are not set here. The spec sets them after week 1 of the live r
 ## Consequences
 
 - Service alerts live outside the VM, so a dead VM still pages someone.
-- Cloud Run metrics belong to project 2. To see both projects in one place, project 1's Cloud Monitoring metrics scope includes project 2; the monitoring issue sets that up through Terraform.
+- Cloud Run metrics belong to project 2. To see both projects in one place, project 1's Cloud Monitoring metrics scope includes project 2; the monitoring issue sets that up through Terraform. Linking needs permissions in both projects, so both owners take part: Prit (project 1) and Kirtan (project 2), per ADR-009.
+- The 311 migration is an expected drift source (spec, drift story), not an alarm. Besides measuring request mix on storm groups, the drift reference window is chosen with the switch dates in `docs/data/change-points.csv` in mind, so the retraining trigger does not fire on reclassification alone.
 - Evidently joins the Airflow image (ADR-022) through `Data-Pipeline/requirements.txt` when the first report task lands, pinned like every other package.
 - The Slack webhook and email credentials live in Secret Manager (ADR-015). Their writers are decided before the slots are added, as ADR-019 asks.
 - Failed pipeline checks and tasks reach Slack and email through #34; drift and grading alerts use the same notifier, so there is one alert path to test.
