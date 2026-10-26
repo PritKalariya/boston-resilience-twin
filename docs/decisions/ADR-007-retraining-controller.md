@@ -17,10 +17,11 @@ Three facts shape the decision:
 
 ## Decision
 
-- **From day one of the live run, the drift-threshold rule triggers retraining.** It watches drift in weather, request mix and volume (Evidently), rolling 7- and 30-day F1, precision and recall on provisional and final grades, and the 30-day worst-group recall gap. The threshold values are not set here; alert thresholds are an open decision (CLAUDE.md).
+- **From day one of the live run, the drift-threshold rule triggers retraining.** It watches drift in weather, request mix and volume (Evidently), rolling 7- and 30-day F1, precision and recall on provisional and final grades, and the 30-day worst-group recall gap. Its starting thresholds are its own, separate from the monitoring alert thresholds that ADR-008 leaves to week 1 of the live run: the drift-threshold retraining work (Nov 9 to 15) sets them before Nov 16 from replays of the tuning years, and they can be tuned with the alert thresholds later. This ADR sets no values.
 - **A safety rule always retrains** past hard accuracy or fairness limits, whatever the rule or the controller decides.
 - **Promotion is unchanged:** a retrained model replaces the current one only if it beats it, with automatic rollback.
-- **The contextual bandit** decides when and how to retrain, trained on replayed history. It replaces the rule through CI/CD only if it beats the rule on replayed history, on accuracy, the fairness gap and compute. It is compared with never retraining, a weekly retrain and the drift-threshold rule, and the result is reported either way.
+- **The contextual bandit** decides when and how to retrain, trained on replayed history. It is compared with never retraining, a weekly retrain and the drift-threshold rule, and the result is reported either way. It replaces the rule through CI/CD only if it beats the rule on the test window: no worse on surge-class F1 and on the 30-day worst-group recall gap, better on at least one of the two, and no more retraining compute (VM time) than the weekly retrain. This test is fixed here, before any replay runs.
+- **Held-out history.** The bandit and the rule's starting thresholds are tuned on replays of 2016 to 2024, the training and validation years; 2015 supplies baseline history only (ADR-003). The comparison runs on the test window, 2025 to mid-2026, which nothing is tuned on (ADR-003). Validation and test replays use archived forecasts (#8), as the models do; training-year replays use observed weather, so their scores are upper bounds.
 - **Q-learning is stretch work.**
 
 ## Alternatives considered
@@ -35,9 +36,9 @@ Three facts shape the decision:
 
 ## Consequences
 
-- The rule and its trigger metrics must exist before Nov 16. They are built in the Nov 9 to 15 milestone (drift-threshold retraining), with the monitoring alerts.
-- The replay comparison becomes the bandit's promotion test in CI/CD: same history, same promotion rule, scored on accuracy, fairness gap and compute against never, weekly and the rule.
-- The replay environment is built Oct 26 to Nov 1. It extends the replay in `Data-Pipeline/scripts/live_baselines.py` (ADR-005), which already labels history day by day the way the live job would.
+- The rule and its trigger metrics must exist before Nov 16. They are built in the Nov 9 to 15 milestone (drift-threshold retraining), with the monitoring alerts, and that work also sets the rule's starting thresholds from replays of 2016 to 2024.
+- The replay comparison on the test window becomes the bandit's promotion test in CI/CD: the same days and the same promotion rule for every option, judged by the test in the Decision against never, weekly and the drift-threshold rule.
+- The replay environment is built Oct 26 to Nov 1. It labels each neighborhood-day with #16's label code (the frozen surge rule on ADR-005's `seasonal_baseline`), using only the days before it as ADR-005 does, so the frozen rule has one implementation. `Data-Pipeline/scripts/live_baselines.py` stays a citywide analysis of baseline methods, with surge flags for analysis only, and is not the replay's base.
 - The result is reported in the final docs and at the Expo whether or not the bandit wins.
 - Flooding in the training label cannot be confirmed live (ADR-004, #16). Until #16 decides, a precision drop on flooding forecasts could trip the rule on a label artifact, so trigger metrics are read on the groups that live grading can confirm.
 
