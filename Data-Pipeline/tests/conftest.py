@@ -17,10 +17,12 @@ LOOPBACK = {"127.0.0.1", "::1"}
 # Tests use fixture files and fakes only, never a live API or Cloud Storage
 # (#21). Local Unix sockets and loopback stay allowed: on Windows, which has no
 # AF_UNIX, socket.socketpair() and asyncio (gcsfs, used by DVC) connect over
-# 127.0.0.1.
+# 127.0.0.1, and a test may serve a stub on it (urllib looks the address up
+# first, so the loopback addresses pass the lookup too).
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
     real_connect = socket.socket.connect
+    real_lookup = socket.getaddrinfo
 
     def guarded_connect(sock, address):
         if sock.family == getattr(socket, "AF_UNIX", None):
@@ -30,6 +32,8 @@ def no_network(monkeypatch):
         raise NetworkBlocked(f"test tried to connect to {address!r}; use a fixture file or a fake instead")
 
     def blocked_lookup(host, *args, **kwargs):
+        if host in LOOPBACK:
+            return real_lookup(host, *args, **kwargs)
         raise NetworkBlocked(f"test tried to look up {host!r}; use a fixture file or a fake instead")
 
     monkeypatch.setattr(socket.socket, "connect", guarded_connect)
