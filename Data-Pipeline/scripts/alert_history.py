@@ -8,9 +8,12 @@ once #18 adds the stage). IEM files an alert under the year it starts, so from
 31 December that starts on 1 January is only there (ADR-014). A year is final
 once it was pulled FINAL_AFTER_DAYS after it ended, since alerts that start
 late in December are still updated in January (the 2015 file holds updates
-from 2016-01-05); until then every download pulls it again. _downloads.json
-records when each year was pulled; --refresh pulls every year. A pull without
-IEM's columns (an error page) never replaces a stored year.
+from 2016-01-05); until then every download pulls it again, and --refresh
+pulls every year. When each year was pulled is kept in _downloads.json under
+--state-dir (Data-Pipeline/data/state/nws_alerts/), not in the raw folder, as
+#7 and #8 keep their manifests: a pull that brings the same bytes leaves the
+stored file as it was, so a run with nothing new changes nothing in raw/. A
+pull without IEM's columns (an error page) never replaces a stored year.
 
 Prepare: keeps the rows of Boston's forecast zone MAZ015 and county MAC025,
 one row per area and first bulletin, with what is known when an alert is first
@@ -108,16 +111,17 @@ def years_to_pull(first_year: int, today: date) -> list[int]:
     return list(range(first_year, last + 1))
 
 
-def load_downloads(raw_dir: Path) -> dict:
+def load_downloads(state_dir: Path) -> dict:
     """When each year was pulled: {"2015": {"downloaded_at": ISO time in UTC, "rows": n}}."""
-    path = raw_dir / DOWNLOADS
+    path = state_dir / DOWNLOADS
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
 
 
-def save_downloads(raw_dir: Path, downloads: dict) -> None:
-    staging = raw_dir / f"{DOWNLOADS}.part"
+def save_downloads(state_dir: Path, downloads: dict) -> None:
+    state_dir.mkdir(parents=True, exist_ok=True)
+    staging = state_dir / f"{DOWNLOADS}.part"
     staging.write_text(json.dumps(downloads, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    staging.replace(raw_dir / DOWNLOADS)
+    staging.replace(state_dir / DOWNLOADS)
 
 
 def is_final(downloads: dict, raw_dir: Path, year: int) -> bool:
@@ -143,16 +147,19 @@ def check_raw(path: Path) -> int:
     return len(df)
 
 
-def download_years(raw_dir: Path, years: list[int], now: datetime, refresh: bool = False, fetch=download) -> list[dict]:
+def download_years(raw_dir: Path, years: list[int], now: datetime, refresh: bool = False, fetch=download, *,
+                   state_dir: Path) -> list[dict]:
     """Pull every year that is not final and, with refresh, every year; now is the run's time.
 
     Each pull lands next to its target first and replaces it only after
-    check_raw passes, so a failed or wrong pull keeps the year already stored.
-    A next year with no alerts yet may come back empty: the pull is recorded
-    and no file is kept. Any other empty answer is an error.
+    check_raw passes and only when its bytes changed, so a failed or wrong pull
+    keeps the year already stored and an unchanged one leaves it untouched. A
+    next year with no alerts yet may come back empty: the pull is recorded and
+    no file is kept. Any other empty answer is an error. The pull times go to
+    state_dir.
     """
     raw_dir.mkdir(parents=True, exist_ok=True)
-    downloads = load_downloads(raw_dir)
+    downloads = load_downloads(state_dir)
     this_year = now.astimezone(ZoneInfo(BOSTON)).year
     pulled = now.astimezone(timezone.utc).isoformat(timespec="seconds")
     report = []
@@ -172,11 +179,16 @@ def download_years(raw_dir: Path, years: list[int], now: datetime, refresh: bool
             raise
         if no_alerts_yet:
             staging.unlink()
+            action = "no alerts yet"
+        elif path.is_file() and path.read_bytes() == staging.read_bytes():
+            staging.unlink()
+            action = "unchanged"
         else:
+            action = "updated" if path.exists() else "downloaded"
             staging.replace(path)
         downloads[str(year)] = {"downloaded_at": pulled, "rows": rows}
-        save_downloads(raw_dir, downloads)
-        report.append({"year": year, "action": "no alerts yet" if no_alerts_yet else "downloaded", "rows": rows})
+        save_downloads(state_dir, downloads)
+        report.append({"year": year, "action": action, "rows": rows})
     return report
 
 
@@ -410,19 +422,20 @@ def newest_snapshot(path: Path) -> Path:
     return max(snapshots, key=lambda p: p.name)
 
 
-def pull_time(raw_dir: Path, years: list[int]) -> pd.Timestamp:
+def pull_time(state_dir: Path, raw_dir: Path, years: list[int]) -> pd.Timestamp:
     """When the pull was made: the oldest download among the years that can still change."""
-    downloads = load_downloads(raw_dir)
+    downloads = load_downloads(state_dir)
     open_years = [year for year in years if not is_final(downloads, raw_dir, year)] or list(years)
     unrecorded = [year for year in open_years if str(year) not in downloads]
     if unrecorded:
-        raise FreshnessError(f"{raw_dir / DOWNLOADS} has no pull time for {unrecorded}; run with --download")
+        raise FreshnessError(f"{state_dir / DOWNLOADS} has no pull time for {unrecorded}; run with --download")
     return min(pd.Timestamp(downloads[str(year)]["downloaded_at"]) for year in open_years).tz_convert("UTC")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw-dir", default="Data-Pipeline/data/raw/nws_alerts")
+    parser.add_argument("--state-dir", default="Data-Pipeline/data/state/nws_alerts", help="_downloads.json")
     parser.add_argument("--map", default="docs/data/alert-map.csv")
     parser.add_argument("--out", default="Data-Pipeline/data/interim/nws_alerts.parquet")
     parser.add_argument("--first-year", type=int, default=FIRST_YEAR)
@@ -439,16 +452,17 @@ def main() -> None:
     now = datetime.now(timezone.utc)
     today = date.fromisoformat(args.today) if args.today else now.astimezone(ZoneInfo(BOSTON)).date()
     years = list(range(args.first_year, args.last_year + 1)) if args.last_year else years_to_pull(args.first_year, today)
-    raw_dir = Path(args.raw_dir)
+    raw_dir, state_dir = Path(args.raw_dir), Path(args.state_dir)
     if args.download or args.refresh:
-        print(markdown(pd.DataFrame(download_years(raw_dir, years, now, refresh=args.refresh))))
+        print(markdown(pd.DataFrame(download_years(raw_dir, years, now, refresh=args.refresh, state_dir=state_dir))))
     raw = read_raw(raw_dir, years, optional={year for year in years if year > today.year})
     alerts, report = prepare(raw, load_alert_map(args.map))
     if args.check_nws:
         cutoff_local = load_settings(args.settings)["forecast_cutoff_local"]
         cutoff = cutoff_utc(pd.DatetimeIndex([pd.Timestamp(today) + pd.Timedelta(days=1)]), cutoff_local)[0]
         snapshot = newest_snapshot(Path(args.check_nws))
-        fresh = check_freshness(raw, json.loads(snapshot.read_text(encoding="utf-8")), cutoff, pull_time(raw_dir, years))
+        fresh = check_freshness(raw, json.loads(snapshot.read_text(encoding="utf-8")), cutoff,
+                                pull_time(state_dir, raw_dir, years))
         print(f"freshness: the {fresh['messages']} Boston NWS message(s) in {snapshot.name} sent before {cutoff} are "
               f"all in the pull; IEM's newest update is {fresh['lag_at_most_minutes']} minutes older than the pull, "
               "the most IEM can have lagged")

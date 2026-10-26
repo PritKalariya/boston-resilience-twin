@@ -630,3 +630,58 @@ def test_16_versioned_inputs_exist_in_the_repo():
         for flag in ("--rules", "--settings"):
             if flag in values:
                 assert Path(values[flag]).is_file(), values[flag]
+
+
+def test_alert_history_keeps_its_pull_record_in_the_state_folder(tmp_path):
+    values = flag_values(script_args("ingest_alert_history", SLICE, tmp_path))
+    assert Path(values["--state-dir"]) == tmp_path / "Data-Pipeline" / "data" / "state" / "nws_alerts"
+
+
+def test_feature_table_reads_the_weather_and_tide_folders(tmp_path):
+    # #16: Logan's observations and the tide predictions (#7) and the GFS day-before forecasts (#8), from
+    # the shared raw folders the ingest tasks fill, whatever the run's range.
+    raw = run_paths(SLICE, tmp_path).raw
+    folders = {"--noaa-dir": raw / "weather" / "noaa_logan",
+               "--forecast-dir": raw / "open_meteo" / "day_before_ncep_gfs_global",
+               "--tides-dir": raw / "tides" / "predicted"}
+    values = flag_values(script_args("feature_table", SLICE, tmp_path))
+    assert {flag: Path(values[flag]) for flag in folders} == folders
+    assert set(folders.values()) <= set(steps.step_files("feature_table", SLICE, tmp_path).config_in)
+
+
+def test_a_missing_weather_download_stops_the_feature_table_before_it_runs(tmp_path, monkeypatch):
+    monkeypatch.setattr(steps, "run_script", lambda *a: pytest.fail("the script must not run"))
+    plan = steps.step_plan("feature_table", SLICE, tmp_path)
+    for path in plan.files.data_in + plan.files.config_in:  # every input but Logan's folder
+        if "noaa_logan" in path.parts:
+            continue
+        if path.suffix:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x")
+        else:
+            path.mkdir(parents=True, exist_ok=True)
+    with pytest.raises(steps.InputError, match=r"feature_table cannot start: missing [^,;]*noaa_logan\. Run daily_counts"):
+        steps.run_step("feature_table", SLICE, tmp_path, run_id="no-weather")
+
+
+def test_open_meteo_is_a_real_step_that_keeps_its_state_and_attribution_under_data(tmp_path):
+    assert "ingest_open_meteo" in steps.SCRIPTS and "ingest_open_meteo" not in steps.PLANNED
+    assert "ingest_open_meteo" in steps.NETWORK
+    plan = steps.step_plan("ingest_open_meteo", SLICE, tmp_path)
+    data = tmp_path / "Data-Pipeline" / "data"
+    values = flag_values([str(arg) for arg in plan.args])
+    assert Path(values["--config"]) == tmp_path / "Data-Pipeline" / "config" / "open_meteo.csv"
+    assert Path(values["--raw-dir"]) == data / "raw" / "open_meteo"
+    assert Path(values["--state-dir"]) == data / "state" / "open_meteo"
+    assert Path(values["--attribution"]).is_relative_to(data / "state")  # docs/data is read-only in the containers
+    assert plan.files.data_out == [] and plan.env == ()  # raw history is never cleared; no key is needed
+
+
+def test_open_meteo_step_flags_are_the_scripts_own(capsys):
+    import open_meteo
+
+    with pytest.raises(SystemExit):
+        open_meteo.main(["--help"])
+    usage = capsys.readouterr().out
+    flags = [arg for arg in script_args("ingest_open_meteo", SLICE) if arg.startswith("--")]
+    assert flags and all(flag in usage for flag in flags)

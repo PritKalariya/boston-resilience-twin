@@ -1,6 +1,17 @@
-# Feature table (#16): design notes and pending work
+# Feature table (#16): design, evidence and remaining work
 
-**State on 2026-10-26: work in progress.** The labels, the feature table, the ADR-014 A+ alert rule and the weather and tide code are in `Data-Pipeline/scripts/` and pass their unit tests. The weather and tide code has not read a real #7 or #8 file yet, the `daily_pipeline` task does not pass it the weather and tide folders, the evening run is not scheduled, and no end-to-end build on real data has run since the A+ change. Current state: `docs/status.md`. Commands: CLAUDE.md and the runbook ("Surge labels and features (#16)").
+**State on 2026-10-26.** #7 and #8 are merged.
+- **Built and wired.** The labels, the ADR-014 A+ alerts and the weather and tide features are built. `daily_pipeline` runs all of them: `feature_table` reads the NOAA Logan, GFS day-before and tide folders, and `ingest_open_meteo` is a real task.
+- **Checked against real data:**
+  - #7's and #8's own download code, through integration tests;
+  - the stored GFS files;
+  - one real half-year of tide predictions;
+  - a limited build on this machine's data.
+- **Not done:**
+  - a build with real NOAA Logan files (they need `NOAA_CDO_TOKEN`, and none are on this machine);
+  - the evening run (#39), listed separately below.
+
+Current numbers: `docs/status.md` (#16 row, W2-4 results). Commands: CLAUDE.md and the runbook ("Surge labels and features (#16)").
 
 ## Columns
 
@@ -10,7 +21,7 @@
 - `no`: in the table but not a model input (row keys, information columns, and features that fail the live rule);
 - `excluded`: deliberately not built, with the reason.
 
-A test (`test_feature_catalog_matches_the_full_table`) checks that the catalog and the full table match both ways and that no `yes` column fails a rule.
+Two tests (`test_feature_catalog_matches_the_full_table`, `test_the_feature_table_joins_every_source_by_unit_and_date`) check that the catalog and the full table match both ways and that no `yes` column fails a rule.
 
 | group | columns | source | model |
 |---|---|---|---|
@@ -35,122 +46,86 @@ Every feature for day D uses only what is known at the cutoff, 18:00 Boston time
   - it was not cancelled or upgraded before that same cutoff.
 - A cancellation or upgrade counts only when IEM records status `CAN` or `UPG` with `utc_expire` equal to `utc_updated`. Every other row keeps its first-announced end.
 - A cancellation at or after the cutoff changes nothing. Extensions and shortened ends are not used.
-- One VTEC event (type, number, year) counts once, even when it covers Boston's zone and county with different first bulletins.
-- History and the evening run use the same functions.
+- One VTEC event counts once, even when it covers Boston's zone and county with different first bulletins.
+- From 15 December the next year's file is pulled too. A year is final once it was pulled at least 14 days after it ended.
+- When each year was pulled is kept in `Data-Pipeline/data/state/nws_alerts/_downloads.json`, so `raw/` holds the IEM files and nothing else, as with #7 and #8.
+- The evening freshness check (`--check-nws`) stops before writing if a Boston message sent before the cutoff is not in the pull yet.
 
-**Downloads and New Year.**
-- IEM files an alert under the year it starts, so from 15 December the next year is pulled too.
-- A year is final once it was pulled at least 14 days after it ended. In the 2015 file, updates arrived up to 2016-01-05.
-- `_downloads.json` in `raw/nws_alerts/` records each pull.
-
-**Freshness (evening run).** `--check-nws` compares the IEM pull with #7's NWS active-alerts snapshot and stops before writing when:
-- the pull or the snapshot is older than the cutoff;
-- a Boston message sent before the cutoff is not in the pull;
-- a cancellation or upgrade sent before the cutoff does not show yet.
-
-It logs an upper bound on IEM's lag.
-
-**Weather (`weather_features.py` and `open_meteo_forecast.py`, ADR-003).**
+**Weather (`weather_features.py`, `open_meteo_forecast.py`, ADR-003).**
 - **Which source each row uses:**
-  - days up to 2023-12-31 (a constant tied to ADR-003's training years) take Logan's observed GHCN-D values for day D, so backtests on them are upper bounds;
-  - every later day takes the GFS day-before forecasts and never an observation of its own day, and `wx_source` records which.
+  - days up to 2023-12-31 take Logan's observed GHCN-D values for day D, so backtests on them are upper bounds;
+  - every later day takes the GFS day-before forecasts, never an observation of its own day, and `wx_source` records which.
 - **Which forecast each hour uses:**
-  - a `previous_dayN` value for hour h counts as available at h minus N days plus `forecast_issue_margin_hours` (6), and day D uses it only if that is no later than D's cutoff;
-  - `previous_day1` is preferred and `previous_day2` is the fallback;
-  - in Boston time, `previous_day1` covers D's hours up to about noon;
-  - `wx_known_by_utc` is the latest availability time used, and the leakage check compares it with the cutoff.
+  - a `previous_dayN` value for hour h comes from the newest GFS run (00, 06, 12 or 18 UTC) that started at least N days before h;
+  - it counts as available 7 hours after that run started (`forecast_issue_margin_hours`);
+  - so `previous_day1` comes from runs up to 12 UTC on D-1, which give D's hours up to 17:00 UTC, and `previous_day2` covers the rest;
+  - `wx_known_by_utc` is the latest availability time behind the values a row keeps, and the leakage check compares it with the cutoff.
+
+  The evidence is in "How the sources were checked".
 - **How hours become days:**
-  - forecast hours are combined over Logan's station day, midnight to midnight Eastern standard time, the day GHCN-D values follow;
-  - precipitation and snowfall are summed, with snowfall converted from cm to mm;
-  - temperature and gusts take the highest or lowest value;
-  - a day with a missing hour is blank.
-- **Gaps:**
-  - GFS forecasts start on 2024-01-21, and snowfall on 2024-12-06; those gaps stay blank;
-  - a GHCN-D value with a quality flag is blank;
-  - nothing is filled with an observation.
-- **Lags:** `obs_*_lag<k>` take Logan's day D-k (`observed_weather_lag_days`, 2). Snow depth is excluded, since Logan reports none from 2015.
+  - forecast hours are combined over Logan's station day, midnight to midnight EST, the day GHCN-D values follow;
+  - a day with a missing hour is blank;
+  - GFS has no values before 2024-01-21 and no snowfall before 2024-12-07 (first full day), and those gaps stay blank.
+- **Lags:** `obs_*_lag2` take Logan's day D-2 and stay out of the model.
 
-**Tides (`tide_features.py`).**
-- `tide_pred_max_m` is the highest hourly predicted water level of the Boston local day (23, 24 or 25 hours with daylight saving), in metres above MLLW. It is blank unless every hour is present.
-- Observed water levels are never read: they come after the cutoff, and verified data lags about a month.
+**Tides (`tide_features.py`).** `tide_pred_max_m` is the highest hourly prediction of the Boston local day (23, 24 or 25 hours with daylight saving), blank unless every hour is present. Observed water levels are never read.
 
-## Interfaces to recheck when #7 and #8 merge
+## How the sources were checked
 
-The readers were written against the open pull requests and fail with a clear error when a file does not match:
-- **#8 (PR #76 at `c6e2423`, `FORMAT_CHECKED` in `open_meteo_forecast.py`).** Recheck:
-  - the set folder `day_before_ncep_gfs_global`;
-  - the time format `YYYY-MM-DDTHH:MM`, in UTC (`utc_offset_seconds` 0);
-  - the columns `<value>_previous_day1` and `_previous_day2`;
-  - the unit strings `mm`, `cm`, `°C` and `m/s`;
-  - `FIRST_YEAR` 2024.
+- **Formats.** `test_feature_sources.py` runs #7's `noaa_logan.refresh` and `tides.refresh` and #8's `open_meteo.run_download` on fake answers in each source's format, reads the files they write with #16's readers, and builds the full table from them. If #7 or #8 change what they store, these tests fail.
+- **Real files on this machine (2026-10-26).**
+  - The stored GFS set-c files for 2024 to 2026 match the reader: UTC, `YYYY-MM-DDTHH:MM`, and the unit strings `mm`, `cm`, `°C` and `m/s`.
+  - One real CO-OPS half-year of predictions (2025-H1, 4,344 hours), fetched through #7's own request, check and store code into a scratch folder, reads correctly: 23 hours on 2025-03-09, daily highs of 2.87 to 3.02 m.
+  - Not here: NOAA Logan files (they need `NOAA_CDO_TOKEN`) and NWS alert snapshots.
+- **When a GFS value became available.**
+  - Open-Meteo's Previous Runs documentation defines `_previous_day1` as "the value that was predicted 24 hours before valid time".
+  - Matching the stored values with single GFS runs (Open-Meteo's Single Runs API, 2026-04-15 and 2026-10-20, 48 of 48 hours) showed runs 24 to 29 hours before the hour for `previous_day1` and 48 to 53 for `previous_day2`.
+  - Open-Meteo's run metadata showed the 2026-10-26 12 UTC run available 5.6 hours (GFS 0.25 degree) and 6.0 hours (0.13 degree) after it started, and Open-Meteo advises waiting 10 more minutes.
+  - On the stored files, the newest run behind every day from 2024-01-21 to 2026-10-21 is 12 UTC on D-1, at least 3 hours before the cutoff.
+  - Limits: the delay was measured on one run, and single runs are kept only from 2026-04-02. The 12 UTC run would have to be more than 10 hours late to miss the cutoff, and any margin from 6 to 10 hours gives the same choice of runs.
 
-  Only the `<year>.json` files in the set's raw folder are read.
-- **#7 (PR #90 at `8ab8492`, `NOAA_CHECKED` and `TIDES_CHECKED`).** Recheck:
-  - GHCN-D results with `date`, `datatype`, `station`, `attributes` and `value` in metric units;
-  - tide predictions with `t` (GMT) and `v` (metres above MLLW) in `<year>-H1` and `<year>-H2` files;
-  - NWS snapshots named by NWS's `updated` time.
+## Acceptance criteria
 
-Every past year (or half-year) must be stored, and a missing one stops the run. Only the current one may be absent.
-
-## Pending work
-
-| step | waits on | what |
+| criterion | state | evidence |
 |---|---|---|
-| Weather and tides in the `feature_table` task | #7 and #8 merged | pass `--noaa-dir`, `--forecast-dir` and `--tides-dir` and add the three folders to `config_in` in `pipeline_steps.step_plan` (block below). Before #7 and #8 land, the folders do not exist and `check_inputs` would stop the task |
-| Evening run | #39 | run `ingest_nws_alerts` before `ingest_alert_history --check-nws`, both after 18:00 (today they run side by side); a feature row for tomorrow, since `build_features` writes rows only for days in `daily_counts` |
-| Tomorrow's inputs | #7, #8 | tide predictions through at least tomorrow (#7's downloads stop at today); GFS day-before hours for tomorrow from the same Previous Runs API (#8's set c ends yesterday). Until then tomorrow's weather and tides are blank live |
-| First real-data build | the rows above | rebuild `nws_alerts.parquet` under A+ (the first `--download` pulls every year once), build the full table with weather and tides, and record the coverage per feature in `docs/status.md` |
-| ADR-014 wording | ADR owner (#12, PR #88) | ADR-014 says re-fetching the previous year in January is not needed; under A+ it is, because a cancellation in early January of an alert that started in late December is only in the previous year's file. The code re-pulls until a year is final; the text or the code changes |
-| D-2 observed lags | #7 | CDO ran about 5 days behind on 2026-10-25, so the lags cannot be filled live; a lag of 6 days or more, or a faster live source, would change their live rule |
-| DVC | #18 | track `raw/nws_alerts/_downloads.json` with the IEM files |
-| Validation | #17 | expectations for the new feature columns |
+| Grid of k 1.5 to 2 and m 3 to 5 compared with the top-10-percent rule | met | `Data-Pipeline/config/surge_rules.csv`: 9 sd rules and 2 q90 rules; `surge_labels.py --grid` on real counts (status, W2-4 results); `test_grid_has_one_row_per_rule_from_the_same_cells` |
+| Surge rate per option, overall and per slice | met | for every rule: overall, per period (train, validate, 2025 onward), per storm group, the per-neighborhood range and the neighborhoods with under 5 validation surges; per neighborhood for the chosen rule (status, W2-4 results) |
+| One recommendation, deterministic label code | met | `sd_k2_m5` chosen, provisional until the freeze ADR; labels byte-identical across three real builds; `test_same_counts_give_the_same_labels_in_any_row_order`, `test_the_same_inputs_in_any_row_order_give_the_same_table` |
+| pytest tests including empty, missing and malformed input | met | labels: empty, missing columns, malformed counts, rules and settings; features: empty counts, malformed counts, missing static, weather or tide days; alerts, weather, forecasts and tides: missing files, error pages, wrong units, formats and numbers |
+| Feature table: counts, weather (observed and as-forecast), tides, alerts and static attributes, keyed (unit, date) | met in code and tests; real data in part | joined and checked end to end from #7's and #8's own writers (`test_feature_sources.py`); real build of counts, A+ alerts and static (103,440 rows, one per unit and day); real GFS and tide files read. **Not yet:** a real build with NOAA Logan files |
+| Leakage test: every feature for D uses only data available before the cutoff (ADR-003) | met, one assumption measured | `check_no_leakage` (311 days up to D-2, cutoff before D, no observed weather of its own day after 2023, no forecast available after the cutoff) and its tests; forecast timing verified as above, the delay measured on one run |
 
-The `feature_table` block of `pipeline_steps.step_plan` after #7 and #8 merge (today it passes only counts, alerts, static attributes and settings):
+#16 is not complete until a build with real NOAA Logan files has run.
 
-```python
-        alerts, static, out = interim / "nws_alerts.parquet", interim / "static", paths.processed / "features.parquet"
-        noaa, forecasts = raw / "weather" / "noaa_logan", raw / "open_meteo" / "day_before_ncep_gfs_global"
-        tides = raw / "tides" / "predicted"
-        return StepPlan(
-            args=["--counts", counts, "--alerts", alerts, "--static-dir", static, "--settings", settings,
-                  "--noaa-dir", noaa, "--forecast-dir", forecasts, "--tides-dir", tides,
-                  "--start", days.start, *end, "--out", out],
-            files=StepFiles(data_in=[counts, alerts], config_in=[static, settings, noaa, forecasts, tides], data_out=[out]),
-            hint="Run daily_counts for the full build, ingest_alert_history, ingest_static_layers, "
-                 "ingest_noaa_logan, ingest_tides and ingest_open_meteo first.",
-        )
-```
+## Remaining work for the evening run (#39)
 
-PR #90 also changes `pipeline_steps.py`, `daily_pipeline.py` and `test_pipeline_steps.py` (the `SCRIPTS` and `PLANNED` tables, `step_plan` and a new `StepPlan.env` field). Keep both sides when they meet, then apply the block above.
+- Schedule the evening run after 18:00 Boston time. Run `ingest_nws_alerts` before `ingest_alert_history --check-nws` (today they run side by side, and the daily DAG does not pass `--check-nws`).
+- Build a feature row for tomorrow: `build_features` writes rows only for days in `daily_counts`.
+- Fetch tomorrow's inputs:
+  - the GFS day-before hours for tomorrow, from the same Previous Runs API (`open_meteo.py` stops at yesterday);
+  - tide predictions through tomorrow (`tides.py` stops at today).
 
-## Assumptions to verify
+  Until then, tomorrow's weather and tides are blank, not filled.
+- Optionally, check Open-Meteo's run metadata before the evening build, so a 12 UTC run that is very late is seen rather than assumed.
+
+## Other remaining work
+
+- A full build with real NOAA Logan files (`ingest_noaa_logan` with `NOAA_CDO_TOKEN`) and the tide history, with the coverage per feature recorded in `docs/status.md`.
+- ADR-014 is still proposed (#12, PR #88). Its January sentence needs the owner: it says re-fetching the previous year in January is not needed, but under A+ a cancellation in early January of an alert that started in late December is only in that file. The code re-pulls until the year is final.
+- The D-2 observed lags fail the live rule while CDO runs about 5 days behind (#7). A lag of 6 days or a faster live source would change that.
+- #18: version `raw/nws_alerts/` with the other raw folders; `state/` holds only run records.
+- #17: expectations for the new feature columns.
+- The rule is frozen by ADR before Model Development; `sd_k2_m5` is the recommendation, not the frozen rule.
+- Later: IEM files start in 2015, so on 2015-01-01 and 2015-01-02 an alert that started in 2014 is missing; `--first-year 2014` would add it.
+
+## Assumptions still to verify
 
 | assumption | where | how to check |
 |---|---|---|
-| A `previous_dayN` value comes from a GFS run made at least N days before the hour and published within 6 hours; Open-Meteo states no availability time | `forecast_issue_margin_hours` | Open-Meteo's Previous Runs API documentation; a wrong value only moves the noon boundary |
+| GFS runs keep arriving within about 6 hours (measured on one run) | `forecast_issue_margin_hours` | Open-Meteo's run metadata over a few weeks; below 10 hours nothing changes |
+| The `previous_dayN` run choice holds for the 2024 and 2025 archive (checked on 2026 days) | `open_meteo_forecast.py` | single runs are kept only from 2026-04-02; Open-Meteo support |
 | GHCN-D Logan days run midnight to midnight EST | #7's data card | NCEI GHCN-D documentation for USW00014739 |
-| Open-Meteo stamps precipitation, snowfall and gusts at the end of the hour they cover | `open_meteo_forecast.py` | Open-Meteo's variable documentation ("preceding hour") |
-| #8's unit strings are exactly `mm`, `cm`, `°C` and `m/s` | `VALUES` | one real set-c file; a mismatch fails loudly |
-| #7's GHCN-D values are metric (the files name no unit) | `weather_features.py` | one real file; #7 requests `units=metric` |
-| A non-blank GHCN-D quality flag (the second field of `attributes`) marks a failed check | `weather_features.py` | NCEI GHCN-D readme |
-| An IEM year stops changing 14 days after it ends | `FINAL_AFTER_DAYS` | in 2015 the longest wait from first bulletin to cancellation or upgrade was 60.6 hours |
-| IEM answers a year with no alerts with an empty body or a header only | `download_years` | both are handled; the first run after 15 December shows which |
-| An NWS message sent before the cutoff is in an IEM pull made after it | `check_freshness` | compare a few evenings of #7 snapshots with IEM pulls; the lag line logs it |
+| Real NOAA files are metric and a non-blank quality flag marks a failed check | `weather_features.py` | one real file from `ingest_noaa_logan` |
+| An IEM year stops changing 14 days after it ends | `FINAL_AFTER_DAYS` | 2015 evidence: the longest wait from first bulletin to cancellation or upgrade was 60.6 hours |
+| An NWS message sent before the cutoff is in an IEM pull made after it | `check_freshness` | a few evenings of #7 snapshots and IEM pulls; the lag line logs it |
 | CO-OPS predictions downloaded now match the ones published in each training year | tides | small differences when datums are updated |
-
-Known limits:
-- The freshness check sees only the active alerts in #7's snapshot for zone MAZ015. A county-only alert, or a cancellation that ended an alert before the snapshot, is not checked.
-- IEM files start in 2015, so on 2015-01-01 and 2015-01-02 an alert that started in 2014 is missing. Labels and 28-day lags start later.
-- Weather uses Logan's standard-time day, while 311 and tides use the Boston calendar day, one hour apart under daylight saving time.
-
-## Tests
-
-`python -m pytest Data-Pipeline/tests` covers the #16 code with fixture files shaped like IEM's, #7's and #8's, and no network:
-
-- **Alerts:** cancellations and upgrades before, at and after the cutoff; the three conditions; extensions; zone and county counted once; daylight saving changes; New Year pulls; an evening pull and a later pull giving identical features; the freshness check.
-- **Forecasts:** the first and last hours of the target day; the noon boundary in winter and summer; the margin; fallbacks; units; gaps; file checks.
-- **Weather:** the ADR-003 split; no own-day observation from 2024; lags; quality flags; missing years.
-- **Tides:** local-day boundaries; 23 and 25 hour days; missing hours; New Year; missing files.
-- **Feature table:** leakage checks for observed weather and late forecasts; missing weather and tide days; the catalog.
-
-On 2026-10-26, in the Airflow 3.3.2 image (Python 3.12.14): `ruff check .` clean, 499 tests pass. Nothing was run against real downloads or in Airflow.

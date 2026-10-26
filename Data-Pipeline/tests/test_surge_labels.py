@@ -276,7 +276,7 @@ def test_repo_settings():
         "feature_groups": ["snow_ice", "tree"],
         "feature_min_lag_days": 2,
         "forecast_cutoff_local": "18:00",
-        "forecast_issue_margin_hours": 6,
+        "forecast_issue_margin_hours": 7,
         "observed_weather_lag_days": 2,
     }
 
@@ -334,6 +334,13 @@ def test_grid_has_one_row_per_rule_from_the_same_cells():
     assert grid.loc["q90_m1", "surges"] == 3
     assert grid.loc["sd_k2_m3", "units with no train surge"] == 0
     assert {"train 2015 to 2023", "validate 2024", "2025 onward", "train in spec range"} <= set(grid.columns)
+    # Per slice, for every rule: each storm group's rate and the spread over neighborhoods.
+    assert grid.loc["sd_k2_m3", "snow_ice rate"] == "0.00%"
+    assert grid.loc["sd_k2_m3", "tree rate"] != "0.00%" and grid.loc["sd_k2_m3", "flooding rate"] != "0.00%"
+    assert grid.loc["q90_m1", "tree surges"] == grid.loc["sd_k2_m3", "tree surges"] + 1
+    lowest, highest = grid.loc["sd_k2_m3", "train rate per unit, lowest to highest"].split(" to ")
+    assert lowest == highest != "0.00%"  # one surge in each neighborhood
+    assert (grid["units with under 5 validate surges"] == 0).all()  # these counts end in 2017: no 2024 cells
 
 
 def test_unit_table_reports_coverage_and_rate():

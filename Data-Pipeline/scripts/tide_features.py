@@ -18,7 +18,8 @@ fail ADR-003's live rule and would leak.
 
 Every half-year file from FIRST_YEAR up to the current half must be stored;
 the current half may be absent (not downloaded yet), and its days stay
-missing. Written against TIDES_CHECKED; recheck before integrating.
+missing. Checked against TIDES_CHECKED: test_feature_sources.py reads what
+tides.py itself stores.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ import pandas as pd
 
 from alert_history import day_start_utc
 
-TIDES_CHECKED = "PR #90 (#7) at commit 8ab8492"
+TIDES_CHECKED = "#7 as merged (tides.py, main df56bd4)"
 FIRST_YEAR = 2015  # #7 downloads from 2015-01-01
 TIME_FORMAT = "%Y-%m-%d %H:%M"
 HOUR_NS = 3_600_000_000_000

@@ -33,8 +33,8 @@ static_no_vehicle_share,static,ACS 2019 to 2023 (#9),fixed,pass,pass,yes,fixed d
 static_flood_10pct_share,static,Climate Ready Boston 9 inch 10% (#9),fixed,pass,pass,yes,fixed descriptor (ADR-003); coastal flooding only
 static_flood_1pct_share,static,Climate Ready Boston 9 inch 1% (#9),fixed,pass,pass,yes,fixed descriptor (ADR-003); coastal flooding only
 wx_source,meta,weather_features.py,2015-01-01,n/a,n/a,no,observed for 2015 to 2023 and forecast from 2024 (ADR-003); checked by check_no_leakage
-wx_known_by_utc,meta,open_meteo_forecast.py,2024-01-01,n/a,n/a,no,when the newest forecast a row uses became available (issue margin assumed); checked against forecast_cutoff_utc
-wx_precip_mm,weather,GHCN-D PRCP (#7) to 2023; GFS precipitation_previous_day1/2 (#8) from 2024,2015-01-01,pass,depends,yes,observed in training makes backtests upper bounds (ADR-003); forecasts missing 2024-01-01 to 2024-01-20; live needs #8 to pull tomorrow's hours each evening
+wx_known_by_utc,meta,open_meteo_forecast.py,2024-01-01,n/a,n/a,no,when the newest forecast a row uses became available: its GFS run's start plus forecast_issue_margin_hours (7); checked against forecast_cutoff_utc
+wx_precip_mm,weather,GHCN-D PRCP (#7) to 2023; GFS precipitation_previous_day1/2 (#8) from 2024,2015-01-01,pass,depends,yes,observed in training makes backtests upper bounds (ADR-003); forecasts missing 2024-01-01 to 2024-01-20; live: the evening run (#39) must pull tomorrow's set c hours (open_meteo.py stops at yesterday)
 wx_snowfall_mm,weather,GHCN-D SNOW (#7) to 2023; GFS snowfall_previous_day1/2 in cm x 10 (#8) from 2024,2015-01-01,pass,depends,yes,GFS has no snowfall before 2024-12-06 so validation 2024 has forecast snowfall only in December; kept missing; live as wx_precip_mm
 wx_tmax_c,weather,GHCN-D TMAX (#7) to 2023; GFS temperature_2m_previous_day1/2 highest (#8) from 2024,2015-01-01,pass,depends,yes,forecasts missing 2024-01-01 to 2024-01-20; live as wx_precip_mm
 wx_tmin_c,weather,GHCN-D TMIN (#7) to 2023; GFS temperature_2m_previous_day1/2 lowest (#8) from 2024,2015-01-01,pass,depends,yes,as wx_tmax_c
@@ -47,7 +47,7 @@ obs_awnd_ms_lag2,weather_lag,GHCN-D AWND (#7),2015-01-03,pass,fail,no,as obs_prc
 obs_wsf5_ms_lag2,weather_lag,GHCN-D WSF5 (#7),2015-01-03,pass,fail,no,as obs_prcp_mm_lag2; WSF5 misses 8 training days
 obs_snwd_mm_lag2,weather_lag,GHCN-D SNWD (#7),none,fail,fail,excluded,Logan reports no snow depth from 2015 (#7 data card)
 tide_pred_hours,meta,tide_features.py,2015-01-01,n/a,n/a,no,hourly predictions in the Boston day (23 24 or 25); tide_pred_max_m is missing unless all are there
-tide_pred_max_m,tides,CO-OPS 8443970 predictions (#7),2015-01-01,pass,depends,yes,astronomical so known in advance; live needs #7 to download predictions through tomorrow (today it stops at today)
+tide_pred_max_m,tides,CO-OPS 8443970 predictions (#7),2015-01-01,pass,depends,yes,astronomical so known in advance; live: the evening run (#39) needs predictions through tomorrow (tides.py stops at today)
 tide_observed_max_m,tides,CO-OPS 8443970 hourly_height (#7),2015-01-01,pass,fail,excluded,the day's own levels come after the cutoff and verified data lags about a month (#7 data card)
 nws_gridpoint_forecast,weather,NWS API gridpoint forecasts (#7),none,fail,pass,excluded,live only; NWS keeps no archive (#7 data card)
 open_meteo_era5_or_first_hours,weather,Open-Meteo sets history_era5 and first_hours_ecmwf_ifs (#8),2021-01-01,fail,fail,excluded,not for validation or test (#8); close to observed weather; the training years use GHCN-D

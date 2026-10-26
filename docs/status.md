@@ -22,7 +22,7 @@ Week 2: Processing (due 2026-10-18)
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | done | PR #52 merged; results below; new-system clock in ADR-020; flooding gap needs a team call |
 | #14 Spatial joins | Alekhya (built by Srikar for the Oct 25 deadline) | 2026-10-16 | in review | every request tagged with tract and unit by coordinates; 99.14% placed; results below |
 | #15 Daily counts | Srikar | 2026-10-17 | in review | neighborhood x day x storm group, zero-filled; 215,701 requests counted and reconciled; results below |
-| #16 Surge labels and feature table | Piyush | 2026-10-18 | in progress | Rule recommended: sd, k 2, m 5 (train 3.44%; provisional until the freeze); 94,560 of 103,440 cells labeled. Feature table: 311 lags, NWS alerts from the IEM archive under ADR-014 Option A+ (18:00 cutoff; an alert cancelled or upgraded before it is left out), calendar, static attributes. Three `daily_pipeline` tasks. Weather (ADR-003) and tide code is in and unit-tested but not yet run on real files or wired into the DAG (waits on #7 and #8, Blocked); every column is in `Data-Pipeline/config/feature_catalog.csv`; pending steps in `docs/feature-table.md`; results below |
+| #16 Surge labels and feature table | Piyush | 2026-10-18 | in progress | Rule recommended: sd, k 2, m 5 (train 3.44%; provisional until the freeze); 94,560 of 103,440 cells labeled. Feature table: 311 lags, NWS alerts from the IEM archive under ADR-014 Option A+ (18:00 cutoff; an alert cancelled or upgraded before it is left out), calendar, static attributes. Three `daily_pipeline` tasks; with #7 and #8 merged, `feature_table` reads the NOAA Logan, GFS day-before and tide folders and `ingest_open_meteo` is a real task. Weather (observed to 2023, as-forecast from 2024, ADR-003) and predicted tides are joined by (unit, date) and tested from #7's and #8's own download code; real GFS and tide files read on 2026-10-26. Not yet: a build with real NOAA Logan files (Blocked) and the evening run (#39). Every column is in `Data-Pipeline/config/feature_catalog.csv`; acceptance criteria and remaining work in `docs/feature-table.md`; results below |
 | #20 Airflow on the VM | Prit | 2026-10-18 | done | PR #59 merged. Airflow stack on airflow-vm (LocalExecutor, Postgres 16; ADR-016); UI by SSH tunnel only; VM stopped. Runbook: "Airflow on the VM". After #58 merges, run the update step in the runbook on the VM |
 | #23 Write ADRs 001, 009, 010, 011, 012 | Prit | 2026-10-18 | done | PR #65 merged; ADRs in docs/decisions/ |
 | #29 Verify teammate IAM | Prit | 2026-10-15 | done | PR #51 merged. All 6 members granted, plus `roles/iam.serviceAccountUser` on `airflow-vm-sa` (scoped) for OS Login. Teammate start and SSH verified; VM stopped. |
@@ -43,7 +43,7 @@ Week 2: Processing (due 2026-10-18)
 | #43 Data card for all sources | Kirtan | 2026-10-23 | done | PR #87 merged. `docs/data/data-card.md`, linked from the README: each source's URL, license and attribution, vintage, update frequency, known issues, and coverage of the 2015 to 2023 training years (ADR-003). Facts checked against the sources on 2026-10-25 (Analyze Boston page, NCEI and CO-OPS metadata, the NWS points API) |
 
 ## Blocked
-- #16 feature table: the weather and tide code is in and unit-tested on files shaped like #7's (NOAA Logan observed weather, Boston Harbor tide predictions) and #8's (Open-Meteo GFS day-before forecasts for validation and test, ADR-003), but it reads real files only once #7 and #8 merge, and the `feature_table` task gets the three folders after that (`docs/feature-table.md`). Until then `feature_table.py` names what is missing on every run.
+- #16 feature table: a build with real NOAA Logan observed weather is still to run. `ingest_noaa_logan` needs `NOAA_CDO_TOKEN` ("API keys in .env"), and the machine that ran the 2026-10-26 checks has no Logan files; until the folder exists, the `feature_table` task stops at once and names it. The code is wired and tested from #7's own writer (`docs/feature-table.md`).
 - #16 alert history follows ADR-014 Option A+, which is still proposed (PR #88). Merge #88 before or with #16. One sentence needs its owner: ADR-014 says re-fetching the previous year in January is not needed, but under A+ a cancellation in early January of an alert that started in late December is only in the previous year's file, so `alert_history.py` re-pulls a year until 14 days after it ends.
 
 ## Risks raised
@@ -51,8 +51,9 @@ Week 2: Processing (due 2026-10-18)
 - **Harbor Islands has no population or ACS values** in the 2025 tables, so its six population-based static attributes are blank (not filled in, ADR-003). Its flood-zone shares are set.
 - **Alert-to-storm-group calls need review** (`docs/data/alert-map.csv`): blizzard counts for snow_ice only, severe thunderstorm and tropical storm for tree and flooding, coastal flood statements for flooding. History and the evening run use the same rule (ADR-014 A+): an alert counts as first announced unless IEM records its cancellation or upgrade before the cutoff; extensions and later changes are not used.
 - **Observed weather lags cannot be filled live (#16).** CDO ran about 5 days behind on 2026-10-25 (#7's data card, PR #90), so Logan's observations of day D-2 fail ADR-003's live rule; `feature_catalog.csv` keeps them out of the model. A lag of 6 days or more (`observed_weather_lag_days`) or a faster live source would change that.
-- **Forecast snowfall is missing for most of the validation year (#16).** GFS day-before forecasts have no snowfall before 2024-12-06 (#8), so `wx_snowfall_mm` is blank in 2024 except December, and every forecast value is blank before 2024-01-21. The gaps are kept, not filled (ADR-003).
-- **Live weather and tides need tomorrow's data (#16).** #8's day-before forecasts end yesterday and #7's tide predictions end today, so the evening run needs both for tomorrow, or those features are blank live.
+- **Forecast snowfall is missing for most of the validation year (#16).** GFS day-before forecasts have no snowfall before 2024-12-06 (#8), so `wx_snowfall_mm` is blank in 2024 until its first full day, 2024-12-07, and every forecast value is blank before 2024-01-21. The gaps are kept, not filled (ADR-003).
+- **Live weather and tides need tomorrow's data (#16, #39).** #8's day-before forecasts end yesterday and #7's tide predictions end today, so the evening run needs both for tomorrow, or those features are blank live.
+- **The forecast cutoff rests on a measured GFS delay, not a guaranteed one (#16).** A GFS value counts as available 7 hours after its run starts (`forecast_issue_margin_hours`). Open-Meteo's metadata showed 5.6 to 6.0 hours for one run (2026-10-26 12 UTC), and the run behind each value matched single runs on 48 of 48 hours of 2026. So day D uses 1-day values only from runs up to 12 UTC on D-1; a 12 UTC run more than 10 hours late would miss the cutoff unseen, and runs before 2026-04-02 cannot be checked this way.
 - **The alert freshness check sees only what #7's NWS snapshot lists (#16).** The snapshot holds the active alerts for zone MAZ015, so a county-only alert, or a cancellation that ended an alert before the snapshot, is not checked (ADR-014).
 - **DVC stage files in the Airflow containers (#18).** The containers now mount `.git`, `.dvc`, `.dvcignore` and `Data-Pipeline/data`, enough for `push_data`. `Data-Pipeline/dvc.yaml` and its `dvc.lock` are not mounted, so #18 must add them before a task runs `dvc repro` or pushes stage outputs.
 - Legacy storm groups cover only 6.9% of legacy requests (210,049 of 3,037,969), against about 15% in the pre-scoping check. The groups now live in `docs/data/category-map.csv` (`storm_group` column) and may be narrower than the first run's. Worth a look before #10 locks the unit.
@@ -72,7 +73,7 @@ Week 2: Processing (due 2026-10-18)
 - **Open-Meteo's archived forecasts for 2021 to 2023 are first-hours data.** The Historical Forecast API joins the first hours of each model run, so its values are almost the real weather, not what was forecast the evening before. ADR-003 (Srikar, PR #67) uses Open-Meteo archived forecasts from 2021 for validation and test, but only day-before forecasts (Previous Runs API) are safe there. This changes what ADR-003 means by archived forecasts, and the team must confirm it. #8 keeps them as set b, labeled not for validation or test (`docs/data/README.md`).
 - **Open-Meteo's Previous Runs data does not reach January 2024, although its docs say most models start then.** ECMWF IFS, HRRR and GFS return no values for 2024-01-01 to 2024-01-07 (requests of 2026-10-21 and 22). Set c (GFS) starts 2024-01-21, its first full day of 1-day and 2-day values, so validation loses January 2024 before it: no day-before forecasts for 2024-01-01 to 2024-01-20. ECMWF has none even on 2025-01-01.
 - **Early set c has no rain or snowfall.** In GFS day-before data, precipitation, showers, temperature and gusts are complete from 2024-01-21, but rain and snowfall start 2024-12-06 18:00 for 1 day ahead (first full day 2024-12-07) and 2024-12-07 18:00 for 2 days ahead (first full day 2024-12-08). #16 must decide how to handle snow in set c before then, for example from precipitation and temperature.
-- **Boston-local days and the cutoff rule moved to #16.** #8 stores hourly UTC values only; set c holds the 1-day and 2-day forecasts side by side. Note for #16: cutoff 00:00 UTC, 6-hour publish delay; set c holds both values from 2024-01-21. A 1-day value for hour H comes from a run that started about 24 hours before H and is published about 6 hours later, so it is known at the cutoff only up to 18:00 UTC on the target day. Use the 1-day value up to 18:00 UTC and the 2-day value for the evening hours.
+- **Boston-local days and the cutoff rule moved to #16.** #8 stores hourly UTC values only; set c holds the 1-day and 2-day forecasts side by side. Note for #16: cutoff 00:00 UTC, 6-hour publish delay; set c holds both values from 2024-01-21. (#16 uses the project's 18:00 Boston cutoff and each value's own run, with a 7-hour margin, so the 1-day value covers hours up to 17:00 UTC; `docs/feature-table.md`.) A 1-day value for hour H comes from a run that started about 24 hours before H and is published about 6 hours later, so it is known at the cutoff only up to 18:00 UTC on the target day. Use the 1-day value up to 18:00 UTC and the 2-day value for the evening hours.
 - **ECMWF's `rain` changes meaning in 2025.** Until 2024 shower rain is inside `rain` and `showers` is empty; from 2025 ECMWF fills `showers` (2,232 of 8,760 hours in 2025, every hour in 2026). Rain plus showers plus snow adds up to precipitation in every year, so #16 should use `precipitation`, or rain plus showers.
 
 ## W1-8 results (2026-10-22)
@@ -213,7 +214,43 @@ sd, k 2, m 3 gives the 4.85% training rate of ADR-004. Recommendation: **sd, k 2
 
 **Feature table.** 103,440 rows, 25 features: 8 lags of snow_ice and tree (flooding is left out, ADR-003 live rule), 6 alert features (count and warning flag per storm group), 3 calendar fields and 8 static attributes. Two builds give byte-identical files. In the Airflow 3.3.2 image, `airflow tasks test daily_pipeline` ran `ingest_alert_history` (1.9 s), `surge_labels` (5.2 s) and `feature_table` (4.0 s).
 
-**A+ alerts, weather and tides (2026-10-26, tests only).** `alert_history.py` now follows ADR-014 Option A+ (an alert cancelled or upgraded before the cutoff is left out; one count per alert across zone and county; next-year pull from 15 December; a year is final once pulled 14 days after it ends; the evening freshness check), and `feature_table.py` can add weather (ADR-003) and predicted tides (`docs/feature-table.md`). The alert numbers above were measured under the first-bulletin rule, before A+, and have not been re-run; the weather and tide columns have not been built from real files yet. In the Airflow 3.3.2 image (Python 3.12.14): `ruff check .` clean and 499 tests pass, 73 of them new (A+ cancellations, upgrades, extensions, late updates, zone and county, daylight saving, New Year and freshness; forecast hours before and after the cutoff; weather, tides, leakage and missing inputs).
+**A+ alerts, weather and tides (2026-10-26).** The numbers above came before A+. Commands as in the runbook, in the Airflow 3.3.2 image (Python 3.12.14), with the repo's data mounted read-only and every output in a scratch folder:
+- `alert_history.py` without `--download`, on the IEM files of 2026-10-25;
+- `surge_labels.py --grid`, run twice;
+- `feature_table.py`.
+
+**Labels.** Byte-identical to the 2026-10-25 build and to a rebuild. The grid now gives each storm group's rate and the spread over neighborhoods for every rule (0.00% is Harbor Islands in every rule):
+
+| rule | snow_ice rate | tree rate | flooding rate | train rate per neighborhood | neighborhoods under 5 validation surges |
+|---|---|---|---|---|---|
+| sd, k 1.5, m 3 | 2.26% | 3.91% | 0.22% | 0.00% to 10.66% | 3 |
+| sd, k 1.5, m 4 | 2.14% | 3.05% | 0.09% | 0.00% to 9.70% | 3 |
+| sd, k 1.5, m 5 | 2.02% | 2.37% | 0.04% | 0.00% to 9.02% | 4 |
+| sd, k 1.75, m 3 | 2.09% | 3.43% | 0.22% | 0.00% to 9.63% | 3 |
+| sd, k 1.75, m 4 | 1.99% | 2.73% | 0.09% | 0.00% to 8.71% | 3 |
+| sd, k 1.75, m 5 | 1.89% | 2.17% | 0.04% | 0.00% to 8.06% | 4 |
+| sd, k 2, m 3 | 1.96% | 3.04% | 0.22% | 0.00% to 8.23% | 3 |
+| sd, k 2, m 4 | 1.87% | 2.45% | 0.09% | 0.00% to 7.34% | 3 |
+| **sd, k 2, m 5** | 1.78% | 1.98% | 0.04% | 0.00% to 6.82% | 4 |
+| top 10%, m 1 | 3.95% | 7.77% | 4.12% | 0.00% to 20.84% | 1 |
+| top 10%, m 3 | 3.04% | 5.05% | 0.22% | 0.00% to 14.84% | 3 |
+
+**NWS alerts under A+.** The same 1,144 Boston alerts. 584 alert rows were cancelled or upgraded with `utc_expire` equal to `utc_updated`, and no CAN or UPG row failed that check. A+ only removes alert days. Days with an alert the evening before go from 177 to 170 (snow_ice), from 239 to 178 (tree) and from 330 to 283 (flooding). Surge rate under the recommended rule on those days: snow_ice 10.6%, tree 9.4% and flooding 6.9%, against 3.2% on days with none.
+
+**Feature table** (real counts, A+ alerts and static layers):
+- 103,440 rows, one per neighborhood and day (24 x 4,310), with no repeated (unit, date);
+- `check_no_leakage` passed, the alert values are the same for every neighborhood on a day, and every column is in the catalog;
+- the weather and tide columns were not built, because no NOAA Logan or tide files were on that machine.
+
+**GFS set c as stored** (hours 2024-01-21 to 2026-10-22; 1,025 target days from 2024-01-01):
+- precipitation, temperature and gusts are missing on 20 days, 2024-01-01 to 2024-01-20;
+- snowfall is missing on 341 days (first full day 2024-12-07);
+- the newest run behind every day is 12 UTC on D-1, at least 3 hours before the cutoff;
+- daily minimum temperature is never above the maximum.
+
+**Tides.** One real half-year of predictions (2025-H1, 4,344 hours), through #7's own code into the scratch folder: 23 hours on 2025-03-09 and daily highs of 2.87 to 3.02 m.
+
+**Tests.** `ruff check .` clean and 715 tests pass. They include the DAG as Airflow parses it (22 tasks, none repeated) and the #7 and #8 downloads feeding the #16 readers (`test_feature_sources.py`).
 
 ## W2-3 results (2026-10-24)
 

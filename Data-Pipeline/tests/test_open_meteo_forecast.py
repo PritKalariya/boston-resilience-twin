@@ -43,7 +43,7 @@ def gusts(overrides):
     return by_value(wind_gusts_10m=lambda n, hour: overrides.get(hour, (5.0, 5.0))[n - 1])
 
 
-def one_day(tmp_path, day, value, margin=6):
+def one_day(tmp_path, day, value, margin=7):
     folder = write(tmp_path / "set_c", int(day[:4]), answer(f"{day[:7]}-01", f"{day[:7]}-28", value))
     days = pd.DatetimeIndex([day])
     hourly = read_hourly(folder, years_for(days), TODAY)
@@ -59,27 +59,36 @@ def test_the_first_hour_of_the_day_takes_the_newer_one_day_forecast(tmp_path):
 
 
 def test_the_last_hour_of_the_day_never_takes_a_forecast_made_after_the_cutoff(tmp_path):
-    # The one-day forecast for 2025-01-16 05:00 UTC was made about 2025-01-15 05:00 UTC, after the cutoff.
+    # The one-day forecast for 2025-01-16 05:00 UTC comes from the 00 UTC run of 2025-01-15, after the cutoff.
     last = pd.Timestamp("2025-01-16 05:00")
     day = one_day(tmp_path, WINTER, gusts({last: (50.0, 10.0)}))
     assert day["gust_max_ms"] == 10
-    assert day["known_by_utc"] == pd.Timestamp("2025-01-14 23:00", tz="UTC")  # the newest use is at the cutoff
+    # The newest value used comes from the 12 UTC run of the 14th, counted as available 7 hours later.
+    assert day["known_by_utc"] == pd.Timestamp("2025-01-14 19:00", tz="UTC")
 
 
 @pytest.mark.parametrize("day, hour, expected", [
-    (WINTER, "2025-01-15 17:00", 30),  # 17:00 - 1 day + 6 h = 2025-01-14 23:00 UTC, the cutoff itself
-    (WINTER, "2025-01-15 18:00", 5),
-    (SUMMER, "2025-07-15 16:00", 30),  # with daylight saving the cutoff is 22:00 UTC
-    (SUMMER, "2025-07-15 17:00", 5),
+    (WINTER, "2025-01-15 17:00", 30),  # from the 12 UTC run of the 14th: available 19:00 UTC, cutoff 23:00 UTC
+    (WINTER, "2025-01-15 18:00", 5),   # from the 18 UTC run: available 01:00 UTC on the 15th, after the cutoff
+    (SUMMER, "2025-07-15 17:00", 30),  # with daylight saving the cutoff is 22:00 UTC, still after 19:00
+    (SUMMER, "2025-07-15 18:00", 5),
 ])
-def test_the_one_day_forecast_is_used_up_to_noon_boston_time(tmp_path, day, hour, expected):
+def test_the_one_day_forecast_comes_only_from_runs_published_before_the_cutoff(tmp_path, day, hour, expected):
     assert one_day(tmp_path, day, gusts({pd.Timestamp(hour): (30.0, 1.0)}))["gust_max_ms"] == expected
 
 
+def test_availability_follows_the_run_not_the_hour(tmp_path):
+    # 06:00 to 11:00 UTC come from the 06 UTC run and 12:00 to 17:00 from the 12 UTC run of the day before.
+    summer = one_day(tmp_path, SUMMER, gusts({}))
+    assert summer["known_by_utc"] == pd.Timestamp("2025-07-14 19:00", tz="UTC")
+    assert summer["known_by_utc"] <= pd.Timestamp("2025-07-14 22:00", tz="UTC")
+
+
 def test_the_issue_margin_moves_the_boundary(tmp_path):
+    # The 18 UTC run of the 14th counts in winter only with a margin of 5 hours or less (23:00 UTC cutoff).
     evening = {pd.Timestamp("2025-01-15 20:00"): (30.0, 1.0)}
-    assert one_day(tmp_path, WINTER, gusts(evening), margin=6)["gust_max_ms"] == 5
-    assert one_day(tmp_path, WINTER, gusts(evening), margin=0)["gust_max_ms"] == 30
+    assert one_day(tmp_path, WINTER, gusts(evening), margin=7)["gust_max_ms"] == 5
+    assert one_day(tmp_path, WINTER, gusts(evening), margin=5)["gust_max_ms"] == 30
 
 
 def test_an_hour_on_the_day_boundary_belongs_to_the_day_it_ends(tmp_path):
@@ -112,8 +121,9 @@ def test_daily_values_and_units(tmp_path):
 def test_a_day_past_the_stored_hours_is_missing(tmp_path):
     folder = write(tmp_path / "set_c", 2025, answer("2025-01-01", "2025-01-15"))
     days = pd.DatetimeIndex(["2025-01-15"])  # its last hours fall on 2025-01-16, not stored
-    day = daily_forecasts(read_hourly(folder, [2025], TODAY), days, cutoff_utc(days, "18:00"), 6).iloc[0]
+    day = daily_forecasts(read_hourly(folder, [2025], TODAY), days, cutoff_utc(days, "18:00"), 7).iloc[0]
     assert day[list(VALUES)].isna().all()
+    assert pd.isna(day["known_by_utc"])  # the hours it has are behind no value the row keeps
 
 
 # Reading #8's files

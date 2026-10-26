@@ -34,8 +34,8 @@ absent (not downloaded yet), and its days stay missing.
 #7 stores Data-Pipeline/data/raw/weather/noaa_logan/<year>.json exactly as CDO
 returned it: {"metadata": ..., "results": [{"date", "datatype", "station",
 "attributes", "value"}]}, in metric units (#7 asks for units=metric; the file
-names no unit). Recheck OBSERVED and _read_noaa_year against #7's final version
-(written against NOAA_CHECKED).
+names no unit). Checked against NOAA_CHECKED: test_feature_sources.py reads
+what noaa_logan.py itself stores.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ import pandas as pd
 import open_meteo_forecast as om
 from alert_history import cutoff_utc
 
-NOAA_CHECKED = "PR #90 (#7) at commit 8ab8492"
+NOAA_CHECKED = "#7 as merged (noaa_logan.py, main df56bd4)"
 STATION = "GHCND:USW00014739"  # Boston Logan (#7)
 FIRST_YEAR = 2015  # #7 downloads Logan from 2015-01-01
 OBSERVED_UNTIL = pd.Timestamp("2023-12-31")  # ADR-003: the last training day; later rows take forecasts

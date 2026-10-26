@@ -1,25 +1,32 @@
 """Read #8's archived GFS day-before forecasts for the weather features (#16, ADR-003).
 
-Isolated on purpose: #8 (PR #76) is still changing, so everything this module
-knows about #8's files is in this one place, written against FORMAT_CHECKED.
-Recheck SET, TIME_FORMAT and VALUES against #8's final version before
-integrating.
+Everything this module knows about #8's files is in this one place, checked
+against FORMAT_CHECKED: SET, TIME_FORMAT and VALUES.
 
 #8 stores the Previous Runs API answer for Boston Logan byte for byte in
 Data-Pipeline/data/raw/open_meteo/day_before_ncep_gfs_global/<year>.json:
 hourly values in UTC (utc_offset_seconds 0), times as YYYY-MM-DDTHH:MM, wind in
-m/s, and each value twice: <value>_previous_day1, what GFS predicted about one
-day before the hour, and <value>_previous_day2, about two days before.
-Precipitation, snowfall and gusts are stamped at the end of the hour they
-cover; temperature is the value at the stamp.
+m/s, and each value twice: <value>_previous_day1, what GFS predicted one day
+before the hour, and <value>_previous_day2, two days before. Precipitation,
+snowfall and gusts are stamped at the end of the hour they cover; temperature
+is the value at the stamp.
 
-Known before the cutoff: Open-Meteo says how many days before the hour a value
-was predicted, not when it became available, and GFS runs every 6 hours. So a
-previous_dayN value for hour h counts as available at h - N days + the issue
-margin (forecast_issue_margin_hours, 6), and day D uses it only if that is no
-later than D's cutoff, 18:00 Boston time on D-1. With 6 hours, previous_day1
-covers D's hours up to about noon and previous_day2 the rest; a missing
-previous_day1 value falls back to previous_day2, never to an observation.
+Known before the cutoff. A previous_dayN value for hour h comes from the newest
+GFS run (00, 06, 12 or 18 UTC) that started at least N days before h. Open-Meteo
+documents it as the value "predicted 24 hours before valid time", and matching
+the stored values with single GFS runs (Open-Meteo's Single Runs API, for
+2026-04-15 and 2026-10-20, 48 of 48 hours) found runs 24 to 29 hours before h
+for previous_day1 and 48 to 53 hours for previous_day2. A value counts as
+available at its run's start plus forecast_issue_margin_hours (7): Open-Meteo's
+run metadata showed the GFS 0.25 and 0.13 degree data of the 2026-10-26 12 UTC
+run available 5.6 and 6.0 hours after it started, and Open-Meteo advises
+waiting 10 more minutes. Day D uses a value only if it was available by D's
+cutoff, 18:00 Boston time on D-1. So previous_day1 comes from runs up to
+12 UTC on D-1, which give D's hours up to 17:00 UTC, previous_day2 covers the
+rest, and a missing previous_day1 value falls back to previous_day2, never to
+an observation. The delay was measured on one run, and runs before 2026-04-02
+cannot be checked this way; the 12 UTC run would have to be more than 10 hours
+late before it missed the cutoff.
 
 Daily values (daily_forecasts): Boston Logan's station day, midnight to
 midnight Eastern standard time (05:00 to 05:00 UTC all year), the day GHCN-D's
@@ -41,7 +48,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-FORMAT_CHECKED = "PR #76 (#8) at commit c6e2423"
+FORMAT_CHECKED = "#8 as merged (PR #76, main df56bd4) and the stored set c files for 2024 to 2026"
 SET = "day_before_ncep_gfs_global"  # #8's set c, the only one for validation and test
 FIRST_YEAR = 2024  # set c starts on 2024-01-21
 TIME_FORMAT = "%Y-%m-%dT%H:%M"
@@ -58,6 +65,7 @@ STATION_DAY_START = pd.Timedelta(hours=5)  # midnight EST in UTC: Logan's GHCN-D
 HOURS_PER_DAY = 24
 HOUR_NS = 3_600_000_000_000
 DAY_NS = 24 * HOUR_NS
+RUN_NS = 6 * HOUR_NS  # GFS starts a run every 6 hours, at 00, 06, 12 and 18 UTC
 NOT_USED = np.iinfo(np.int64).min  # pandas' missing time (NaT) as an integer
 
 
@@ -142,7 +150,8 @@ def daily_forecasts(hourly: pd.DataFrame, days, cutoffs, margin_hours: float) ->
 
     days are dates (midnight, no time zone); cutoffs are their forecast cutoffs
     in UTC, in the same order. known_by_utc is the latest availability time of
-    any value used, so a check can prove that none came after the cutoff.
+    any hour behind a daily value the row keeps (none for a day left missing),
+    so a check can prove that none came after the cutoff.
     """
     days = pd.DatetimeIndex(days)
     cut = np.repeat(pd.DatetimeIndex(cutoffs).tz_convert("UTC").as_unit("ns").asi8, HOURS_PER_DAY)
@@ -152,18 +161,19 @@ def daily_forecasts(hourly: pd.DataFrame, days, cutoffs, margin_hours: float) ->
         pd.DatetimeIndex(stamps.astype("datetime64[ns]")).tz_localize("UTC"))
     margin = int(round(margin_hours * HOUR_NS))
     out = pd.DataFrame({"date": days})
-    known = np.full(stamps.shape, NOT_USED)
+    latest = np.full(len(days), NOT_USED)
     for feature, (name, _, factor, how) in VALUES.items():
         value, used_at = np.full(stamps.shape, np.nan), np.full(stamps.shape, NOT_USED)
         for n in DAYS_BEFORE:
-            available = stamps - n * DAY_NS + margin
+            run = (stamps - n * DAY_NS) // RUN_NS * RUN_NS  # the GFS run the value comes from
+            available = run + margin
             candidate = lookup[f"{name}_previous_day{n}"].to_numpy(dtype="float64") * factor
             take = np.isnan(value) & (available <= cut) & ~np.isnan(candidate)
             value[take], used_at[take] = candidate[take], available[take]
         per_day = value.reshape(len(days), HOURS_PER_DAY)  # a missing hour makes the day missing
         combined = getattr(per_day, how)(axis=1)
         out[feature] = combined.round(2) if how == "sum" else combined
-        known = np.maximum(known, used_at)
-    latest = known.reshape(len(days), HOURS_PER_DAY).max(axis=1)
+        newest = used_at.reshape(len(days), HOURS_PER_DAY).max(axis=1)
+        latest = np.maximum(latest, np.where(np.isnan(combined), NOT_USED, newest))  # only values the row keeps
     out["known_by_utc"] = pd.DatetimeIndex(latest.astype("datetime64[ns]")).tz_localize("UTC")
     return out

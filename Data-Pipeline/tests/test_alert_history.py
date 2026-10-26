@@ -73,9 +73,10 @@ def write_csv(path, *rows):
     raw(*rows).to_csv(path, index=False)
 
 
-def record_pulls(raw_dir, pulls):
+def record_pulls(state_dir, pulls):
     """_downloads.json as if each year had been pulled at the given time."""
-    (raw_dir / DOWNLOADS).write_text(json.dumps({str(year): {"downloaded_at": at, "rows": 1} for year, at in pulls.items()}))
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / DOWNLOADS).write_text(json.dumps({str(year): {"downloaded_at": at, "rows": 1} for year, at in pulls.items()}))
 
 
 # Prepare
@@ -209,32 +210,47 @@ def csv_text(*rows):
 
 
 def test_a_year_is_kept_once_pulled_two_weeks_after_it_ended(tmp_path):
-    raw_dir = tmp_path / "nws_alerts"
+    raw_dir, state_dir = tmp_path / "nws_alerts", tmp_path / "state"
     raw_dir.mkdir()
     for year in (2015, 2016, 2025):
         write_csv(raw_path(raw_dir, year), row(year=year))
     # 2015 pulled 14 days after it ended; 2025 a minute short of that; 2016 has no record.
-    record_pulls(raw_dir, {2015: "2016-01-15T00:00:00+00:00", 2025: "2026-01-14T23:59:00+00:00"})
+    record_pulls(state_dir, {2015: "2016-01-15T00:00:00+00:00", 2025: "2026-01-14T23:59:00+00:00"})
     calls = []
     bodies = {year: csv_text(row(year=year)) for year in (2015, 2016, 2025, 2026)}
     years = [2015, 2016, 2025, 2026]
-    report = download_years(raw_dir, years, NOW, fetch=fake_fetch(bodies, calls))
-    assert [r["action"] for r in report] == ["kept", "downloaded", "downloaded", "downloaded"]
+    report = download_years(raw_dir, years, NOW, fetch=fake_fetch(bodies, calls), state_dir=state_dir)
+    assert [r["action"] for r in report] == ["kept", "unchanged", "unchanged", "downloaded"]
     assert calls == [year_url(2016), year_url(2025), year_url(2026)]
-    assert json.loads((raw_dir / DOWNLOADS).read_text())["2025"]["downloaded_at"] == "2026-10-26T22:30:00+00:00"
+    assert json.loads((state_dir / DOWNLOADS).read_text())["2025"]["downloaded_at"] == "2026-10-26T22:30:00+00:00"
     calls.clear()
-    again = download_years(raw_dir, years, NOW, fetch=fake_fetch(bodies, calls))
-    assert [r["action"] for r in again] == ["kept", "kept", "kept", "downloaded"]
+    again = download_years(raw_dir, years, NOW, fetch=fake_fetch(bodies, calls), state_dir=state_dir)
+    assert [r["action"] for r in again] == ["kept", "kept", "kept", "unchanged"]
     assert calls == [year_url(2026)]
+    # The pull record lives in the state folder, so raw/ holds the year files and nothing else (#7, #8).
+    assert sorted(p.name for p in raw_dir.iterdir()) == [f"box_{year}.csv" for year in years]
+
+
+def test_an_unchanged_pull_leaves_the_stored_year_as_it_was(tmp_path):
+    raw_dir, state_dir = tmp_path / "nws_alerts", tmp_path / "state"
+    raw_dir.mkdir()
+    write_csv(raw_path(raw_dir, 2026), row(year=2026))
+    before = raw_path(raw_dir, 2026).stat().st_mtime_ns
+    same = download_years(raw_dir, [2026], NOW, fetch=fake_fetch({2026: csv_text(row(year=2026))}, []), state_dir=state_dir)
+    assert same[0]["action"] == "unchanged" and raw_path(raw_dir, 2026).stat().st_mtime_ns == before
+    assert json.loads((state_dir / DOWNLOADS).read_text())["2026"]["downloaded_at"] == "2026-10-26T22:30:00+00:00"
+    newer = csv_text(row(year=2026), row(eventid=2, year=2026))
+    changed = download_years(raw_dir, [2026], NOW, fetch=fake_fetch({2026: newer}, []), state_dir=state_dir)
+    assert changed[0]["action"] == "updated" and raw_path(raw_dir, 2026).read_text() == newer
 
 
 def test_refresh_fetches_every_year(tmp_path):
-    raw_dir = tmp_path / "nws_alerts"
+    raw_dir, state_dir = tmp_path / "nws_alerts", tmp_path / "state"
     raw_dir.mkdir()
     write_csv(raw_path(raw_dir, 2015), row())
-    record_pulls(raw_dir, {2015: "2020-01-01T00:00:00+00:00"})
+    record_pulls(state_dir, {2015: "2020-01-01T00:00:00+00:00"})
     calls = []
-    download_years(raw_dir, [2015], NOW, refresh=True, fetch=fake_fetch({2015: csv_text(row())}, calls))
+    download_years(raw_dir, [2015], NOW, refresh=True, fetch=fake_fetch({2015: csv_text(row())}, calls), state_dir=state_dir)
     assert calls == [year_url(2015)]
 
 
@@ -245,7 +261,7 @@ def test_an_error_page_never_replaces_a_good_year(tmp_path):
     good = raw_path(raw_dir, 2026).read_text()
     fetch = fake_fetch({2026: "<html><body>Service unavailable</body></html>"}, [])
     with pytest.raises(ValueError, match="missing IEM columns") as failure:
-        download_years(raw_dir, [2026], NOW, fetch=fetch)
+        download_years(raw_dir, [2026], NOW, fetch=fetch, state_dir=tmp_path / "state")
     assert "unchanged" in " ".join(failure.value.__notes__)
     assert raw_path(raw_dir, 2026).read_text() == good
     assert not list(raw_dir.glob("*.download"))
@@ -297,12 +313,14 @@ def test_in_january_the_previous_year_is_pulled_again_for_its_late_cancellations
     alert = dict(eventid=50, first="2026-12-30 15:00", first_end="202701041200", year=2026)
     write_csv(raw_path(raw_dir, 2026), running(**alert))
     write_csv(raw_path(raw_dir, 2027))  # no 2027 alerts yet: IEM's header only
-    record_pulls(raw_dir, {2026: "2026-12-31T23:30:00+00:00", 2027: "2026-12-31T23:30:00+00:00"})
+    state_dir = tmp_path / "state"
+    record_pulls(state_dir, {2026: "2026-12-31T23:30:00+00:00", 2027: "2026-12-31T23:30:00+00:00"})
     evening = datetime(2027, 1, 2, 23, 30, tzinfo=timezone.utc)  # 18:30 EST on 2 January
     bodies = {2026: csv_text(ended("CAN", "2027-01-02 15:00", **alert)), 2027: csv_text()}
     calls = []
-    download_years(raw_dir, [2026, 2027], evening, fetch=fake_fetch(bodies, calls))
+    report = download_years(raw_dir, [2026, 2027], evening, fetch=fake_fetch(bodies, calls), state_dir=state_dir)
     assert calls == [year_url(2026), year_url(2027)]
+    assert [r["action"] for r in report] == ["updated", "unchanged"]
     alerts, _ = prepare(read_raw(raw_dir, [2026, 2027]), boston_map())
     day = alert_features(alerts, pd.Series(pd.to_datetime(["2027-01-03"])), "18:00", GROUPS).iloc[0]
     assert day["alert_snow_ice_count"] == 0  # cancelled at 15:00 UTC, before that evening's 23:00 UTC cutoff
@@ -312,12 +330,13 @@ def test_a_next_year_with_no_alerts_yet_may_come_back_empty(tmp_path):
     raw_dir = tmp_path / "nws_alerts"
     december = datetime(2026, 12, 20, 23, 0, tzinfo=timezone.utc)
     bodies = {2026: csv_text(row(year=2026)), 2027: ""}
-    report = download_years(raw_dir, [2026, 2027], december, fetch=fake_fetch(bodies, []))
+    state_dir = tmp_path / "state"
+    report = download_years(raw_dir, [2026, 2027], december, fetch=fake_fetch(bodies, []), state_dir=state_dir)
     assert [r["action"] for r in report] == ["downloaded", "no alerts yet"]
     assert not raw_path(raw_dir, 2027).exists() and not list(raw_dir.glob("*.download"))
     assert len(read_raw(raw_dir, [2026, 2027], optional={2027})) == 1
     with pytest.raises(ValueError, match="empty"):  # an empty answer for this year stays an error
-        download_years(raw_dir, [2026], december, fetch=fake_fetch({2026: ""}, []))
+        download_years(raw_dir, [2026], december, fetch=fake_fetch({2026: ""}, []), state_dir=state_dir)
     assert check_raw(raw_path(raw_dir, 2026)) == 1
 
 
@@ -553,17 +572,17 @@ def test_main_prepares_the_pulled_years(tmp_path, monkeypatch, capsys):
 
 
 def test_main_checks_freshness_before_it_writes(tmp_path, monkeypatch, capsys):
-    raw_dir, nws_dir = tmp_path / "nws_alerts", tmp_path / "nws"
+    raw_dir, state_dir, nws_dir = tmp_path / "nws_alerts", tmp_path / "state", tmp_path / "nws"
     raw_dir.mkdir()
     write_csv(raw_path(raw_dir, 2015), running())
-    record_pulls(raw_dir, {2015: "2015-01-26T23:30:00+00:00"})
+    record_pulls(state_dir, {2015: "2015-01-26T23:30:00+00:00"})
     folder = nws_dir / "2015-01-26"
     folder.mkdir(parents=True)
     (nws_dir / "_manifest.json").write_text("{}")  # not a snapshot
     (folder / "20150126T232000Z.json").write_text(json.dumps(snapshot(message(WS_W_1))))
     out = tmp_path / "alerts.parquet"
-    argv = ["alert_history.py", "--raw-dir", str(raw_dir), "--map", str(MAP), "--out", str(out),
-            "--first-year", "2015", "--last-year", "2015", "--check-nws", str(nws_dir),
+    argv = ["alert_history.py", "--raw-dir", str(raw_dir), "--state-dir", str(state_dir), "--map", str(MAP),
+            "--out", str(out), "--first-year", "2015", "--last-year", "2015", "--check-nws", str(nws_dir),
             "--settings", str(SETTINGS), "--today", "2015-01-26"]
     monkeypatch.setattr(sys, "argv", argv)
     alert_history.main()

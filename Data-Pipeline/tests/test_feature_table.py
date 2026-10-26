@@ -284,6 +284,19 @@ def test_feature_catalog_matches_the_full_table(tmp_path):
     assert not set(catalog.loc[catalog["use_in_model"] == "excluded", "feature"]) & set(table.columns)
 
 
+def test_the_same_inputs_in_any_row_order_give_the_same_table(tmp_path):
+    counts = counts_table()
+    days = written_days(counts)
+    alerts = alerts_table(("snow_ice", "W", "2016-02-14 12:00", "2016-02-17 12:00"),
+                          ("tree", "Y", "2016-02-15 03:00", "2016-02-18 00:00", "2016-02-16 01:00"))
+    static = static_attributes(make_static_dir(tmp_path / "static"))
+    first = build_features(counts, GROUPS, LAG, alerts=alerts, static=static, weather=weather_frame(days), tides=tide_frame(days))
+    again = build_features(counts.sample(frac=1, random_state=1), GROUPS, LAG, alerts=alerts.iloc[::-1],
+                           static=static.iloc[::-1], weather=weather_frame(days).iloc[::-1],
+                           tides=tide_frame(days).sample(frac=1, random_state=2))
+    pd.testing.assert_frame_equal(first, again)
+
+
 # Static attributes
 
 

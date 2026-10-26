@@ -280,11 +280,18 @@ def rule_summary(labels: pd.DataFrame, rule: Rule) -> dict:
     for name, _, _ in PERIODS:
         row[name] = _pct(_rate(surge[period == name]))
     for group in STORM_GROUPS:
-        row[f"{group} surges"] = int(labeled[f"surge_{group}"].fillna(False).astype(bool).sum())
+        flags = labeled[f"surge_{group}"].fillna(False).astype(bool)
+        row[f"{group} surges"] = int(flags.sum())
+        row[f"{group} rate"] = _pct(_rate(flags))
     row["flooding only"] = int((labeled["surge_groups"] == "flooding").sum())
     train = labeled[period == TRAIN]
     per_unit = train.groupby("unit")["surge"].apply(lambda s: int(s.astype(bool).sum()))
     row["units with no train surge"] = int((per_unit == 0).sum())
+    unit_rates = train.groupby("unit")["surge"].apply(lambda s: _rate(s.astype(bool)))
+    row["train rate per unit, lowest to highest"] = (f"{_pct(unit_rates.min())} to {_pct(unit_rates.max())}"
+                                                    if len(unit_rates) else "")
+    validate = labeled[period == PERIODS[1][0]].groupby("unit")["surge"].apply(lambda s: int(s.astype(bool).sum()))
+    row["units with under 5 validate surges"] = int((validate < 5).sum())
     train_rate = _rate(train["surge"].astype(bool))
     row["train in spec range"] = "" if pd.isna(train_rate) else ("yes" if SPEC_RANGE[0] <= train_rate <= SPEC_RANGE[1] else "no")
     return row

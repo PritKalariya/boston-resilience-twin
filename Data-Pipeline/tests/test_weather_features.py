@@ -59,7 +59,7 @@ def sources(tmp_path):
 
 
 def features(noaa, forecast, days, lag=2):
-    return weather_features(pd.DatetimeIndex(days), "18:00", noaa, forecast, lag, 6, TODAY).set_index("date")
+    return weather_features(pd.DatetimeIndex(days), "18:00", noaa, forecast, lag, 7, TODAY).set_index("date")
 
 
 # ADR-003: observed in training, forecasts after
@@ -101,14 +101,14 @@ def test_lagged_observations_come_from_day_d_minus_the_lag(tmp_path):
 
 def test_columns_and_one_row_per_day(tmp_path):
     days = pd.date_range("2023-12-25", "2024-01-25")
-    table = weather_features(days, "18:00", *sources(tmp_path), 2, 6, TODAY)
+    table = weather_features(days, "18:00", *sources(tmp_path), 2, 7, TODAY)
     assert list(table.columns) == ["date", *weather_columns(2)]
     assert len(table) == len(days) and not table["date"].duplicated().any()
 
 
 def test_the_first_days_of_2015_lack_only_the_lag(tmp_path):
     noaa = write(tmp_path / "noaa_logan", 2015, noaa_answer("2015-01-01", "2015-12-31"))
-    jan1 = weather_features(pd.DatetimeIndex(["2015-01-01"]), "18:00", noaa, None, 2, 6, TODAY).iloc[0]
+    jan1 = weather_features(pd.DatetimeIndex(["2015-01-01"]), "18:00", noaa, None, 2, 7, TODAY).iloc[0]
     assert jan1["wx_precip_mm"] == observed("PRCP", "2015-01-01") and pd.isna(jan1["obs_prcp_mm_lag2"])  # 2014 is not stored
 
 
@@ -151,4 +151,4 @@ def test_every_past_year_must_be_stored(tmp_path):
 def test_rows_after_2023_need_the_forecasts(tmp_path):
     noaa, _ = sources(tmp_path)
     with pytest.raises(ValueError, match="forecast"):
-        weather_features(pd.DatetimeIndex(["2024-02-01"]), "18:00", noaa, None, 2, 6, TODAY)
+        weather_features(pd.DatetimeIndex(["2024-02-01"]), "18:00", noaa, None, 2, 7, TODAY)

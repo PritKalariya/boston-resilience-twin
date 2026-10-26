@@ -6,10 +6,10 @@ data). The defaults are the full build, written to Data-Pipeline/data/interim/
 and processed/. Any other range is a slice, written to
 Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/.
 
-Fifteen tasks run pipeline scripts: four of them the weather and tide
-downloads (#7) and three the alert history, labels and features (#16). The
-others are placeholders: they log the issue that builds them and do nothing
-else; an ingest task becomes real once its script is in
+Sixteen tasks run pipeline scripts: five of them the weather and tide
+downloads (#7, and Open-Meteo from #8) and three the alert history, labels and
+features (#16). The others are placeholders: they log the issue that builds
+them and do nothing else; an ingest task becomes real once its script is in
 pipeline_steps.SCRIPTS. The last task, push_data, pushes
 the DVC-tracked data to the team remote (dvc_push.py, #19); without bucket
 access it logs `dvc push skipped: ...` and succeeds.
