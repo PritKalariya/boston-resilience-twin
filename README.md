@@ -103,9 +103,27 @@ The VM gets its secrets from Secret Manager (ADR-015), set up in #20. The runboo
 ```bash
 pip install -r Data-Pipeline/requirements.txt
 python -m pytest Data-Pipeline/tests
+pip install ruff==0.17.2 && ruff check .   # lint, as CI runs it
 ```
 
+CI (`.github/workflows/ci.yml`) runs the same lint and tests on Python 3.12 for every pull request and every push to main. Tests may not reach the network: `Data-Pipeline/tests/conftest.py` fails any test that tries, so use fixture files or fakes.
+
 Use Python 3.12 (ADR-013): the pins come from the Airflow constraints for 3.12, and on other versions the install can fail or build packages from source. Without a system 3.12, `uv venv --python 3.12 --seed .venv && source .venv/bin/activate` creates one (`.venv/` is gitignored). A test command pinned to Python 3.12 comes with W3-7 (#38).
+
+### Versioned data (DVC)
+
+DVC is installed by `Data-Pipeline/requirements.txt`. The remote is **`gs://boston-resilience-twin-data/dvc`**, a private bucket in project 1 (`.dvc/config`).
+
+**Team members** have read and write access. Log in once per machine, then pull from the repo root:
+
+```bash
+gcloud auth application-default login
+dvc pull
+```
+
+**Without access**, for example a grader, skip `dvc pull`. Rebuilding the data from the public sources with `dvc repro` arrives with #18; until then `Data-Pipeline/dvc.yaml` has no stages and `dvc repro` does nothing. Pushing is skipped too: `python Data-Pipeline/scripts/dvc_push.py` logs `dvc push skipped: ...` and exits 0, and the data stays in the local DVC cache.
+
+The runbook ("Versioned data (DVC)") has the checks and fixes.
 
 ## Pipeline performance (#37)
 
