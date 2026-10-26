@@ -77,6 +77,7 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `gcloud auth application-default login`: Google credentials for DVC, once per machine. Human only (opens a browser)
 - `dvc remote list`, `dvc status -c`, `dvc pull`: show the remote (`gs://boston-resilience-twin-data/dvc`), compare the cache with it, fetch the data for the current commit
 - `python Data-Pipeline/scripts/dvc_push.py`: `dvc push`, or a `dvc push skipped: ...` log line and exit 0 without bucket access. Use it instead of bare `dvc push` in DAGs and scripts
+- `docker compose exec airflow-scheduler python /opt/airflow/repo/Data-Pipeline/scripts/alerts.py --test`: send one test failure alert, to Slack when `SLACK_ALERT_WEBHOOK` is set in `.env`, else to the log only (runbook "Pipeline alerts (Slack)")
 - `docker compose exec airflow-scheduler airflow tasks test daily_pipeline push_data`: run only the DAG's DVC push task (skips without credentials; runbook "Versioned data (DVC)")
 - `cd Deployment/terraform && terraform init`: configure the GCS state backend and providers (needs `gcloud auth application-default login`)
 - `terraform fmt -check && terraform validate`: format and syntax check, no cloud calls

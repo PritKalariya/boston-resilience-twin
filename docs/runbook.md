@@ -125,8 +125,52 @@ Logging and failures (#36):
   (0-byte) files in `Data-Pipeline/data/raw/static/`, so `--download` fetches
   them again.
 - A task that fails for good writes `ALERT <dag>.<task> failed in run <id>
-  (try <n>): <error>` to its own log (`Data-Pipeline/scripts/alerts.py`).
-  Slack or email delivery comes with #34.
+  (try <n>): <error>` to its own log (`Data-Pipeline/scripts/alerts.py`), and
+  posts the same line to Slack when a webhook is set (below). The callback
+  runs once, after the last try, so one failed task is one alert.
+
+### Pipeline alerts (Slack)
+
+Failure alerts go to Slack through an incoming webhook (#34). The URL is the
+credential: anyone who has it can post to the channel, so it lives only in the
+gitignored `.env` locally, never in chat, a ticket or the repo. On airflow-vm
+it comes from Secret Manager with #64. Without it, alerts stay in the task log
+and runs are unaffected.
+
+Set it up once (the webhook's owner; the team only needs to join the channel):
+
+1. In Slack, create an app for the workspace (api.slack.com/apps, "From
+   scratch"), turn on **Incoming Webhooks**, and add a webhook to the alert
+   channel. Invite the team to that channel.
+2. Copy the webhook URL and put it in `.env` as one line:
+   `SLACK_ALERT_WEBHOOK=https://hooks.slack.com/services/...`
+3. Recreate the stack so the containers see it: `docker compose up -d --wait`.
+4. Send a test alert:
+
+   ```bash
+   docker compose exec airflow-scheduler python /opt/airflow/repo/Data-Pipeline/scripts/alerts.py --test
+   ```
+
+   It logs `ALERT test alert ...` and `alert sent to Slack`, and the message
+   appears in the channel.
+
+To check the whole path, inject a bad file and run a slice: drop a required
+column (for example `open_dt`) from `Data-Pipeline/data/raw/311/2025.csv`,
+then trigger `daily_pipeline` with `{"start": "2025-01-01", "end":
+"2025-01-31"}`. `validate_raw` fails with `ValidationFailed`, the tasks after
+it are `upstream_failed`, and the run sends exactly one alert, from
+`validate_raw`, starting with `raw 2025.csv header:
+expect_column_to_exist(open_dt)`. Restore the file afterwards (re-download, or
+`dvc pull` once #18 tracks it).
+
+- **`... is not set (or not a Slack webhook)`.** The variable is empty in the
+  container, or does not start with `https://hooks.slack.com/`. Check `.env`,
+  then recreate the stack.
+- **`Slack refused the alert: HTTP 403` or `404`.** The webhook was revoked or
+  mistyped. Create a new one and replace the line in `.env`.
+- **`could not send the failure alert: ...` in a task log.** Slack could not
+  be reached; the task's own result is unchanged, and the alert is still in
+  the log line above it.
 
 ### Data validation (Great Expectations)
 
