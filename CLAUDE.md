@@ -87,6 +87,9 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `ruff check .`: lint as CI runs it (errors only, `ruff.toml`); install with `pip install ruff==0.17.2`. CI (`.github/workflows/ci.yml`) runs it and the tests on every PR
 - `gcloud auth application-default login`: Google credentials for DVC, once per machine. Human only (opens a browser)
 - `dvc remote list`, `dvc status -c`, `dvc pull`: show the remote (`gs://boston-resilience-twin-data/dvc`), compare the cache with it, fetch the data for the current commit
+- `cd Data-Pipeline && dvc repro`: run the `Data-Pipeline/dvc.yaml` stages that changed (ADR-024); after `dvc pull` it reports `Data and pipelines are up to date.`, without remote access it rebuilds every stage from the public sources (needs `NOAA_CDO_TOKEN`; runbook "Stages")
+- `python Data-Pipeline/scripts/dvc_stages.py [--check]`: write `Data-Pipeline/dvc.yaml` from `pipeline_steps.step_plan`, or exit 1 when it is stale; run it after changing a step
+- `python Data-Pipeline/scripts/pipeline_steps.py <step> [--year YYYY]`: run one `daily_pipeline` step of the full build, as a DVC stage does (`--year` for `parse_legacy_311` only)
 - `python Data-Pipeline/scripts/dvc_push.py`: `dvc push`, or a `dvc push skipped: ...` log line and exit 0 without bucket access. Use it instead of bare `dvc push` in DAGs and scripts
 - `docker compose exec airflow-scheduler python /opt/airflow/repo/Data-Pipeline/scripts/alerts.py --test`: send one test failure alert, to Slack when `SLACK_ALERT_WEBHOOK` is set in `.env`, else to the log only (runbook "Pipeline alerts (Slack)")
 - `docker compose exec airflow-scheduler airflow tasks test daily_pipeline push_data`: run only the DAG's DVC push task (skips without credentials; runbook "Versioned data (DVC)")

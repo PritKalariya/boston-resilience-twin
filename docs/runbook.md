@@ -183,7 +183,7 @@ then trigger `daily_pipeline` with `{"start": "2025-01-01", "end":
 it are `upstream_failed`, and the run sends exactly one alert, from
 `validate_raw`, starting with `raw 2025.csv header:
 expect_column_to_exist(open_dt)`. Restore the file afterwards (re-download, or
-`dvc pull` once #18 tracks it).
+`cd Data-Pipeline && dvc pull`, #18).
 
 - **`... is not set (or not a Slack webhook)`.** The variable is empty in the
   container, or does not start with `https://hooks.slack.com/`. Check `.env`,
@@ -621,6 +621,55 @@ gcloud auth application-default login
 
 On `airflow-vm` the attached service account is picked up with no login.
 
+### Stages (#18, ADR-024)
+
+`Data-Pipeline/dvc.yaml` holds one stage per `daily_pipeline` step of the full
+build (the legacy parse once per year), from the downloads to
+`processed/labels.parquet` and `processed/features.parquet`. Each stage runs
+`python scripts/pipeline_steps.py <step>`, the same `run_step` the DAG task
+calls, so a missing input or key stops it with the DAG's message. Left out: the
+two live NWS snapshot tasks (nothing rebuilds past snapshots, and no stage
+reads them) and the schedule state in `Data-Pipeline/data/state/`.
+
+Run DVC from `Data-Pipeline/`; `.dvc/` stays at the repo root:
+
+```bash
+cd Data-Pipeline
+dvc pull        # team members: the data dvc.lock names
+dvc repro       # "Data and pipelines are up to date." after a pull; otherwise runs what changed
+dvc status      # which stages changed, without running them
+dvc dag         # the stages and their order
+```
+
+Without remote access, `dvc repro` rebuilds every stage from the public
+sources (about 2 GB of downloads). It needs Python 3.12 with
+`Data-Pipeline/requirements.txt` and `NOAA_CDO_TOKEN` in the environment
+(`docs/data-access.md`). Stages run one after the other, with no retries: a
+clean clone took 630 s on a laptop (2026-10-27), 389 s of it the seven downloads, and a
+second `dvc repro` 12 s. The data and the DVC cache take about 2.1 GB each.
+
+**Changing a step.** `dvc.yaml` is generated from `pipeline_steps.step_plan`;
+do not edit it. After changing `step_plan`, a script's imports or the steps
+in `dvc_stages.STEPS`, run:
+
+```bash
+python Data-Pipeline/scripts/dvc_stages.py           # rewrite Data-Pipeline/dvc.yaml
+python Data-Pipeline/scripts/dvc_stages.py --check   # exit 1 while it is stale (a test checks this too)
+```
+
+**New data versions.** After `dvc repro` changes outputs, `dvc.lock` changes:
+push the data (`python Data-Pipeline/scripts/dvc_push.py`), then commit
+`Data-Pipeline/dvc.lock` so the commit points at it. The DAG writes the same
+files but does not update `dvc.lock`; recording its runs as versions is #40.
+
+- **`ERROR: '.../dvc.yaml' does not exist`.** DVC was run from the repo
+  root. Run it from `Data-Pipeline/`.
+- **`ingest_noaa_logan cannot start: NOAA_CDO_TOKEN not set`.** Export the
+  token (team members: the runbook's "API keys in .env" fills `.env`; DVC does
+  not read `.env`, so `set -a && . ../.env && set +a` first).
+- **A stage you did not change reruns.** Its code changed: every stage depends
+  on `pipeline_steps.py` and on the scripts it runs.
+
 Check the remote from the repo root:
 
 ```bash
@@ -644,7 +693,9 @@ runs past 30 minutes, fails the run.
 
 **In Airflow** the last task of `daily_pipeline`, `push_data`, runs the same
 helper. DVC refuses to run outside a git repository, so `docker-compose.yaml`
-mounts `.git` (read-only), `.dvc` and `.dvcignore` at `/opt/airflow/repo`.
+mounts `.git` (read-only), `.dvc` and `.dvcignore` at `/opt/airflow/repo`, and
+`Data-Pipeline/dvc.yaml` and `dvc.lock` (read-only, #18), so the push sends the
+outputs the committed `dvc.lock` names that are in the local cache.
 After pulling a change to those mounts, run `docker compose down`, then
 `docker compose up -d --build --wait`. DVC is in the Airflow image (ADR-022),
 so a change to its pins in `Data-Pipeline/requirements.txt` also needs that
@@ -1028,7 +1079,7 @@ ls -a Data-Pipeline/data/raw/311 Data-Pipeline/data/state/311
 - Until you move them, the script reads the old `raw/311/_manifest.json` without changing it and logs a warning, so a run still downloads only what is due. That run writes `state/311/_manifest.json`, so `mv -n` then leaves the old files in place: delete the old `raw/311/_manifest.json` (it is out of date) and keep the old log next to the new one with `mv -n Data-Pipeline/data/raw/311/_runs.jsonl Data-Pipeline/data/state/311/_runs_before_move.jsonl`.
 
 ### Versioning to Cloud Storage
-There is no direct upload: issue #6 requires raw data to reach GCS only through DVC. DVC is not set up in the repo yet (no `.dvc/`, no remote, empty `dvc.yaml`; see Blocked in `docs/status.md`), so for now the files stay on the machine that ran the DAG. `raw/311/` holds only the downloads and changes only when a source changed, so DVC sees a new version only then. The `dvc add` and `dvc push` steps for this folder, and who runs them, come with the DVC setup.
+There is no direct upload: issue #6 requires raw data to reach GCS only through DVC. Each file in `raw/311/` is a persist out of the `ingest_legacy_311` or `ingest_new_311` stage in `Data-Pipeline/dvc.yaml` (#18), so it is versioned and pushed with the rest of the data ("Versioned data (DVC)"). `raw/311/` holds only the downloads and changes only when a source changed, so DVC sees a new version only then.
 
 `gs://boston-resilience-twin-data/raw/311/` still holds 1,739,455,041 bytes from an earlier direct upload by this script, outside DVC. The team decides whether to keep or delete them; do not delete them before that.
 

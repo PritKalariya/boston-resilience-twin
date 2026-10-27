@@ -116,14 +116,28 @@ Use Python 3.12 (ADR-013): the pins come from the Airflow constraints for 3.12, 
 
 DVC is installed by `Data-Pipeline/requirements.txt`. The remote is **`gs://boston-resilience-twin-data/dvc`**, a private bucket in project 1 (`.dvc/config`).
 
-**Team members** have read and write access. Log in once per machine, then pull from the repo root:
+The pipeline's stages are in `Data-Pipeline/dvc.yaml` (ADR-024): the same steps the `daily_pipeline` DAG runs, for the full build, from the raw downloads to `processed/labels.parquet` and `processed/features.parquet`. Run DVC from `Data-Pipeline/`.
+
+**Team members** have read and write access. Log in once per machine, then pull and check:
 
 ```bash
 gcloud auth application-default login
+cd Data-Pipeline
 dvc pull
+dvc repro      # "Data and pipelines are up to date." when the pull matches dvc.lock
 ```
 
-**Without access**, for example a grader, skip `dvc pull`. Rebuilding the data from the public sources with `dvc repro` arrives with #18; until then `Data-Pipeline/dvc.yaml` has no stages and `dvc repro` does nothing. Pushing is skipped too: `python Data-Pipeline/scripts/dvc_push.py` logs `dvc push skipped: ...` and exits 0, and the data stays in the local DVC cache.
+**Without access**, for example a grader, skip `dvc pull`. `dvc repro` then rebuilds every stage from the public sources, about 2 GB of downloads. It needs Python 3.12 with `Data-Pipeline/requirements.txt` (Tests, below) and a free NOAA CDO token in `NOAA_CDO_TOKEN` (`docs/data-access.md`):
+
+```bash
+cd Data-Pipeline
+export NOAA_CDO_TOKEN='...'
+dvc repro
+```
+
+Pushing is skipped without access: `python Data-Pipeline/scripts/dvc_push.py` logs `dvc push skipped: ...` and exits 0, and the data stays in the local DVC cache.
+
+`Data-Pipeline/dvc.yaml` is generated from the DAG's step table (`pipeline_steps.step_plan`), so a step is defined once. After changing a step, run `python Data-Pipeline/scripts/dvc_stages.py`; a test fails while the file is stale.
 
 The runbook ("Versioned data (DVC)") has the checks and fixes.
 
