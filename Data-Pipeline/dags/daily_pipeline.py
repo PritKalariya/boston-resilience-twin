@@ -4,14 +4,15 @@ Triggered by hand until the evening run starts on the VM (#39). Params, both
 inclusive: start (2015-01-01 or later) and end (empty: through the latest
 data). The defaults are the full build, written to Data-Pipeline/data/interim/
 and processed/. Any other range is a slice, written to
-Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/.
+Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/,
+which the ingest tasks refresh first, for any range.
 
-Thirteen tasks run pipeline scripts, four of them the weather and tide
-downloads (#7). parse_legacy_311 runs once per legacy year, at most
-LEGACY_PARALLEL at a time (4 unless .env sets it), and merge_legacy_311 joins
-the years (#37). The others are placeholders: they log the issue that builds
-them and do nothing else; an ingest task becomes real once its script is in
-pipeline_steps.SCRIPTS. The last task, push_data, pushes
+Fifteen tasks run pipeline scripts, two of them the 311 downloads (#6) and
+four the weather and tide downloads (#7). parse_legacy_311 runs once per
+legacy year, at most LEGACY_PARALLEL at a time (4 unless .env sets it), and
+merge_legacy_311 joins the years (#37). The others are placeholders: they log
+the issue that builds them and do nothing else; an ingest task becomes real
+once its script is in pipeline_steps.SCRIPTS. The last task, push_data, pushes
 the DVC-tracked data to the team remote (dvc_push.py, #19); without bucket
 access it logs `dvc push skipped: ...` and succeeds.
 
