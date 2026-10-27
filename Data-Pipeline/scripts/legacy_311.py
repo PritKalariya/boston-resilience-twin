@@ -45,20 +45,25 @@ TIMESTAMP_FORMAT = "ISO8601"
 
 @dataclass
 class ParseReport:
+    """What parsing one file did: rows in the file, rows kept and rows dropped per reason."""
     source: str
     file_rows: int = 0
     parsed_rows: int = 0
     dropped: dict[str, int] = field(default_factory=dict)
 
     def drop(self, reason: str, n: int) -> None:
+        """Count n rows dropped for reason; zero leaves no entry."""
         if n:
             self.dropped[reason] = self.dropped.get(reason, 0) + int(n)
 
     @property
     def dropped_rows(self) -> int:
+        """Rows dropped for any reason."""
         return sum(self.dropped.values())
 
     def as_row(self) -> dict:
+        """The report as one table row: source, file and parsed rows, and a dropped_<reason> column per
+        reason."""
         return {
             "source": self.source,
             "file_rows": self.file_rows,
@@ -90,14 +95,19 @@ def scan_records(path: Path) -> tuple[int, list[int]]:
 
 
 def count_records(path: Path) -> int:
+    """Records in a CSV file, counted as scan_records counts them."""
     return scan_records(path)[0]
 
 
 def parse_timestamps(values: pd.Series) -> pd.Series:
+    """Times in TIMESTAMP_FORMAT; any other value becomes NaT."""
     return pd.to_datetime(values, format=TIMESTAMP_FORMAT, errors="coerce")
 
 
 def read_legacy(path: Path | str, year: int | None = None) -> tuple[pd.DataFrame, ParseReport]:
+    """Parse one legacy 311 file. Malformed lines and rows with no case id, no readable open time, a repeated
+    case id or (with year) an open time in another year are dropped and counted in the report. An empty
+    file gives no rows."""
     path = Path(path)
     report = ParseReport(source=path.name)
 
@@ -152,6 +162,7 @@ def read_legacy(path: Path | str, year: int | None = None) -> tuple[pd.DataFrame
 
 
 def read_years(raw_dir: Path | str, years: list[int]) -> tuple[pd.DataFrame, list[ParseReport]]:
+    """Parse each year's file and join them, dropping a case id already seen in an earlier year."""
     raw_dir = Path(raw_dir)
     frames, reports = [], []
     for year in years:
@@ -168,6 +179,7 @@ def read_years(raw_dir: Path | str, years: list[int]) -> tuple[pd.DataFrame, lis
 
 
 def main() -> None:
+    """Parse the yearly legacy files to legacy_311.parquet and print the rows dropped per file."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw-dir", default="Data-Pipeline/data/raw/311")
     parser.add_argument("--years", nargs="+", type=int, default=list(range(2015, 2027)))

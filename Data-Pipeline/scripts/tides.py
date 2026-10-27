@@ -41,6 +41,7 @@ log = logging.getLogger(__name__)
 
 
 def request_url(params: dict, period: rf.Period) -> str:
+    """The CO-OPS address for one product and half-year: station 8443970, GMT, metric, MLLW datum."""
     query = {
         "station": STATION, "begin_date": period.start.strftime("%Y%m%d"), "end_date": period.end.strftime("%Y%m%d"),
         "datum": "MLLW", "units": "metric", "time_zone": "gmt", "format": "json", "application": APPLICATION, **params,
@@ -97,6 +98,7 @@ def refresh(raw_dir: Path, state_dir: Path, fetch, today: date, now: datetime) -
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Bring both tide products up to today and print what changed (the ingest_tides task)."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--raw-dir", type=Path, default=Path("Data-Pipeline/data/raw/tides"))
     parser.add_argument("--state-dir", type=Path, default=Path("Data-Pipeline/data/state/tides"))

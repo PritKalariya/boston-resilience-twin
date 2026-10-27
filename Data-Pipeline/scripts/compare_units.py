@@ -158,6 +158,7 @@ def group_metrics(counts: pd.DataFrame, windows: dict, k: float = 2.0, m: int = 
 
 
 def markdown(df: pd.DataFrame) -> str:
+    """A table as GitHub markdown, missing values left blank."""
     cells = df.astype(object).where(df.notna(), "").astype(str)
     lines = ["| " + " | ".join(df.columns) + " |", "|" + "---|" * len(df.columns)]
     lines += ["| " + " | ".join(row) + " |" for row in cells.itertuples(index=False)]
@@ -165,6 +166,8 @@ def markdown(df: pd.DataFrame) -> str:
 
 
 def main() -> None:
+    """Print the candidate unit comparison behind ADR-004 (empty-cell share and surge rates per window).
+    Writes no files."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--combined", default="Data-Pipeline/data/interim/311_combined.parquet")
     parser.add_argument("--tracts", default="Data-Pipeline/data/interim/static/tracts_2020.parquet")

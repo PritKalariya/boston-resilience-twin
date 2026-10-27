@@ -156,6 +156,8 @@ class DateRange:
 
     @classmethod
     def from_params(cls, params: Mapping) -> DateRange:
+        """A range from the DAG params, checked: no unknown key, start on or after FIRST_DAY, end not before
+        start, and at least one legacy year."""
         unknown = set(params) - set(PARAMS)
         if unknown:
             raise ValueError(f"unknown params {sorted(unknown)}; the DAG takes {' and '.join(PARAMS)}")
@@ -179,10 +181,12 @@ class DateRange:
 
     @property
     def label(self) -> str:
+        """The range as a folder name, start_end, with latest for an open end."""
         return f"{self.start}_{self.end or 'latest'}"
 
     @property
     def legacy_years(self) -> list[int]:
+        """The legacy 311 file years the range touches."""
         last = self.end.year if self.end else LEGACY_YEARS[-1]
         return [year for year in LEGACY_YEARS if self.start.year <= year <= last]
 
@@ -502,6 +506,7 @@ def drop_empty_downloads(plan: StepPlan) -> list[Path]:
 
 
 def check_outputs(step: str, plan: StepPlan) -> None:
+    """Fail when a step finished without writing one of its outputs."""
     missing = [path for path in plan.files.data_out if not path.exists()]
     if missing:
         raise RuntimeError(f"{step} finished but wrote no {', '.join(str(path) for path in missing)}")

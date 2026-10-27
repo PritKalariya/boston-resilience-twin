@@ -347,21 +347,70 @@ the README's `echo "AIRFLOW_UID=$(id -u)" > .env` overwrites the file.
   to `docker-compose.yaml`, such as the ADR-017 DAG mount, run
   `docker compose down`, then `docker compose up -d --build --wait`.
 
+## Tests
+
+One command runs the full suite (#38). It needs Docker only:
+
+```bash
+docker compose run --rm --build test
+```
+
+It builds `brt-airflow:local` from `airflow.Dockerfile` (cached after the first
+build, so `--build` costs seconds unless `Data-Pipeline/requirements.txt`
+changed), then runs `Data-Pipeline/tests/run_tests.sh` in it:
+
+1. prints the Python and Airflow versions and stops unless Python is 3.12 (ADR-013);
+2. runs every test in `Data-Pipeline/tests`, the DAG tests included
+   (`test_daily_pipeline.py` parses `Data-Pipeline/dags` with Airflow's DagBag);
+3. prints the line coverage of each module in `Data-Pipeline/scripts/` and fails
+   below the bar in `.coveragerc` (70 percent).
+
+The `test` service in `docker-compose.yaml` starts nothing else and is not part
+of `docker compose up`. It gets no `.env`, no keys, no database and no network,
+mounts only what the tests read (read-only), and hides `Data-Pipeline/data`
+behind an empty folder, so a run on a laptop sees what CI sees. It sets
+`BRT_TEST_SERVICE=1`: there a DAG test fails instead of skipping when Airflow is
+missing, and `test_test_service.py` checks that no key, `.env` or network
+reached the container.
+
+Arguments replace the full suite and go to pytest. `--no-cov` drops the coverage
+report and bar, which a partial run would miss:
+
+```bash
+docker compose run --rm test Data-Pipeline/tests/test_dvc_push.py --no-cov   # one file
+docker compose run --rm test -x -k dvc --no-cov                               # stop at the first failure
+```
+
+- **`ADR-013 pins Python 3.12, but this is 3.x`.** The script ran outside the
+  image, for example `bash Data-Pipeline/tests/run_tests.sh` on the host. Use
+  the compose command.
+- **`Required test coverage of 70% not reached`.** New code lacks tests. The
+  report lists each module's missing lines; add tests rather than lowering the bar.
+- **`Read-only file system`.** A test wrote into the repo; write to pytest's
+  `tmp_path` instead.
+- **Linux: `Permission denied` on a mounted file.** The container runs as
+  `AIRFLOW_UID` (README, Linux setup), which must be able to read the checkout.
+- **On the host,** `python -m pytest Data-Pipeline/tests` still runs with
+  Python 3.12 (README, "Tests"), but the DAG tests skip there: Airflow comes
+  only with the image.
+
 ## CI
 
 `.github/workflows/ci.yml` runs on every pull request and every push to
 main: check Python is 3.12, `ruff check .` (errors only, rules in
-`ruff.toml`), install `Data-Pipeline/requirements.txt`, then
-`python -m pytest Data-Pipeline/tests`. It uses no secrets, and
+`ruff.toml`), then the test command `docker compose run --rm --build test`
+("Tests" above). So CI runs the DAG tests in the Airflow image and fails below
+the coverage bar. It uses no secrets, the test container has no network, and
 `Data-Pipeline/tests/conftest.py` blocks network access in every test, so a
 test that calls a live API or Cloud Storage fails with `NetworkBlocked`.
-The job is cancelled after 10 minutes; a normal run takes 1 to 2.
+The job is cancelled after 15 minutes: on a fresh runner the image is built
+from scratch, which takes a few minutes before the tests start.
 
 Run the same checks locally before pushing:
 
 ```bash
 ruff check .
-python -m pytest Data-Pipeline/tests
+docker compose run --rm --build test
 ```
 
 **Making the check required (repo admin, once).** After the workflow has run
@@ -641,10 +690,65 @@ python Data-Pipeline/scripts/dvc_stages.py           # rewrite Data-Pipeline/dvc
 python Data-Pipeline/scripts/dvc_stages.py --check   # exit 1 while it is stale (a test checks this too)
 ```
 
-**New data versions.** After `dvc repro` changes outputs, `dvc.lock` changes:
-push the data (`python Data-Pipeline/scripts/dvc_push.py`), then commit
-`Data-Pipeline/dvc.lock` so the commit points at it. The DAG writes the same
-files but does not update `dvc.lock`; recording its runs as versions is #40.
+### Data versions (#40)
+
+A data version is a commit that changes `Data-Pipeline/dvc.lock`, with the
+files it names pushed to the remote. The versions so far:
+
+| commit | from | what changed |
+|---|---|---|
+| `a86e6e5` | #18, the first full build (2026-10-27) | everything, from the public sources |
+| `0812b8b` | #94, a rebuild after rebasing onto #18 (2026-10-27) | newer weather, alert and static downloads, so `features.parquet` changed; the 311 parquet files were rewritten with the same rows; `daily_counts` and `labels.parquet` are identical |
+
+**Making one.** From `Data-Pipeline/`, after new public data (the 2026 legacy
+311 file and the new-system export refresh daily):
+
+```bash
+dvc repro                                  # reruns what changed; dvc.lock changes with it
+python scripts/dvc_push.py                 # push first, so the commit never points at missing data
+git add dvc.lock && git commit             # the user does git writes
+```
+
+Do not force the download stages (`dvc repro -f ingest_...`) to make a version.
+Without the schedule state in `Data-Pipeline/data/state/`, they download every
+year again, and Open-Meteo and the IEM alert files come back with a few bytes
+changed (response metadata), so `dvc.lock` changes while `features.parquet`
+stays byte-identical. That is noise, not a version. Checked 2026-10-27.
+
+The DAG writes the same files but does not update `dvc.lock`, so a DAG run is
+not a version until someone runs the steps above. Committing versions from the
+VM would need git write access there; that is for #39 or the team.
+
+**Listing and comparing.**
+
+```bash
+git log --oneline -- dvc.lock     # every version, newest first
+dvc diff a86e6e5 HEAD             # outputs added, deleted or modified between two versions
+dvc diff                          # the workspace against HEAD's dvc.lock
+```
+
+`dvc diff` reads folder listings from the cache, so run `dvc pull` (or
+`dvc fetch`) for both versions first if it reports missing cache.
+
+**Checking out a previous version.** Only the data, keeping today's code:
+
+```bash
+git checkout <older> -- dvc.lock
+dvc pull                          # or dvc checkout, when the cache has it
+dvc status                        # "Data and pipelines are up to date." for that version
+```
+
+Back to the current version:
+
+```bash
+git checkout HEAD -- dvc.lock
+dvc pull
+```
+
+With today's code and an older `dvc.lock`, `dvc status` may list stages whose
+code changed since; that is expected. For code and data from the same commit,
+check out the whole commit (`git checkout <older>`, then `dvc pull`) and return
+with `git checkout main` and `dvc pull`.
 
 - **`ERROR: '.../dvc.yaml' does not exist`.** DVC was run from the repo
   root. Run it from `Data-Pipeline/`.
@@ -653,6 +757,11 @@ files but does not update `dvc.lock`; recording its runs as versions is #40.
   not read `.env`, so `set -a && . ../.env && set +a` first).
 - **A stage you did not change reruns.** Its code changed: every stage depends
   on `pipeline_steps.py` and on the scripts it runs.
+- **`ingest_static_layers` stops with `... could not be read as a vector
+  layer`.** The open data portal (ArcGIS Hub) sent a short reply instead of the
+  file; it happened once in a fresh rebuild (Prit, #97). Delete that file in
+  `Data-Pipeline/data/raw/static/` and run `dvc repro` again. A check and retry
+  in `static_layers.py` itself is later work for its owner.
 
 Check the remote from the repo root:
 

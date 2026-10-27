@@ -105,14 +105,15 @@ The VM gets its secrets from Secret Manager (ADR-015), set up in #20. The runboo
 **Tests**
 
 ```bash
-pip install -r Data-Pipeline/requirements.txt
-python -m pytest Data-Pipeline/tests
+docker compose run --rm --build test       # the full suite with coverage, on Python 3.12 in the Airflow image
 pip install ruff==0.17.2 && ruff check .   # lint, as CI runs it
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same lint and tests on Python 3.12 for every pull request and every push to main. Tests may not reach the network: `Data-Pipeline/tests/conftest.py` fails any test that tries, so use fixture files or fakes.
+The test command needs Docker only, no Python on the host. It builds the Airflow image (`brt-airflow:local`; cached after the first build), prints the Python version and stops unless it is 3.12 (ADR-013), then runs every test, the DAG tests included, and prints the line coverage of each module in `Data-Pipeline/scripts/`. It fails below 70 percent (`.coveragerc`). The test container gets no `.env`, no keys and no network, and an empty folder hides `Data-Pipeline/data`, so a run on a laptop sees what CI sees. Arguments replace the full suite and go to pytest, for example `docker compose run --rm test Data-Pipeline/tests/test_dvc_push.py --no-cov`.
 
-Use Python 3.12 (ADR-013): the pins come from the Airflow constraints for 3.12, and on other versions the install can fail or build packages from source. Without a system 3.12, `uv venv --python 3.12 --seed .venv && source .venv/bin/activate` creates one (`.venv/` is gitignored). A test command pinned to Python 3.12 comes with W3-7 (#38).
+CI (`.github/workflows/ci.yml`) runs the same lint and test command for every pull request and every push to main. Tests may not reach the network: `Data-Pipeline/tests/conftest.py` fails any test that tries, so use fixture files or fakes.
+
+To run the tests on the host instead, use Python 3.12 (ADR-013): the pins come from the Airflow constraints for 3.12, and on other versions the install can fail or build packages from source. Without a system 3.12, `uv venv --python 3.12 --seed .venv && source .venv/bin/activate` creates one (`.venv/` is gitignored); then `pip install -r Data-Pipeline/requirements.txt` and `python -m pytest Data-Pipeline/tests`. The DAG tests skip there, since Airflow comes only with the image.
 
 ### Versioned data (DVC)
 
@@ -137,9 +138,24 @@ export NOAA_CDO_TOKEN='...'
 dvc repro
 ```
 
+If `ingest_static_layers` stops with `... could not be read as a vector layer`, the open data portal sent a short reply instead of the file. Delete that file in `Data-Pipeline/data/raw/static/` and run `dvc repro` again; it resumes from that stage.
+
 Pushing is skipped without access: `python Data-Pipeline/scripts/dvc_push.py` logs `dvc push skipped: ...` and exits 0, and the data stays in the local DVC cache.
 
 `Data-Pipeline/dvc.yaml` is generated from the DAG's step table (`pipeline_steps.step_plan`), so a step is defined once. After changing a step, run `python Data-Pipeline/scripts/dvc_stages.py`; a test fails while the file is stale.
+
+**Data versions (#40).** Each commit that changes `Data-Pipeline/dvc.lock` is a data version: the lock names the exact files, and the remote holds them. The first two are `a86e6e5` (#18) and `0812b8b` (#94); the runbook lists what changed. From `Data-Pipeline/`:
+
+```bash
+git log --oneline -- dvc.lock          # the data versions, newest first
+dvc diff <older> <newer>               # which outputs changed between two of them
+git checkout <older> -- dvc.lock       # point at the previous version
+dvc pull                               # fetch it (or `dvc checkout` when it is in the local cache)
+git checkout HEAD -- dvc.lock          # back to the current version
+dvc pull
+```
+
+`git checkout <older>` of the whole repo works too: the code and the data then match that commit. Run `dvc pull` after it, and again after switching back.
 
 The runbook ("Versioned data (DVC)") has the checks and fixes.
 

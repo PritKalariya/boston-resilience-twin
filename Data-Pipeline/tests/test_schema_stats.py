@@ -1,9 +1,12 @@
 import json
+import re
+import sys
 
 import numpy as np
 import pandas as pd
 import pytest
 
+import schema_stats
 from schema_stats import MAX_CATEGORIES, drift, load_thresholds, run, table_stats
 
 THRESHOLDS = {
@@ -216,3 +219,60 @@ def test_mean_shifts_ignore_tiny_tables_and_noise_on_constant_columns():
     moved = drift(table_stats(constant), table_stats(constant.assign(x=6.0)), THRESHOLDS)
     assert nudged == []
     assert [f["kind"] for f in moved] == ["mean_shift"]
+
+
+def test_rows_per_year_split_at_midnight_on_new_years_day():
+    times = pd.to_datetime(["2024-12-31 23:59:59", "2025-01-01 00:00:00", "2025-01-01 00:00:01"])
+    assert table_stats(pd.DataFrame({"open_dt": times}))["rows_per_year"] == {"2024": 1, "2025": 2}
+
+
+def test_thresholds_need_name_and_value_columns(tmp_path):
+    path = tmp_path / "thresholds.csv"
+    path.write_text("threshold,amount\nrow_count_change_pct,5\n")
+    with pytest.raises(ValueError, match="needs name and value columns"):
+        load_thresholds(path)
+
+
+def counts_table(requests=(1, 0, 2, 3)):
+    return pd.DataFrame({
+        "unit": ["East", "West"] * 2,
+        "date": pd.to_datetime(["2024-01-01"] * 2 + ["2024-01-02"] * 2),
+        "storm_group": ["tree"] * 4,
+        "requests": list(requests),
+        "baseline_requests": list(requests),
+    })
+
+
+def stats_argv(tmp_path):
+    thresholds = tmp_path / "thresholds.csv"
+    thresholds.write_text("name,value\n" + "".join(f"{k},{v}\n" for k, v in THRESHOLDS.items()))
+    return ["schema_stats.py", "--located", str(tmp_path / "located.parquet"),
+            "--daily-counts", str(tmp_path / "counts.parquet"), "--thresholds", str(thresholds),
+            "--out-dir", str(tmp_path / "stats"), "--no-docs"]
+
+
+def test_main_writes_the_statistics_then_finds_them_unchanged_then_flags_a_shift(tmp_path, monkeypatch, capsys):
+    # The schema_and_statistics task runs this main() (pipeline_steps.run_step).
+    located().to_parquet(tmp_path / "located.parquet", index=False)
+    counts_table().to_parquet(tmp_path / "counts.parquet", index=False)
+    monkeypatch.setattr(sys, "argv", stats_argv(tmp_path))
+    schema_stats.main()
+    out = capsys.readouterr().out
+    assert "located: first run, nothing to compare with" in out and "daily_counts: first run" in out
+    assert "0 shift(s) beyond the thresholds" in out
+    assert sorted(p.name for p in (tmp_path / "stats").iterdir()) == ["daily_counts.json", "drift.json", "located.json"]
+    schema_stats.main()
+    assert "statistics unchanged since the previous run" in capsys.readouterr().out
+    located(n=200).to_parquet(tmp_path / "located.parquet", index=False)  # twice the rows
+    schema_stats.main()
+    out = capsys.readouterr().out
+    assert int(re.search(r"(\d+) shift\(s\) beyond the thresholds", out).group(1)) >= 1
+    assert "\n  located " in out
+
+
+def test_main_names_a_table_that_does_not_exist_yet(tmp_path, monkeypatch, capsys):
+    located().to_parquet(tmp_path / "located.parquet", index=False)
+    monkeypatch.setattr(sys, "argv", stats_argv(tmp_path))
+    schema_stats.main()
+    assert f"skipped daily_counts: {tmp_path / 'counts.parquet'} does not exist yet" in capsys.readouterr().out
+    assert sorted(p.name for p in (tmp_path / "stats").iterdir()) == ["drift.json", "located.json"]
