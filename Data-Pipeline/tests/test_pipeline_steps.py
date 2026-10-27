@@ -16,8 +16,8 @@ SCRIPTS_DIR = Path(steps.__file__).resolve().parent
 FULL = DateRange()
 SLICE = DateRange(date(2025, 1, 1), date(2025, 12, 31))
 OUTPUT_FLAGS = {"--out", "--out-dir", "--manifest", "--change-points", "--prepared-dir"}
-INPUT_FLAGS = {"--raw-dir", "--raw", "--legacy", "--new", "--config", "--map", "--sources"}
-STATE_FLAGS = {"--state-dir"}  # the 311 download state, shared by every range like the raw folder
+INPUT_FLAGS = {"--raw-dir", "--raw", "--legacy", "--new", "--config", "--map", "--published", "--sources"}
+STATE_FLAGS = {"--state-dir"}
 
 
 def flag_values(args):
@@ -84,8 +84,14 @@ def test_bad_ranges_fail(params, message):
 def test_outputs_stay_in_the_run_folder(tmp_path, step, days):
     args = script_args(step, days, tmp_path)
     outputs = [Path(v) for flag, v in flag_values(args).items() if flag in OUTPUT_FLAGS]
+    paths = run_paths(days, tmp_path)
+    if step.startswith("ingest_") and not outputs:
+        # A raw download (#7): it adds to the shared raw folder and keeps its
+        # history, so it writes nothing else, in a slice or a full build.
+        assert Path(flag_values(args)["--raw-dir"]).is_relative_to(paths.raw)
+        return
     assert outputs
-    assert all(path.is_relative_to(run_paths(days, tmp_path).interim) for path in outputs)
+    assert all(path.is_relative_to(paths.interim) or path.is_relative_to(paths.processed) for path in outputs)
     assert not any("gs://" in arg for arg in args)
 
 
@@ -105,9 +111,9 @@ def test_every_path_is_absolute(step):
 
 
 def test_versioned_inputs_exist_in_the_repo():
-    for step in ("ingest_static_layers", "combine_311", "ingest_legacy_311", "ingest_new_311"):
+    for step in ("ingest_static_layers", "combine_311", "validate_raw", "validate_processed", "ingest_legacy_311", "ingest_new_311"):
         values = flag_values(script_args(step, FULL))
-        for flag in ("--config", "--map", "--sources"):
+        for flag in ("--config", "--map", "--published", "--sources"):
             if flag in values:
                 assert Path(values[flag]).is_file(), values[flag]
 
@@ -119,7 +125,7 @@ def test_legacy_step_reads_only_the_years_in_range():
 
 
 def test_unknown_step():
-    with pytest.raises(ValueError, match="no script step 'labels_and_features'"):
+    with pytest.raises(ValueError, match="no real step 'labels_and_features'"):
         script_args("labels_and_features", FULL)
 
 
@@ -710,3 +716,79 @@ def test_scripts_do_not_shadow_installed_packages():
     }
     names = {path.stem for path in SCRIPTS_DIR.glob("*.py")}
     assert not names & taken
+
+
+# #37: the legacy years are parsed side by side, then merged.
+
+LEGACY_2024_2025 = {
+    2024: LEGACY_HEADER
+    + f"501,2024-03-01 08:00:00,,{TREE},\n"  # before the slice
+    + f"888,2024-02-01 08:00:00,,{TREE},\n"  # before the slice, repeated in 2025
+    + f"777,2024-12-31 23:00:00,,{TREE},\n",  # in the slice, repeated in 2025
+    2025: LEGACY_HEADER
+    + f"777,2025-01-02 09:00:00,,{TREE},\n"
+    + f"888,2025-02-01 09:00:00,,{TREE},\n"
+    + f"601,2025-06-01 10:00:00,,{TREE},\n",
+}
+MID_2024_ON = DateRange(date(2024, 6, 1), date(2025, 12, 31))
+
+
+@pytest.mark.parametrize("value, parallel", [(None, 4), ("", 4), ("2", 2), (" 1 ", 1)])
+def test_legacy_parallelism_comes_from_the_environment(value, parallel):
+    assert steps.legacy_parallel(value) == parallel
+
+
+@pytest.mark.parametrize("value", ["0", "-2", "two", "2.5"])
+def test_a_bad_legacy_parallelism_fails_clearly(value):
+    with pytest.raises(ValueError, match=r"LEGACY_PARALLEL must be a whole number of 1 or more, got '"):
+        steps.legacy_parallel(value)
+
+
+def test_one_year_has_its_own_arguments_and_files(tmp_path):
+    interim, raw = run_paths(MID_2024_ON, tmp_path).interim, run_paths(MID_2024_ON, tmp_path).raw
+    by_year = interim / "legacy_311_by_year" / "2025.parquet"
+    assert script_args("parse_legacy_311", MID_2024_ON, tmp_path, year=2025) == [
+        "--raw-dir", str(raw / "311"), "--years", "2025", "--out", str(by_year),
+    ]
+    files = steps.step_files("parse_legacy_311", MID_2024_ON, tmp_path, year=2025)
+    assert files.data_in == [raw / "311" / "2025.csv"] and files.data_out == [by_year]
+    merge = steps.step_files("merge_legacy_311", MID_2024_ON, tmp_path)
+    assert merge.data_in == [interim / "legacy_311_by_year" / f"{y}.parquet" for y in (2024, 2025)]
+    assert merge.data_out == [interim / "legacy_311.parquet"]
+    assert steps.step_plan("merge_legacy_311", MID_2024_ON, tmp_path).hint.startswith("Run parse_legacy_311")
+    assert "merge_legacy_311" not in steps.NETWORK
+
+
+def test_years_side_by_side_give_the_same_table_as_one_parse(tmp_path, monkeypatch, caplog):
+    # 777 and 888 are repeated across years: legacy_311.read_years keeps the 2024
+    # copy, and 888's 2024 copy is then cut by the slice, so 888 must be gone in
+    # both ways. That only holds if the cut waits for the merge.
+    one, side = tmp_path / "one", tmp_path / "side"
+    for root in (one, side):
+        make_repo(root, LEGACY_2024_2025, NEW_SYSTEM)
+    monkeypatch.chdir(tmp_path)
+    run_step("parse_legacy_311", MID_2024_ON, one)
+    with caplog.at_level(logging.INFO, logger="pipeline_steps"):
+        for year in MID_2024_ON.legacy_years:
+            run_step("parse_legacy_311", MID_2024_ON, side, run_id="r", year=year)
+        run_step("merge_legacy_311", MID_2024_ON, side, run_id="r")
+
+    def legacy(root):
+        return pd.read_parquet(run_paths(MID_2024_ON, root).interim / "legacy_311.parquet")
+
+    pd.testing.assert_frame_equal(legacy(side), legacy(one))
+    assert legacy(side)["case_enquiry_id"].astype(str).tolist() == ["777", "601"]
+    by_year = pd.read_parquet(run_paths(MID_2024_ON, side).interim / "legacy_311_by_year" / "2024.parquet")
+    assert len(by_year) == 3  # the per-year file is not cut
+    assert re.fullmatch(r"run r task parse_legacy_311\[2024\]: rows in 3, rows out 3 in \d+\.\d s", caplog.messages[0])
+    assert "merged 2 years: dropped 2 case ids repeated across years" in caplog.messages
+    assert re.fullmatch(r"run r task merge_legacy_311: rows in 6, rows out 2 in \d+\.\d s", caplog.messages[-1])
+
+
+def test_merge_needs_every_year(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    make_repo(root, LEGACY_2024_2025, NEW_SYSTEM)
+    monkeypatch.chdir(tmp_path)
+    run_step("parse_legacy_311", MID_2024_ON, root, year=2024)  # 2025 never parsed
+    with pytest.raises(steps.InputError, match=r"merge_legacy_311 cannot start: missing .*2025\.parquet\. Run parse_legacy_311"):
+        run_step("merge_legacy_311", MID_2024_ON, root)

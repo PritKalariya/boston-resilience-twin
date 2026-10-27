@@ -5,10 +5,16 @@ inclusive: start (2015-01-01 or later) and end (empty: through the latest
 data). The defaults are the full build, written to Data-Pipeline/data/interim/
 and processed/. Any other range is a slice, written to
 Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/,
-which the 311 ingest tasks refresh first, for any range.
+which the ingest tasks refresh first, for any range.
 
-Seven tasks run pipeline scripts. The others are placeholders: they log the
-issue that builds them and do nothing else.
+Fifteen tasks run pipeline scripts, two of them the 311 downloads (#6) and
+four the weather and tide downloads (#7). parse_legacy_311 runs once per
+legacy year, at most LEGACY_PARALLEL at a time (4 unless .env sets it), and
+merge_legacy_311 joins the years (#37). The others are placeholders: they log
+the issue that builds them and do nothing else; an ingest task becomes real
+once its script is in pipeline_steps.SCRIPTS. The last task, push_data, pushes
+the DVC-tracked data to the team remote (dvc_push.py, #19); without bucket
+access it logs `dvc push skipped: ...` and succeeds.
 
 Every task logs its run id, rows in and rows out (#36). The ingest tasks retry
 twice, about 5 to 10 minutes and then 10 to 15 minutes apart (exponential
@@ -25,6 +31,7 @@ from airflow.sdk import Param, dag, get_current_context, task
 from airflow.sdk.exceptions import AirflowFailException
 
 import alerts  # Data-Pipeline/scripts, on PYTHONPATH (docker-compose.yaml)
+import dvc_push
 import pipeline_steps as steps
 
 log = logging.getLogger("airflow.task")
@@ -81,7 +88,8 @@ def retries(step: str) -> dict:
 )
 def daily_pipeline():
     @task
-    def check_range() -> None:
+    def check_range() -> list[int]:
+        """Checks the params and returns the legacy years the run parses."""
         days = run_range()
         kind = "full build" if days.is_full else "slice"
         log.info(
@@ -89,14 +97,22 @@ def daily_pipeline():
             kind, days.label, days.legacy_years, steps.run_paths(days).interim.parent,
         )
         steps.log_task(run_id(), "check_range", None, None)
+        return days.legacy_years
 
     @task
-    def run(step: str) -> None:
+    def run(step: str, year: int | None = None) -> None:
         try:
-            steps.run_step(step, run_range(), run_id=run_id())
+            steps.run_step(step, run_range(), run_id=run_id(), year=year)
         except steps.InputError as e:
             # A missing or empty input stays missing: fail now instead of retrying.
             raise AirflowFailException(str(e)) from e
+
+    @task
+    def push_data() -> None:
+        # Needs .git, .dvc and .dvcignore mounted at the repo root (docker-compose.yaml).
+        # dvc_push logs the push or the skip; a skip still succeeds.
+        dvc_push.push(steps.REPO)
+        steps.log_task(run_id(), "push_data", None, None)
 
     @task
     def planned(issue: str) -> None:
@@ -104,34 +120,50 @@ def daily_pipeline():
         steps.log_task(run_id(), get_current_context()["ti"].task_id, 0, 0)
 
     def real(step: str):
-        return run.override(task_id=step, doc_md=f"Runs {steps.SCRIPTS[step]}.py.", **retries(step))(step)
+        if step in steps.SCRIPTS:
+            doc = f"Runs {steps.SCRIPTS[step]}.py."
+        else:
+            doc = "Joins the per-year legacy files with legacy_311.read_years' rule (#37)."
+        return run.override(task_id=step, doc_md=doc, **retries(step))(step)
 
     def todo(step: str):
         issue = steps.PLANNED[step]
         return planned.override(task_id=step, doc_md=f"Placeholder until {issue}.", **retries(step))(issue)
 
-    # One after the other, legacy first: both write the 311 schedule state.
-    legacy_311, new_311 = real("ingest_legacy_311"), real("ingest_new_311")
-    legacy_311 >> new_311
-    ingest = [legacy_311, new_311] + [
-        todo(step)
+    ingest = {
+        step: real(step) if step in steps.SCRIPTS else todo(step)
         for step in (
+            "ingest_legacy_311",
+            "ingest_new_311",
             "ingest_noaa_logan",
             "ingest_nws_forecasts",
             "ingest_nws_alerts",
             "ingest_tides",
             "ingest_open_meteo",
         )
-    ]
+    }
+    # One after the other, legacy first: both write the 311 schedule state (#6).
+    ingest["ingest_legacy_311"] >> ingest["ingest_new_311"]
+    years = check_range()
     static = real("ingest_static_layers")
-    raw_checked = todo("validate_raw")
+    raw_checked = real("validate_raw")
+    # One task per legacy year, side by side (#37); merge_legacy_311 joins them.
+    parse_legacy = run.override(
+        task_id="parse_legacy_311",
+        doc_md="Runs legacy_311.py for one year; the years run side by side (#37).",
+        max_active_tis_per_dagrun=steps.LEGACY_PARALLEL,
+    ).partial(step="parse_legacy_311").expand(year=years)
+    merged = real("merge_legacy_311")
+    parse_new = real("parse_new_311")
     combined = real("combine_311")
-    validated = todo("validate_processed")
+    validated = real("validate_processed")
 
-    check_range() >> [*ingest, static] >> raw_checked
-    raw_checked >> [real("parse_legacy_311"), real("parse_new_311")] >> combined
-    [combined, static] >> real("spatial_join") >> todo("daily_counts") >> todo("labels_and_features") >> validated
-    validated >> [todo("schema_and_statistics"), todo("bias_slicing")]
+    years >> [*ingest.values(), static] >> raw_checked
+    raw_checked >> [parse_legacy, parse_new]
+    parse_legacy >> merged
+    [merged, parse_new] >> combined
+    [combined, static] >> real("spatial_join") >> real("daily_counts") >> todo("labels_and_features") >> validated
+    validated >> [real("schema_and_statistics"), todo("bias_slicing")] >> push_data()
 
 
 daily_pipeline()

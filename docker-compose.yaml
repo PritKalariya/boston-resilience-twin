@@ -40,6 +40,16 @@ x-airflow-common:
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     # Pipeline DAGs import Data-Pipeline/scripts by module name (ADR-017, #22).
     PYTHONPATH: /opt/airflow/repo/Data-Pipeline/scripts
+    # API keys from .env (#4). Empty when unset, so the stack still starts;
+    # credentials.require fails the task that needs one, naming the key.
+    NOAA_CDO_TOKEN: ${NOAA_CDO_TOKEN:-}
+    CENSUS_API_KEY: ${CENSUS_API_KEY:-}
+    NWS_USER_AGENT: ${NWS_USER_AGENT:-}
+    # Slack incoming webhook for failure alerts (#34), from .env. Empty: alerts go
+    # to the task log only. On the VM it comes from Secret Manager with #64.
+    SLACK_ALERT_WEBHOOK: ${SLACK_ALERT_WEBHOOK:-}
+    # Legacy 311 years parsed at once (#37). Put LEGACY_PARALLEL=2 in .env if memory is tight.
+    LEGACY_PARALLEL: ${LEGACY_PARALLEL:-4}
   volumes:
     - ./Data-Pipeline/dags:/opt/airflow/dags/data_pipeline
     - ./Data-Pipeline/logs:/opt/airflow/logs
@@ -49,6 +59,11 @@ x-airflow-common:
     - ./Data-Pipeline/config:/opt/airflow/repo/Data-Pipeline/config:ro
     - ./docs/data:/opt/airflow/repo/docs/data:ro
     - ./Data-Pipeline/data:/opt/airflow/repo/Data-Pipeline/data
+    # DVC for the push_data task (#19): DVC refuses to run outside a git repo, so
+    # .git is mounted read-only; .dvc is writable for DVC's cache and tmp files.
+    - ./.git:/opt/airflow/repo/.git:ro
+    - ./.dvc:/opt/airflow/repo/.dvc
+    - ./.dvcignore:/opt/airflow/repo/.dvcignore:ro
   # Linux: set AIRFLOW_UID to `id -u` in .env. The image requires group 0.
   user: "${AIRFLOW_UID:-50000}:0"
   # Cap container stdout logs (the VM disk is 30 GB).

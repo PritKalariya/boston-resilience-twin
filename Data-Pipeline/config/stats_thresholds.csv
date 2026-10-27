@@ -1,0 +1,5 @@
+name,value,note
+row_count_change_pct,5,rows change by more than this percent from the previous run
+missing_change_points,2,a column's missing share moves by more than this many points
+mean_shift_std,0.5,a numeric mean moves by more than this many of the previous run's standard deviations
+category_share_change_points,2,"a category's share (a storm group, unit, location reason) moves by more than this many points"

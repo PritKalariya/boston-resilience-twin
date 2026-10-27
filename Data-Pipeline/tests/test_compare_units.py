@@ -1,7 +1,6 @@
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import pytest
 from shapely.geometry import box
 
 from compare_units import STORM_GROUPS, any_group, group_metrics, locate, panel, tract_neighborhoods, unit_metrics
