@@ -136,9 +136,24 @@ export NOAA_CDO_TOKEN='...'
 dvc repro
 ```
 
+If `ingest_static_layers` stops with `... could not be read as a vector layer`, the open data portal sent a short reply instead of the file. Delete that file in `Data-Pipeline/data/raw/static/` and run `dvc repro` again; it resumes from that stage.
+
 Pushing is skipped without access: `python Data-Pipeline/scripts/dvc_push.py` logs `dvc push skipped: ...` and exits 0, and the data stays in the local DVC cache.
 
 `Data-Pipeline/dvc.yaml` is generated from the DAG's step table (`pipeline_steps.step_plan`), so a step is defined once. After changing a step, run `python Data-Pipeline/scripts/dvc_stages.py`; a test fails while the file is stale.
+
+**Data versions (#40).** Each commit that changes `Data-Pipeline/dvc.lock` is a data version: the lock names the exact files, and the remote holds them. The first two are `a86e6e5` (#18) and `0812b8b` (#94); the runbook lists what changed. From `Data-Pipeline/`:
+
+```bash
+git log --oneline -- dvc.lock          # the data versions, newest first
+dvc diff <older> <newer>               # which outputs changed between two of them
+git checkout <older> -- dvc.lock       # point at the previous version
+dvc pull                               # fetch it (or `dvc checkout` when it is in the local cache)
+git checkout HEAD -- dvc.lock          # back to the current version
+dvc pull
+```
+
+`git checkout <older>` of the whole repo works too: the code and the data then match that commit. Run `dvc pull` after it, and again after switching back.
 
 The runbook ("Versioned data (DVC)") has the checks and fixes.
 

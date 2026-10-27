@@ -690,10 +690,65 @@ python Data-Pipeline/scripts/dvc_stages.py           # rewrite Data-Pipeline/dvc
 python Data-Pipeline/scripts/dvc_stages.py --check   # exit 1 while it is stale (a test checks this too)
 ```
 
-**New data versions.** After `dvc repro` changes outputs, `dvc.lock` changes:
-push the data (`python Data-Pipeline/scripts/dvc_push.py`), then commit
-`Data-Pipeline/dvc.lock` so the commit points at it. The DAG writes the same
-files but does not update `dvc.lock`; recording its runs as versions is #40.
+### Data versions (#40)
+
+A data version is a commit that changes `Data-Pipeline/dvc.lock`, with the
+files it names pushed to the remote. The versions so far:
+
+| commit | from | what changed |
+|---|---|---|
+| `a86e6e5` | #18, the first full build (2026-10-27) | everything, from the public sources |
+| `0812b8b` | #94, a rebuild after rebasing onto #18 (2026-10-27) | newer weather, alert and static downloads, so `features.parquet` changed; the 311 parquet files were rewritten with the same rows; `daily_counts` and `labels.parquet` are identical |
+
+**Making one.** From `Data-Pipeline/`, after new public data (the 2026 legacy
+311 file and the new-system export refresh daily):
+
+```bash
+dvc repro                                  # reruns what changed; dvc.lock changes with it
+python scripts/dvc_push.py                 # push first, so the commit never points at missing data
+git add dvc.lock && git commit             # the user does git writes
+```
+
+Do not force the download stages (`dvc repro -f ingest_...`) to make a version.
+Without the schedule state in `Data-Pipeline/data/state/`, they download every
+year again, and Open-Meteo and the IEM alert files come back with a few bytes
+changed (response metadata), so `dvc.lock` changes while `features.parquet`
+stays byte-identical. That is noise, not a version. Checked 2026-10-27.
+
+The DAG writes the same files but does not update `dvc.lock`, so a DAG run is
+not a version until someone runs the steps above. Committing versions from the
+VM would need git write access there; that is for #39 or the team.
+
+**Listing and comparing.**
+
+```bash
+git log --oneline -- dvc.lock     # every version, newest first
+dvc diff a86e6e5 HEAD             # outputs added, deleted or modified between two versions
+dvc diff                          # the workspace against HEAD's dvc.lock
+```
+
+`dvc diff` reads folder listings from the cache, so run `dvc pull` (or
+`dvc fetch`) for both versions first if it reports missing cache.
+
+**Checking out a previous version.** Only the data, keeping today's code:
+
+```bash
+git checkout <older> -- dvc.lock
+dvc pull                          # or dvc checkout, when the cache has it
+dvc status                        # "Data and pipelines are up to date." for that version
+```
+
+Back to the current version:
+
+```bash
+git checkout HEAD -- dvc.lock
+dvc pull
+```
+
+With today's code and an older `dvc.lock`, `dvc status` may list stages whose
+code changed since; that is expected. For code and data from the same commit,
+check out the whole commit (`git checkout <older>`, then `dvc pull`) and return
+with `git checkout main` and `dvc pull`.
 
 - **`ERROR: '.../dvc.yaml' does not exist`.** DVC was run from the repo
   root. Run it from `Data-Pipeline/`.
@@ -702,6 +757,11 @@ files but does not update `dvc.lock`; recording its runs as versions is #40.
   not read `.env`, so `set -a && . ../.env && set +a` first).
 - **A stage you did not change reruns.** Its code changed: every stage depends
   on `pipeline_steps.py` and on the scripts it runs.
+- **`ingest_static_layers` stops with `... could not be read as a vector
+  layer`.** The open data portal (ArcGIS Hub) sent a short reply instead of the
+  file; it happened once in a fresh rebuild (Prit, #97). Delete that file in
+  `Data-Pipeline/data/raw/static/` and run `dvc repro` again. A check and retry
+  in `static_layers.py` itself is later work for its owner.
 
 Check the remote from the repo root:
 

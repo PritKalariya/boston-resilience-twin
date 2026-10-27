@@ -1,6 +1,6 @@
 # ADR-024: DVC stages are generated from the DAG's step plan
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-27
 - Owner: Kirtan10
 - Phase: data
