@@ -32,6 +32,7 @@ USER_AGENT = "boston-resilience-twin (IE7374 course project)"
 
 @dataclass
 class LayerReport:
+    """What loading one layer did: rows kept, the source CRS, rows dropped per reason and geometries repaired."""
     name: str
     rows: int = 0
     source_crs: str = ""
@@ -39,11 +40,13 @@ class LayerReport:
     repaired: int = 0
 
     def drop(self, reason: str, count) -> None:
+        """Count rows dropped for reason; zero leaves no entry."""
         if int(count):
             self.dropped[reason] = self.dropped.get(reason, 0) + int(count)
 
 
 def read_config(path: Path | str) -> pd.DataFrame:
+    """The layer list, checked: every column present, known kinds and unique names."""
     config = pd.read_csv(path, dtype=str, keep_default_na=False)
     missing = CONFIG_COLUMNS - set(config.columns)
     if missing:
@@ -65,6 +68,7 @@ class DefaultPortRedirect(urllib.request.HTTPRedirectHandler):
     """
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        """Follow the redirect with :443 taken out of an https target (see the class docstring)."""
         parts = urllib.parse.urlsplit(newurl)
         if parts.scheme == "https" and parts.port == 443:
             newurl = parts._replace(netloc=parts.netloc.replace(":443", "", 1)).geturl()
@@ -72,6 +76,7 @@ class DefaultPortRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def download(url: str, dest: Path) -> None:
+    """Fetch url to dest through a .part file, so a failed download never leaves a partial dest."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_suffix(dest.suffix + ".part")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
@@ -83,6 +88,7 @@ def download(url: str, dest: Path) -> None:
 
 
 def sha256(path: Path) -> str:
+    """SHA-256 of a file, read in 1 MB chunks."""
     digest = hashlib.sha256()
     with open(path, "rb") as f:
         while chunk := f.read(1 << 20):
@@ -91,6 +97,7 @@ def sha256(path: Path) -> str:
 
 
 def check_file(path: Path) -> None:
+    """Fail when a layer's file is missing or empty."""
     if not path.exists():
         raise FileNotFoundError(f"{path} not found; run static_layers.py --download")
     if path.stat().st_size == 0:
@@ -98,6 +105,7 @@ def check_file(path: Path) -> None:
 
 
 def check_key(df: pd.DataFrame, key: str, source: str) -> None:
+    """Fail when the key column is missing or has blank values; an empty key checks nothing."""
     if not key:
         return
     if key not in df.columns:
@@ -110,6 +118,8 @@ def check_key(df: pd.DataFrame, key: str, source: str) -> None:
 
 
 def read_vector(path: Path | str, key: str = "") -> tuple[gpd.GeoDataFrame, LayerReport]:
+    """Read a vector layer: drop features without geometry, repair invalid ones, reproject to EPSG:4326 and
+    check it lies in Boston."""
     path = Path(path)
     report = LayerReport(name=path.stem)
     check_file(path)
@@ -147,6 +157,8 @@ def read_vector(path: Path | str, key: str = "") -> tuple[gpd.GeoDataFrame, Laye
 
 
 def read_table(path: Path | str, key: str = "", text_columns: tuple[str, ...] = ()) -> tuple[pd.DataFrame, LayerReport]:
+    """Read a table layer as text, drop blank rows, and turn every column except the key and text_columns into
+    numbers."""
     path = Path(path)
     report = LayerReport(name=path.stem)
     check_file(path)
@@ -173,6 +185,7 @@ def read_table(path: Path | str, key: str = "", text_columns: tuple[str, ...] = 
 
 
 def load_layer(layer: pd.Series, raw_dir: Path, out_dir: Path) -> LayerReport:
+    """Write one configured layer to out_dir as parquet (a document is only checked). Returns its report."""
     path = raw_dir / layer["file"]
     if layer["kind"] == "document":
         check_file(path)
@@ -192,6 +205,8 @@ def load_layer(layer: pd.Series, raw_dir: Path, out_dir: Path) -> LayerReport:
 
 
 def manifest_row(layer: pd.Series, report: LayerReport, raw_dir: Path) -> dict:
+    """The layer's row in docs/data/static-layers.csv: source, vintage, license, CRS, rows, retrieval date and
+    SHA-256."""
     path = raw_dir / layer["file"]
     retrieved = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).date().isoformat()
     return {
@@ -211,6 +226,8 @@ def manifest_row(layer: pd.Series, report: LayerReport, raw_dir: Path) -> dict:
 
 
 def main() -> None:
+    """Load every configured layer (fetching missing ones with --download, all of them with --refresh) and
+    write the manifest."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="Data-Pipeline/config/static_layers.csv")
     parser.add_argument("--raw-dir", default="Data-Pipeline/data/raw/static")

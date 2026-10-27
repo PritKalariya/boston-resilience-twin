@@ -1,8 +1,11 @@
+import sys
+
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 from shapely.geometry import box
 
+import compare_units
 from compare_units import STORM_GROUPS, any_group, group_metrics, locate, panel, tract_neighborhoods, unit_metrics
 
 # Two tracts side by side in Boston, both in one neighborhood, plus a second
@@ -138,3 +141,38 @@ def test_any_group_metrics_count_unit_days_not_group_days():
     assert row["units"] == 1 and row["cells"] == 365
     assert row["empty_pct"] == round(100 * float(pooled_empty), 1)
     assert row["surge_pct k2 m3"] > 0
+
+
+def test_panel_counts_each_request_on_its_local_day_to_the_last_second_of_the_range():
+    days = pd.date_range("2024-01-01", "2024-01-02")
+    df = requests([
+        ("2023-12-31 23:59:59", "tree", 42.31, -71.09),  # before the range
+        ("2024-01-01 00:00:00", "tree", 42.31, -71.09),
+        ("2024-01-01 23:59:59", "tree", 42.31, -71.09),
+        ("2024-01-02 23:59:59", "tree", 42.31, -71.09),  # the last second of the range
+        ("2024-01-03 00:00:00", "tree", 42.31, -71.09),  # after it
+    ]).assign(neighborhood="Roxbury")
+    counts = panel(df, "neighborhood", False, ["Roxbury", "Fenway"], days)
+    assert counts["Roxbury"].tolist() == [2, 1]
+    assert counts["Fenway"].tolist() == [0, 0]
+
+
+def test_main_compares_every_candidate_unit(tmp_path, monkeypatch, capsys):
+    TRACTS.to_parquet(tmp_path / "tracts.parquet")
+    HOODS.to_parquet(tmp_path / "hoods.parquet")
+    months = pd.date_range("2015-01-01", "2024-06-01", freq="MS") + pd.Timedelta(days=14)
+    rows = [(f"{day.date()} 09:00", group, 42.31, -71.09 if i % 2 else -71.07)
+            for i, day in enumerate(months) for group in ("tree", "snow_ice")]
+    rows += [("2024-06-20 10:00", "flooding", None, None),  # no coordinates
+             ("2024-06-21 10:00", "pothole", 42.31, -71.09)]  # not storm-related; the last request
+    requests(rows).to_parquet(tmp_path / "combined.parquet", index=False)
+    monkeypatch.setattr(sys, "argv", ["compare_units.py", "--combined", str(tmp_path / "combined.parquet"),
+                                      "--tracts", str(tmp_path / "tracts.parquet"),
+                                      "--neighborhoods", str(tmp_path / "hoods.parquet")])
+    compare_units.main()
+    out = capsys.readouterr().out
+    assert "| 229 | 1 | 0 | 228 | 0 |" in out  # storm rows, no coordinates, outside, located, no neighborhood
+    assert "## Candidate units (2015-01-01 to 2024-06-20)" in out
+    for name, *_ in compare_units.CANDIDATES:
+        assert f"| {name} |" in out
+    assert "## By storm group (k 2, m 3)" in out

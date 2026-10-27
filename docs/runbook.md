@@ -347,21 +347,70 @@ the README's `echo "AIRFLOW_UID=$(id -u)" > .env` overwrites the file.
   to `docker-compose.yaml`, such as the ADR-017 DAG mount, run
   `docker compose down`, then `docker compose up -d --build --wait`.
 
+## Tests
+
+One command runs the full suite (#38). It needs Docker only:
+
+```bash
+docker compose run --rm --build test
+```
+
+It builds `brt-airflow:local` from `airflow.Dockerfile` (cached after the first
+build, so `--build` costs seconds unless `Data-Pipeline/requirements.txt`
+changed), then runs `Data-Pipeline/tests/run_tests.sh` in it:
+
+1. prints the Python and Airflow versions and stops unless Python is 3.12 (ADR-013);
+2. runs every test in `Data-Pipeline/tests`, the DAG tests included
+   (`test_daily_pipeline.py` parses `Data-Pipeline/dags` with Airflow's DagBag);
+3. prints the line coverage of each module in `Data-Pipeline/scripts/` and fails
+   below the bar in `.coveragerc` (70 percent).
+
+The `test` service in `docker-compose.yaml` starts nothing else and is not part
+of `docker compose up`. It gets no `.env`, no keys, no database and no network,
+mounts only what the tests read (read-only), and hides `Data-Pipeline/data`
+behind an empty folder, so a run on a laptop sees what CI sees. It sets
+`BRT_TEST_SERVICE=1`: there a DAG test fails instead of skipping when Airflow is
+missing, and `test_test_service.py` checks that no key, `.env` or network
+reached the container.
+
+Arguments replace the full suite and go to pytest. `--no-cov` drops the coverage
+report and bar, which a partial run would miss:
+
+```bash
+docker compose run --rm test Data-Pipeline/tests/test_dvc_push.py --no-cov   # one file
+docker compose run --rm test -x -k dvc --no-cov                               # stop at the first failure
+```
+
+- **`ADR-013 pins Python 3.12, but this is 3.x`.** The script ran outside the
+  image, for example `bash Data-Pipeline/tests/run_tests.sh` on the host. Use
+  the compose command.
+- **`Required test coverage of 70% not reached`.** New code lacks tests. The
+  report lists each module's missing lines; add tests rather than lowering the bar.
+- **`Read-only file system`.** A test wrote into the repo; write to pytest's
+  `tmp_path` instead.
+- **Linux: `Permission denied` on a mounted file.** The container runs as
+  `AIRFLOW_UID` (README, Linux setup), which must be able to read the checkout.
+- **On the host,** `python -m pytest Data-Pipeline/tests` still runs with
+  Python 3.12 (README, "Tests"), but the DAG tests skip there: Airflow comes
+  only with the image.
+
 ## CI
 
 `.github/workflows/ci.yml` runs on every pull request and every push to
 main: check Python is 3.12, `ruff check .` (errors only, rules in
-`ruff.toml`), install `Data-Pipeline/requirements.txt`, then
-`python -m pytest Data-Pipeline/tests`. It uses no secrets, and
+`ruff.toml`), then the test command `docker compose run --rm --build test`
+("Tests" above). So CI runs the DAG tests in the Airflow image and fails below
+the coverage bar. It uses no secrets, the test container has no network, and
 `Data-Pipeline/tests/conftest.py` blocks network access in every test, so a
 test that calls a live API or Cloud Storage fails with `NetworkBlocked`.
-The job is cancelled after 10 minutes; a normal run takes 1 to 2.
+The job is cancelled after 15 minutes: on a fresh runner the image is built
+from scratch, which takes a few minutes before the tests start.
 
 Run the same checks locally before pushing:
 
 ```bash
 ruff check .
-python -m pytest Data-Pipeline/tests
+docker compose run --rm --build test
 ```
 
 **Making the check required (repo admin, once).** After the workflow has run

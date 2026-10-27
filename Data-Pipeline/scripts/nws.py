@@ -49,10 +49,13 @@ def stamp(value, what: str) -> datetime:
 
 
 def snapshot_path(raw_dir: Path, moment: datetime) -> Path:
+    """Where a snapshot taken at moment goes: a folder per UTC date and a file named by the UTC time."""
     return raw_dir / moment.strftime("%Y-%m-%d") / f"{moment.strftime('%Y%m%dT%H%M%SZ')}.json"
 
 
 def save(raw_dir: Path, moment: datetime, body: bytes) -> tuple[str, Path]:
+    """Store a snapshot unless the same bytes are already there. Returns the action (saved, updated or
+    unchanged) and the path."""
     path = snapshot_path(raw_dir, moment)
     if path.exists() and rf.sha256(path.read_bytes()) == rf.sha256(body):
         return "unchanged", path
@@ -62,6 +65,7 @@ def save(raw_dir: Path, moment: datetime, body: bytes) -> tuple[str, Path]:
 
 
 def grid_url(fetch) -> str:
+    """The forecastGridData address the NWS points API gives for POINT."""
     point = rf.parse_json(fetch(f"{API}/points/{POINT}"), "points")
     url = (point.get("properties") or {}).get("forecastGridData") if isinstance(point, dict) else None
     if not isinstance(url, str) or not url.startswith(API):
@@ -70,6 +74,8 @@ def grid_url(fetch) -> str:
 
 
 def forecasts(raw_dir: Path, fetch) -> tuple[str, Path]:
+    """Save the current gridpoint forecast, named by its update time, once it holds every value in
+    GRID_VALUES."""
     body = fetch(grid_url(fetch))
     data = rf.parse_json(body, "gridpoint")
     props = data.get("properties") if isinstance(data, dict) else None
@@ -84,6 +90,8 @@ def forecasts(raw_dir: Path, fetch) -> tuple[str, Path]:
 
 
 def alerts(raw_dir: Path, fetch) -> tuple[str, Path]:
+    """Save the active alerts for Boston's zone and county, named by their updated time, once the answer is a
+    FeatureCollection."""
     body = fetch(f"{API}/alerts/active?zone={','.join(ZONES)}")
     data = rf.parse_json(body, "alerts")
     if not isinstance(data, dict) or data.get("type") != "FeatureCollection" or not isinstance(data.get("features"), list):
@@ -98,6 +106,7 @@ KINDS = {
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Save one NWS snapshot (forecasts or alerts) with the User-Agent from NWS_USER_AGENT."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("kind", choices=sorted(KINDS))
     parser.add_argument("--raw-dir", type=Path)

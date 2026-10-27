@@ -81,3 +81,9 @@ def test_a_broken_manifest_fails_with_how_to_fix_it(tmp_path):
     (tmp_path / rf.MANIFEST).write_text("{broken")
     with pytest.raises(rf.FetchError, match="delete it to download the folder again"):
         rf.load_manifest(tmp_path)
+
+
+def test_a_manifest_that_is_not_an_object_fails_with_how_to_fix_it(tmp_path):
+    (tmp_path / rf.MANIFEST).write_text('["2015.json"]')
+    with pytest.raises(rf.FetchError, match="is not a JSON object; fix it, or delete it"):
+        rf.load_manifest(tmp_path)

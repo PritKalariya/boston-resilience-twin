@@ -377,6 +377,7 @@ def coverage(combined: pd.DataFrame, group: str, anchor) -> dict:
 
 
 def switch_date(points: pd.DataFrame, level: str, name: str):
+    """The switch date of one series in the change points table, or None when the table does not list it."""
     row = points[(points["level"] == level) & (points["name"] == name)]
     return pd.Timestamp(row["switch_date"].iloc[0]) if len(row) else None
 
@@ -386,6 +387,8 @@ def _fmt(df: pd.DataFrame, digits: int = 2) -> pd.DataFrame:
 
 
 def main() -> None:
+    """Print the tables behind ADR-005 (switch dates as change points and the replay of each baseline method).
+    Writes no files."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--combined", default="Data-Pipeline/data/interim/311_combined.parquet")
     parser.add_argument("--weather", default="Data-Pipeline/data/raw/weather/ghcnd_USW00014739.csv")

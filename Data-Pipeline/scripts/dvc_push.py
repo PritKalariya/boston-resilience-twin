@@ -39,6 +39,7 @@ def remote_url(repo: Path = REPO_ROOT) -> str:
 
 
 def has_google_credentials() -> bool:
+    """Whether google-auth finds any credentials, without the warnings it logs for a laptop login or for none."""
     import google.auth
     from google.auth.exceptions import DefaultCredentialsError
 
@@ -70,6 +71,7 @@ def no_access_line(output: str) -> str | None:
 
 
 def is_no_access(output: str) -> bool:
+    """Whether DVC's output says the credentials have no access to the bucket."""
     return no_access_line(output) is not None
 
 
@@ -108,6 +110,7 @@ def push(repo: Path = REPO_ROOT, run=None, credentials=None) -> bool:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Push the DVC-tracked data, or log why the push is skipped (push)."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo", type=Path, default=REPO_ROOT, help="repository root (default: this checkout)")
     args = parser.parse_args(argv)

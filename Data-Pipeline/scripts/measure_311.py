@@ -30,18 +30,21 @@ AFTERMATH_DAYS = 3
 
 
 def legacy_storm_groups(path: Path | str) -> pd.DataFrame:
+    """Legacy 311 types that belong to a storm group, from the category map (columns type and storm_group)."""
     cmap = pd.read_csv(path, dtype=str, keep_default_na=False)
     legacy = cmap[(cmap["system"] == "legacy") & (cmap["storm_group"] != "")]
     return legacy.rename(columns={"source_category": "type"})[["type", "storm_group"]]
 
 
 def normalize_neighborhood(values: pd.Series) -> pd.Series:
+    """Neighborhood names with the legacy aliases merged; citywide or blank names become missing."""
     cleaned = values.astype("string").str.strip()
     cleaned = cleaned.replace(NEIGHBORHOOD_ALIASES)
     return cleaned.mask(cleaned.isin(NO_NEIGHBORHOOD))
 
 
 def load_weather(path: Path | str) -> pd.DataFrame:
+    """Logan's GHCN-D daily file as prcp_mm, snow_mm and tmax_c by date (PRCP and TMAX are stored in tenths)."""
     raw = pd.read_csv(path, usecols=["DATE", "PRCP", "SNOW", "TMAX"], dtype=str)
     out = pd.DataFrame({"date": pd.to_datetime(raw["DATE"], format="%Y-%m-%d")})
     out["prcp_mm"] = pd.to_numeric(raw["PRCP"].str.strip(), errors="coerce") / 10
@@ -57,6 +60,7 @@ def inferred_format_loss(path: Path | str) -> int:
 
 
 def reconcile(raw_dir: Path, parsed: pd.DataFrame, published: pd.DataFrame) -> pd.DataFrame:
+    """Per source file: published rows, CSV records, rows lost to an inferred time format and rows parsed now."""
     parsed_by_year = parsed["open_dt"].dt.year.value_counts()
     rows = []
     for source, published_rows in published.set_index("source")["published_rows"].items():
@@ -74,6 +78,7 @@ def reconcile(raw_dir: Path, parsed: pd.DataFrame, published: pd.DataFrame) -> p
 
 
 def daily_cells(df: pd.DataFrame, storm_groups: pd.DataFrame) -> pd.DataFrame:
+    """Storm-related requests with a neighborhood, each with its Boston local day."""
     storm = df.merge(storm_groups, on="type", how="inner")
     storm = storm.assign(
         neighborhood=normalize_neighborhood(storm["neighborhood"]),
@@ -83,6 +88,8 @@ def daily_cells(df: pd.DataFrame, storm_groups: pd.DataFrame) -> pd.DataFrame:
 
 
 def sparsity(cells: pd.DataFrame, start, end, by_group: bool) -> dict:
+    """Neighborhood-day cells (with by_group, neighborhood-day-group cells) from start to end, and the share
+    with no request."""
     days = pd.date_range(start, end, freq="D")
     neighborhoods = cells["neighborhood"].unique()
     keys = ["neighborhood", "date"] + (["storm_group"] if by_group else [])
@@ -92,7 +99,9 @@ def sparsity(cells: pd.DataFrame, start, end, by_group: bool) -> dict:
     total = len(days) * len(neighborhoods)
     if by_group:
         total *= cells["storm_group"].nunique()
-    return {"cells": total, "non_empty": filled, "empty_pct": round(100 * (1 - filled / total), 1)}
+    # No storm rows at all means no cells, so there is no share to report (not a division by zero).
+    empty_pct = round(100 * (1 - filled / total), 1) if total else float("nan")
+    return {"cells": total, "non_empty": filled, "empty_pct": empty_pct}
 
 
 def matched_ratio(daily: pd.Series, event: pd.Series, control: pd.Series, lag: int = 0) -> float:
@@ -116,6 +125,8 @@ def matched_ratio(daily: pd.Series, event: pd.Series, control: pd.Series, lag: i
 
 
 def storm_ratios(df: pd.DataFrame, storm_groups: pd.DataFrame, weather: pd.DataFrame, start, end) -> pd.DataFrame:
+    """Same-day and next-day ratios of requests on weather event days to matched control days, one row per
+    check."""
     days = pd.date_range(start, end, freq="D")
     window = df[df["open_dt"].between(days[0], days[-1] + pd.Timedelta(days=1), inclusive="left")]
     dates = window["open_dt"].dt.normalize()
@@ -148,6 +159,7 @@ def storm_ratios(df: pd.DataFrame, storm_groups: pd.DataFrame, weather: pd.DataF
 
 
 def markdown(df: pd.DataFrame) -> str:
+    """A table as GitHub markdown, missing values left blank."""
     cells = df.astype(object).where(df.notna(), "").astype(str)
     lines = ["| " + " | ".join(df.columns) + " |", "|" + "---|" * len(df.columns)]
     lines += ["| " + " | ".join(row) + " |" for row in cells.itertuples(index=False)]
@@ -155,6 +167,7 @@ def markdown(df: pd.DataFrame) -> str:
 
 
 def main() -> None:
+    """Print the reconciliation, sparsity and storm ratio tables for docs/status.md."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parsed", default="Data-Pipeline/data/interim/legacy_311.parquet")
     parser.add_argument("--raw-dir", default="Data-Pipeline/data/raw/311")

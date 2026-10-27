@@ -33,6 +33,8 @@ REQUIRED_COLUMNS = {"case_id", "source_system", "open_dt", "latitude", "longitud
 
 
 def load_placeholders(path: Path | str) -> pd.DataFrame:
+    """The placeholder coordinates that stand for no real location. Raises on a missing column or a value that
+    is not a number."""
     table = pd.read_csv(path, dtype=str, keep_default_na=False)
     missing = {"latitude", "longitude"} - set(table.columns)
     if missing:
@@ -114,6 +116,7 @@ def location_report(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def markdown(df: pd.DataFrame) -> str:
+    """A table as GitHub markdown, missing values left blank."""
     cells = df.astype(object).where(df.notna(), "").astype(str)
     lines = ["| " + " | ".join(map(str, df.columns)) + " |", "|" + "---|" * len(df.columns)]
     lines += ["| " + " | ".join(row) + " |" for row in cells.itertuples(index=False)]
@@ -121,6 +124,8 @@ def markdown(df: pd.DataFrame) -> str:
 
 
 def main() -> None:
+    """Place every combined request in a tract and unit, write 311_located.parquet and print the share without
+    a unit by year."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--combined", default="Data-Pipeline/data/interim/311_combined.parquet")
     parser.add_argument("--tracts", default="Data-Pipeline/data/interim/static/tracts_2020.parquet")

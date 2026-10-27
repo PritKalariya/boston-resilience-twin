@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-27 by Kirtan. Edit this file in the PR that changes the state.
+Updated: 2026-10-27 by piyush1420. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -39,6 +39,7 @@ Week 2: Processing (due 2026-10-18)
 | #31 Repo layout and pipeline pins | Prit | 2026-10-16 | done | PR #58 merged; ADR-017: one shared Airflow stack at the root, each component mounts its `dags/` at `/opt/airflow/dags/<component>` in snake_case; `Data-Pipeline/requirements.txt` pinned, 94 tests pass in a clean Python 3.12 venv. Amended 2026-10-27 by ADR-023: the `/opt/airflow/repo/` mounts for `Data-Pipeline/scripts`, `config`, `docs/data` and `data`, and the `PYTHONPATH` entry, that #72 and #73 added |
 | #8 Open-Meteo history and archived forecasts | Piyush | 2026-10-13 | in review | PR #76. Set a (ERA5 history) and set b (ECMWF IFS first-hours data) from 2021-01-01; set c (GFS day-before forecasts, for validation and test) from 2024-01-21. Kirtan's review fixes in (2026-10-26): a `yesterday` year whose last day has gaps stays marked incomplete and is fetched again daily for 7 days, then weekly until complete; manifests and run logs moved to `data/state/open_meteo/` (old ones read in place, move in the runbook); the attribution file is written only after a run with no failure, only when it changes, and keeps the other sets' rows with `--only`; HTTP 429 stops the run and 5xx is retried; manifest entries and a later start date are checked; results below |
 | #21 CI v1 | Kirtan | 2026-10-16 | in review | `.github/workflows/ci.yml`: Python 3.12 check, `ruff check .` (errors only), tests, on every PR and push to main; no secrets; `conftest.py` blocks network in tests (loopback and Unix sockets allowed, so `socketpair()` and asyncio work on Windows). On main as of 2026-10-25 (992b981, #78 in) plus this change, in plain `python:3.12-slim` as CI runs it: `ruff check .` clean, 234 tests pass and 1 skips (`test_spatial_join.py` needs the static layers on disk), install 24 s. Action pins checked against their tags (checkout v7.0.1, setup-python v7.0.0). Required-check setting needs a repo admin (runbook, "CI") |
+| #38 Unit test audit and coverage in CI | Piyush | 2026-10-23 | in review | One test command, `docker compose run --rm --build test`: the compose `test` service on the Airflow image (Python 3.12, checked; Airflow for the DAG tests), with no `.env`, keys or network; README, runbook and CI use it. Line coverage of `Data-Pipeline/scripts/` 98.3% on main d5652b9 (85.6% before), bar 70 percent in `.coveragerc`. `test_daily_pipeline.py` parses every DAG with DagBag (import errors, duplicate ids, wiring, retries, failure alert); every public definition has a docstring; results below |
 | #69 Airflow image with every pipeline dependency | Prit | 2026-10-22 | done | PR #74 merged; ADR-022: every Airflow service runs `brt-airflow:local` from `airflow.Dockerfile`, the ADR-013 base image plus `Data-Pipeline/requirements.txt` under Airflow's constraints. Cold `docker compose up -d --build --wait` 1m37s (image build plus stack start, base image already pulled), cached `docker compose build` 1.0s, image 3.44 GB on disk against the base image's 3.22 GB. Great Expectations 1.24.1, Fairlearn 0.15.0 and dvc[gs] 3.67.1 all dry-run clean against the constraints with pandas 3.0.5. Unblocks #22 and #37 |
 | #24 Write ADRs 002, 003 | Srikar | 2026-10-18 | in review | ADR-002 supporting sources, ADR-003 time-based split and feature-history rule; both record scoping decisions (dated 2026-10-04) |
 | #19 DVC remote on GCS | Kirtan | 2026-10-15 | done | PR #79 merged. Remote `gs://boston-resilience-twin-data/dvc` set in `.dvc/config` (repo root); dvc 3.67.1 and dvc-gs 3.1.0 pinned. `dvc_push.py` skips with a log line and exits 0 without bucket access (checked with no credentials, 2026-10-23). Round trip with team credentials checked in a scratch repo (push, `dvc pull` in a fresh clone, files match; test objects removed, 2026-10-23). `push_data`, the last task of `daily_pipeline`, runs it; the containers mount `.git` (read-only, since DVC needs a git repo), `.dvc` and `.dvcignore`. `airflow tasks test daily_pipeline push_data` without credentials: skip line, task success; with team credentials: `dvc push to gs://boston-resilience-twin-data/dvc: Everything is up to date.`, task success (2026-10-25). No data tracked yet: stages come with #18 |
@@ -113,6 +114,25 @@ Week 2: Processing (due 2026-10-18)
 - Data and cache: 2.1 GB each.
 - Push with team credentials (`dvc_push.py` in a one-off Airflow container): `dvc push to gs://boston-resilience-twin-data/dvc: 177 files pushed`. A fresh clone of the branch, team credentials: `dvc pull` gave `177 files fetched and 170 files added`, exit 0, then `dvc repro` gave `Data and pipelines are up to date.`, exit 0.
 - `dvc push` with outputs missing from the cache (checked in a scratch repo): a warning listing them, then `Everything is up to date.`, exit 0, so `push_data` does not fail on a machine that has not run `dvc repro`.
+
+## W3-7 results (2026-10-27)
+
+Command: `docker compose run --rm --build test`, on main d5652b9 plus #38, in a file-copy sandbox (no git, no `.env`, no data):
+- **Suite.** Python 3.12.14 and Airflow 3.3.2. 591 tests pass and 1 skips (`test_hand_checked_landmarks` needs the real static layers, which the test service hides, as in CI); 33.5 s.
+- **Coverage.** 98.3% of `Data-Pipeline/scripts/` (3,043 statements, 53 missed), up from 85.6% before #38. Every module is at 96% or more; the lowest are raw_fetch (96.4%), map_311 and open_meteo (96.9%). Of the 53 lines, 18 are the `main()` call under `if __name__ == "__main__":` and 3 are defensive; the other 32 are listed with owners in #38's notes. The bar is 70 percent (`.coveragerc`); with a 99 percent bar the same run fails, as it should.
+- **DAG integrity** (`test_daily_pipeline.py`, 9 tests):
+  - every file in `dags/` imports with no errors (DagBag, safe mode off), each DAG file builds a DAG, and dag ids are unique;
+  - daily_pipeline has one task per step-table entry, starts at check_range and ends at push_data, and runs each step after the steps that write its inputs;
+  - only the ingest tasks retry (2 times, 5 to 15 minutes apart), and every task sends the failure alert.
+
+  Seven deliberate breaks each fail the intended test: a duplicate dag id, an import error, a DAG never built, a missing dependency, a retry on a non-network task, no failure callback, and a network call at parse time.
+- **No skipping in CI.** Outside the image the DAG tests skip; with `BRT_TEST_SERVICE=1`, which the test service sets, they fail instead. `run_tests.sh` on Python 3.13 and 3.11 stops with the ADR-013 message.
+- **Isolation.** With a dummy `.env` next to the compose file, the test container saw no key, no `.env`, no `.git`, an empty data folder and no network (connect: ENETUNREACH). `test_test_service.py` checks the same in every run.
+- **Lint and CI.** ruff 0.17.2 clean; actionlint 1.7.7 finds no errors in `ci.yml`. An image rebuild with no layer cache took 22 s, and `pip check` is clean with the new pins (coverage 7.16.2, pytest-cov 7.1.0).
+- **With #73.** On #73's head (c3e818d) the #38 patch applies except one CLAUDE.md hunk (a one-line merge) and this file; 681 tests pass, coverage 98.3%.
+- **Fixed while testing.**
+  - `measure_311.sparsity` divided by zero when there were no storm rows; the share is now missing.
+  - `test_daily_pipeline.py` imported Airflow at collection, which set the root logger to INFO for every later test. Airflow is now imported inside the tests, and the logging is put back after them.
 
 ## W1-8 results (2026-10-22)
 
