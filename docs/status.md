@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-27 by piyush1420. Edit this file in the PR that changes the state.
+Updated: 2026-10-27 by Srikar. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -44,6 +44,7 @@ Week 2: Processing (due 2026-10-18)
 | #28 Write ADR-008 | Kirtan | 2026-10-18 | done | PR #86 merged. ADR-008 monitoring tools: Cloud Monitoring for the services (VM, Cloud Run uptime, errors, latency), Evidently for data drift and rolling accuracy and fairness; no Grafana, Prometheus or W&B. Records the scoping decision (dated 2026-10-04); alert thresholds stay open until week 1 of the live run |
 | #26 Write ADR-006 | Piyush | 2026-10-18 | in review | ADR-006 model registry, proposed until Kirtan approves: the Vertex AI Model Registry in project 2 is the only registry; MLflow on the VM tracks experiments and agent traces, not models; Cloud Run serves, with no Vertex AI endpoint. A version is registered as `candidate`, served by a Cloud Run revision set to its version ID, and promoted by moving `production` to it while the version it replaces keeps `previous`; a rollback sends traffic back to that version's revision. Records the scoping choice of 2026-10-04 and adds the version flow; Google's docs checked 2026-10-26 (no charge for models kept in the registry). Open: where model files live, how CI runs and agent traces reach MLflow (ADR-016), and how CI/CD authenticates to project 2 |
 | #43 Data card for all sources | Kirtan | 2026-10-23 | done | PR #87 merged. `docs/data/data-card.md`, linked from the README: each source's URL, license and attribution, vintage, update frequency, known issues, and coverage of the 2015 to 2023 training years (ADR-003). Facts checked against the sources on 2026-10-25 (Analyze Boston page, NCEI and CO-OPS metadata, the NWS points API) |
+| #12 Decision: alert-history source for 2015 to 2023 | Piyush | 2026-10-14 | done | PR #88 merged. ADR-014 revised to Option A+ after Punith's review (approved by Punith on PR #88, 2026-10-26): NWS alert history from the Iowa Environmental Mesonet bulk download (office BOX, rows for Boston zone MAZ015 and county MAC025), with alerts in every year 2015 to 2026, so the alert feature meets ADR-003. Each alert counts from its first bulletin to its first-announced end and stops earlier only at a cancellation or upgrade IEM recorded before the 18:00 Boston cutoff (`utc_expire` = `utc_updated`); checked against the bulletins of all 584 cancelled or upgraded Boston rows, the rule never used a later bulletin. History and evening features both come from IEM with the same logic. #16 still needs the A+ code; evening scheduling is separate (#39); results below |
 
 ## Blocked
 - #6: raw 311 reaches Cloud Storage only through DVC, and nothing is tracked yet. The DVC remote, `dvc_push.py` and the `push_data` task are in place (#19), but the stages that track `raw/311/` (`Data-Pipeline/dvc.yaml`, #18) are not, so until #18 lands the raw 311 files exist only on the machine that ran the DAG. Since the #6 review, `raw/311/` holds only the downloaded CSVs and changes only when a source changed.
@@ -69,6 +70,7 @@ Week 2: Processing (due 2026-10-18)
 - **Early set c has no rain or snowfall.** In GFS day-before data, precipitation, showers, temperature and gusts are complete from 2024-01-21, but rain and snowfall start 2024-12-06 18:00 for 1 day ahead (first full day 2024-12-07) and 2024-12-07 18:00 for 2 days ahead (first full day 2024-12-08). #16 must decide how to handle snow in set c before then, for example from precipitation and temperature.
 - **Boston-local days and the cutoff rule moved to #16.** #8 stores hourly UTC values only; set c holds the 1-day and 2-day forecasts side by side. Note for #16: cutoff 00:00 UTC, 6-hour publish delay; set c holds both values from 2024-01-21. A 1-day value for hour H comes from a run that started about 24 hours before H and is published about 6 hours later, so it is known at the cutoff only up to 18:00 UTC on the target day. Use the 1-day value up to 18:00 UTC and the 2-day value for the evening hours.
 - **ECMWF's `rain` changes meaning in 2025.** Until 2024 shower rain is inside `rain` and `showers` is empty; from 2025 ECMWF fills `showers` (2,232 of 8,760 hours in 2025, every hour in 2026). Rain plus showers plus snow adds up to precipitation in every year, so #16 should use `precipitation`, or rain plus showers.
+- **Notes for #16 on alerts (ADR-014).** #16 downloads and prepares the alert history: the Iowa Environmental Mesonet bulk download for office BOX, one request per year, rows for zone MAZ015 and county MAC025, raw pulls versioned by DVC (#18, #19); #7 lands only live alerts (ADR-002). Count an alert for day D only if its first bulletin (`utc_prodissue`) is before the 18:00 Boston cutoff on day D-1, and end it at its first-announced end (`utc_init_expire`, written `YYYYMMDDHHMM`), or earlier if IEM shows it cancelled or upgraded (`CAN`, `UPG`) with `utc_expire` = `utc_updated` before that cutoff; all times are UTC and are converted to `America/New_York` first, daylight saving included. In 2015 to 2023, 429 of 684 zone alerts (62.7%) and 97 of 235 county alerts (41.3%) ended at another time than first announced, and 138 zone alerts end before they start. Evening features use the same rule on a fresh IEM pull, checked against the NWS API's active Boston alerts, failing clearly instead of writing zeros, and including the next year's file around New Year. Extensions before the cutoff are not used, and the bulk download has no first-announced start; ADR-014 lists these limits, and the latest-bulletin option as later work. The committed #16 code still needs the A+ check, the next-year pull and the freshness check. County severe thunderstorm, flash flood and tornado warnings start when first sent, so they are never known the evening before. NWS alert types were renamed during 2015 to 2026 (freezing rain advisory, blizzard watch, flash flood watch, excessive heat, wind chill), so #16 needs a reviewed map from alert type to storm group. Once Punith confirms ADR-014, spec risk 4 (alert history needs a source) can close; the spec's owner updates it.
 - The Analyze Boston catalog `size` for the new-system file is stale (488,098 bytes listed; the file is 24,763,502 bytes with 70,208 records on 2026-10-15). #6 treats the new-system file as having no reliable change detection and downloads it whenever it is due.
 - The 2026 file is refreshed daily by #6. In January 2027 someone must add a `legacy_2027` row to `Data-Pipeline/config/ingest_311_sources.csv` and slow 2026 down; see the runbook.
 
@@ -85,6 +87,19 @@ Command: `python Data-Pipeline/scripts/open_meteo.py`. Data: Open-Meteo at Bosto
 Set c: `python Data-Pipeline/scripts/open_meteo.py --only day_before_ncep_gfs_global`, downloaded 2026-10-23 03:09 UTC in 3 requests (about 85 API calls); a rerun sent no request and skipped all 3 files. Its start came from one-day and two-week checks on 2026-10-22 (10 requests).
 
 After Kirtan's review, the year-end fix and merging `main` (2026-10-26): `python -m pytest Data-Pipeline/tests` gave 505 passed on Python 3.12 in the Airflow image (82 in `test_open_meteo.py`; the static layers were on disk, so `test_spatial_join.py` did not skip), and `ruff check .` (0.17.2, CI's `ruff.toml`) is clean. `--dry-run` on the local files (before the year-end fix) read the three old manifests in place, all 15 entries passed the new manifest checks, every finished year was skipped, and no file changed; the attribution rows rebuilt from those manifests are byte-identical to `docs/data/open-meteo.csv`. Read again with the final code (no network), all 15 entries pass the manifest checks and have a complete last day, so none is due for a weekly check.
+
+## W1-12 results (2026-10-24)
+
+Counts: the Iowa Environmental Mesonet per-area service for NWS alerts, Boston forecast zone MAZ015 and county MAC025 (office BOX), queried 2026-10-24. The bulk download, the source ADR-014 names, gives the same counts in every year, one row per first bulletin (queried 2026-10-25). The query links, storm checks, lead times and change counts are in ADR-014.
+
+| split | years | zone MAZ015 alerts | county MAC025 alerts |
+|---|---|---|---|
+| train | 2015 to 2023 | 684 (63 to 115 a year) | 235 (11 to 39 a year) |
+| validation | 2024 | 85 | 23 |
+| test | 2025 | 51 | 13 |
+| test to mid-2026, then live | 2026, to 2026-10-23 (partial year) | 46 | 7 |
+
+The four storm checks (2015-01-27, 2018-01-04, 2018-03-02, 2022-01-29) each show their blizzard, coastal flood or high wind warnings. The NWS API returns no alerts for the 2015 blizzard, so it cannot be the history source.
 
 ## W2-5 results (2026-10-25)
 
