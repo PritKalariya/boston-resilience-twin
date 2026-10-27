@@ -1,6 +1,6 @@
 # Data Pipeline
 
-The data pipeline for Boston Resilience Twin. It turns Boston's 311 requests into one table: storm-related requests per neighborhood, day and storm group from 2015 to today. That table feeds the surge labels and features (#16) and the models after them.
+The data pipeline for Boston Resilience Twin. It turns Boston's 311 requests, weather, tides and NWS alerts into the tables the models train on: storm-related requests per neighborhood, day and storm group from 2015 to today, a surge label for each neighborhood and day, and a feature table that uses only what was known by 6 PM the evening before (#16).
 
 Everything here runs two ways: script by script on your own machine, or as one Airflow DAG (`daily_pipeline`) in Docker. Both download into `Data-Pipeline/data/raw/` and write the same files.
 
@@ -16,14 +16,14 @@ Contents:
 8. [DVC and reproducibility](#dvc-and-reproducibility)
 9. [Evaluation criteria](#evaluation-criteria)
 
-Every command below was run in a fresh clone on 2026-10-27 (macOS, Apple silicon, Docker Desktop with 8 GB). Times and row counts are from that run. The city adds new requests every day, so your counts will be a little higher. That run had no NOAA token or NWS user agent, so the three weather tasks that need them were marked success instead of run ([Run it in Airflow](#run-it-in-airflow) shows how).
+Every command below was run in a fresh clone on 2026-10-27 (macOS, Apple silicon, Docker Desktop with 8 GB). Times and row counts are from that run. The city adds new requests every day, so your counts will be a little higher. That run had no NOAA token or NWS user agent, so the three weather tasks that need them, and `feature_table`, which reads the NOAA download, were marked success instead of run ([Run it in Airflow](#run-it-in-airflow) shows how).
 
 ## What the pipeline does
 
 ```
-ingest_legacy_311 -> ingest_new_311     ingest_static_layers     ingest_noaa_logan, ingest_nws_forecasts,
-  (Analyze Boston, 13 CSVs)               (tracts, neighborhoods,   ingest_nws_alerts, ingest_tides
-          |                                population, flood zones)  (raw weather and tide history)
+ingest_legacy_311 -> ingest_new_311     ingest_static_layers     ingest_noaa_logan, ingest_tides,
+  (Analyze Boston, 13 CSVs)               (tracts, neighborhoods,   ingest_open_meteo, ingest_alert_history,
+          |                                population, flood zones)  ingest_nws_forecasts, ingest_nws_alerts
           |                                         |                          |
      validate_raw  <--------------------------------+--------------------------+
           |                                         |
@@ -36,7 +36,9 @@ ingest_legacy_311 -> ingest_new_311     ingest_static_layers     ingest_noaa_log
            spatial_join  <--------------------------+
                 |
            daily_counts  ->  processed/daily_counts.parquet
-                |
+            /       \
+  surge_labels     feature_table   ->  processed/labels.parquet, features.parquet
+            \       /
         validate_processed
                 |
       schema_and_statistics  ->  processed/stats/
@@ -47,8 +49,10 @@ ingest_legacy_311 -> ingest_new_311     ingest_static_layers     ingest_noaa_log
 - **Two 311 systems.** The city is moving from the legacy system (yearly files since 2015) to a new one (one export, starting in 2025), category by category. `combine_311` maps both onto one set of categories with `docs/data/category-map.csv`, records each category's switch date in `docs/data/change-points.csv`, and drops legacy cases that were resubmitted in the new system. New-system times carry a `+00` suffix but are Boston local (ADR-020).
 - **Placement.** `spatial_join` puts every request in a 2020 Census tract and its neighborhood by coordinates. The modeling unit is one of 24 tract-built neighborhoods (ADR-004). Requests with no coordinates, at the City Hall placeholder point, or outside Boston are kept and labeled, not dropped.
 - **Counts.** `daily_counts` counts storm-related requests (snow and ice, flooding, trees) per neighborhood, day and storm group, fills days with no requests with 0, and adds the ADR-005 baseline counts. Legacy rows opened after their category's switch date are kept (ADR-021).
-- **Downloads.** `ingest_311.py` keeps the 13 Analyze Boston files current on the schedule in `config/ingest_311_sources.csv` (2026 and the new system daily, 2025 weekly, older years monthly) and replaces a file only when its source changed. The four weather and tide tasks add to their history in `data/raw/weather/` and `data/raw/tides/` (#7); #16 turns them into features.
+- **Downloads.** `ingest_311.py` keeps the 13 Analyze Boston files current on the schedule in `config/ingest_311_sources.csv` (2026 and the new system daily, 2025 weekly, older years monthly) and replaces a file only when its source changed. The weather, tide and alert tasks add to their history in `data/raw/weather/`, `data/raw/tides/`, `data/raw/open_meteo/` and `data/raw/nws_alerts/` (#7, #8, ADR-014).
 - **Checks.** Great Expectations runs on the raw files before parsing and on the processed tables after. A failed check fails the run and names the check.
+- **Labels and features.** `surge_labels` marks a neighborhood-day as a surge when its storm requests are well above the same weeks of the 3 years before (ADR-005; rules in `config/surge_rules.csv`). `feature_table` builds one row per neighborhood and day from 311 lags, NWS alerts from the Iowa Environmental Mesonet archive (ADR-014), observed weather at Logan to 2023, day-before forecasts from 2024 (ADR-003), predicted tides, the calendar and the static layers, each cut at 6 PM the evening before. Details: [docs/feature-table.md](../docs/feature-table.md).
+- **Bias slicing.** `bias_slicing` is the one placeholder left ([#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32)).
 - **Schema and statistics.** `schema_and_statistics` writes each processed table's schema and summary statistics, Great Expectations data docs, and `drift.json` with the shifts from the previous run (#35).
 - **Alerts.** A failed task logs one `ALERT` line naming the task, the run and the error, and posts it to Slack when `SLACK_ALERT_WEBHOOK` is set (#34).
 
@@ -74,12 +78,14 @@ The install took 34 seconds. The pins come from the Airflow 3.3.2 constraints fo
 
 ### API keys
 
-The 311 and static-layer steps need no key. Three of the weather tasks (#7) do, and without them the DAG run fails before `validate_raw`:
+Most steps need no key. Three weather tasks (#7) do, and without them the DAG run fails before `validate_raw`:
 
 | Task | Needs |
 |---|---|
 | `ingest_noaa_logan` | `NOAA_CDO_TOKEN` |
 | `ingest_nws_forecasts`, `ingest_nws_alerts` | `NWS_USER_AGENT` |
+
+`feature_table` reads the NOAA download, so it needs the token too.
 
 To get your own:
 
@@ -87,7 +93,7 @@ To get your own:
 2. **NWS user agent:** no sign-up. Any string with an app name and your email, for example `(boston-resilience-twin, you@example.org)`.
 3. **Census key (optional):** request one at https://api.census.gov/data/key_signup.html, then activate it from the link in the email. No step needs it to run yet; `docs/data-access.md` has a request to check it.
 
-`ingest_tides` needs no key. `SLACK_ALERT_WEBHOOK` is optional too (Run it in Airflow).
+`ingest_tides`, `ingest_open_meteo` and `ingest_alert_history` need no key. `SLACK_ALERT_WEBHOOK` is optional too (Run it in Airflow).
 
 Copy the template and put each value in `.env`, in single quotes:
 
@@ -115,7 +121,7 @@ python Data-Pipeline/scripts/ingest_311.py
 
 **The static layers** (tracts, neighborhoods, population, flood zones) download on the first run of `static_layers.py --download` in the next section, or of the `ingest_static_layers` task in Airflow.
 
-**Weather and tides** download in the DAG (next sections), into `data/raw/weather/` and `data/raw/tides/`. The 311 steps below do not read them.
+**Weather, tides and alerts** download in the DAG (next sections). The 311 steps below do not read them; the feature table does.
 
 ## Run it step by step
 
@@ -131,6 +137,7 @@ python Data-Pipeline/scripts/spatial_join.py
 python Data-Pipeline/scripts/validate_data.py --stage processed
 python Data-Pipeline/scripts/daily_counts.py
 python Data-Pipeline/scripts/schema_stats.py
+python Data-Pipeline/scripts/pipeline_steps.py surge_labels
 ```
 
 | Step | Writes | Time | Peak memory | Result |
@@ -144,6 +151,9 @@ python Data-Pipeline/scripts/schema_stats.py
 | `validate_data.py --stage processed` | `data/interim/validation/processed.json` | 10 s | 2.0 GB | 55 of 55 checks pass |
 | `daily_counts.py` | `data/processed/daily_counts.parquet` | 2 s | 1.2 GB | 310,680 cells, 215,878 requests |
 | `schema_stats.py` | `data/processed/stats/` | 8 s | 2.6 GB | schema, statistics, data docs, `drift.json` |
+| `pipeline_steps.py surge_labels` | `data/processed/labels.parquet` | 6 s | 0.3 GB | 103,560 cells, 94,680 labeled, 3,557 surges (3.76%) |
+
+`pipeline_steps.py <step>` runs any DAG step for the full build with the DAG's own paths and checks; it is what the DVC stages call. The feature table runs the same way (`pipeline_steps.py feature_table`) once the weather, tide and alert downloads are there, which needs `NOAA_CDO_TOKEN`; without it the step stops with `feature_table cannot start: missing .../raw/weather/noaa_logan`.
 
 Each script prints a table you can check against the source: rows read and dropped per file, unmapped categories, placement by year, and how the daily total reconciles with the combined table, line by line. On a first run `schema_stats.py` prints `first run, nothing to compare with`; after that it lists the shifts from the previous run beyond the thresholds in `config/stats_thresholds.csv`. Open `data/processed/stats/data_docs/index.html` in a browser to see the statistics. Paths are under `Data-Pipeline/`. All of `Data-Pipeline/data/` is gitignored.
 
@@ -156,7 +166,7 @@ python -m pytest Data-Pipeline/tests
 pip install ruff==0.17.2 && ruff check .
 ```
 
-631 tests pass in 13 seconds. They never reach the network (`tests/conftest.py` fails any test that tries).
+895 tests pass and 3 skip (they need data on disk) in 26 seconds. They never reach the network (`tests/conftest.py` fails any test that tries).
 
 ## Run it in Airflow
 
@@ -179,27 +189,21 @@ docker compose exec airflow-scheduler airflow dags list-runs daily_pipeline
 docker compose exec airflow-scheduler airflow tasks states-for-dag-run daily_pipeline full-build
 ```
 
-It writes to `Data-Pipeline/data/interim/` and `processed/`, the same files as the step-by-step run. If the 311 files are not there yet, the first run downloads them (82 seconds above). The legacy years parse side by side, at most 4 at a time; that change took the full build from 124 to 73 seconds ([Pipeline performance](../README.md#pipeline-performance-37) in the root README has the Gantt charts).
+It writes to `Data-Pipeline/data/interim/` and `processed/`, the same files as the step-by-step run. If the 311 files are not there yet, the first run downloads them (82 seconds above). The first run also downloads the Open-Meteo history (92 seconds) and the alert history (14 seconds); later runs fetch only what is new. The legacy years parse side by side, at most 4 at a time; that change took the full build from 124 to 73 seconds ([Pipeline performance](../README.md#pipeline-performance-37) in the root README has the Gantt charts).
 
-**Without the keys** a triggered run fails: `ingest_noaa_logan`, `ingest_nws_forecasts` and `ingest_nws_alerts` fail at once, and `validate_raw` and every task after it are `upstream_failed`. Checked on 2026-10-27. To run everything else, mark those three as successful with `dags test`, which runs the tasks one at a time in the scheduler container:
+**Without the keys** a triggered run fails: `ingest_noaa_logan`, `ingest_nws_forecasts` and `ingest_nws_alerts` fail at once, and `validate_raw` and every task after it are `upstream_failed`. Marking only those three as successful is not enough: `feature_table` then stops with `feature_table cannot start: missing .../raw/weather/noaa_logan`. To run everything else, mark all four with `dags test`, which runs the tasks one at a time in the scheduler container:
 
 ```bash
-docker compose exec airflow-scheduler airflow dags test daily_pipeline --mark-success-pattern 'ingest_(noaa_logan|nws_forecasts|nws_alerts)$'
+docker compose exec airflow-scheduler airflow dags test daily_pipeline --mark-success-pattern '^(ingest_(noaa_logan|nws_forecasts|nws_alerts)|feature_table)$'
 ```
 
-That is how the fresh-clone run was done: 142 seconds, run state `success`, with the raw 311 files already downloaded.
+That is how the fresh-clone run was done on 2026-10-27: 134 seconds, run state `success`, with the 311 and weather downloads already on disk. Every other task ran, `surge_labels` included.
 
-The DAG has 21 tasks. 18 run code: `check_range`; the downloads `ingest_legacy_311`, `ingest_new_311`, `ingest_static_layers`, `ingest_noaa_logan`, `ingest_nws_forecasts`, `ingest_nws_alerts` and `ingest_tides`; `validate_raw`; `parse_legacy_311` (one task instance per legacy year) and `merge_legacy_311`; `parse_new_311`, `combine_311`, `spatial_join`, `daily_counts`, `validate_processed`, `schema_and_statistics`; and `push_data`. The other 3 are placeholders until their issue lands: each logs that issue and succeeds (`PLANNED` in `scripts/pipeline_steps.py`).
-
-| Placeholder | Issue |
-|---|---|
-| `ingest_open_meteo` | [#8](https://github.com/PritKalariya/boston-resilience-twin/issues/8): `open_meteo.py` runs by hand for now (runbook, "Weather download") |
-| `labels_and_features` | [#16](https://github.com/PritKalariya/boston-resilience-twin/issues/16), in review in [PR #93](https://github.com/PritKalariya/boston-resilience-twin/pull/93) |
-| `bias_slicing` | [#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32) |
+The DAG has 23 tasks. 22 run code: `check_range`; the downloads `ingest_legacy_311`, `ingest_new_311`, `ingest_static_layers`, `ingest_noaa_logan`, `ingest_nws_forecasts`, `ingest_nws_alerts`, `ingest_tides`, `ingest_open_meteo` and `ingest_alert_history`; `validate_raw`; `parse_legacy_311` (one task instance per legacy year) and `merge_legacy_311`; `parse_new_311`, `combine_311`, `spatial_join`, `daily_counts`, `surge_labels`, `feature_table`, `validate_processed`, `schema_and_statistics`; and `push_data`. The last, `bias_slicing`, is a placeholder until [#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32) lands: it logs that issue and succeeds (`PLANNED` in `scripts/pipeline_steps.py`).
 
 The `ingest_*` tasks retry twice on a network error, about 5 to 10 and then 10 to 15 minutes apart. A missing input or key fails a task at once, since a retry cannot fix it.
 
-Each task logs one line with its run id, rows in and rows out, for example `run full-build task combine_311: rows in 3,116,729, rows out 3,115,423 in 7.6 s`. Logs, with everything each script printed, are in `Data-Pipeline/logs/dag_id=daily_pipeline/run_id=<run>/task_id=<task>/`. A failed task also logs `ALERT daily_pipeline.<task> failed in run <run> (try n): <error>`; with `SLACK_ALERT_WEBHOOK` in `.env` the same line goes to Slack (runbook, "Pipeline alerts (Slack)").
+Each task logs one line with its run id, rows in and rows out, for example `run full-build task combine_311: rows in 3,116,729, rows out 3,115,423 in 6.4 s`. Logs, with everything each script printed, are in `Data-Pipeline/logs/dag_id=daily_pipeline/run_id=<run>/task_id=<task>/`. A failed task also logs `ALERT daily_pipeline.<task> failed in run <run> (try n): <error>`; with `SLACK_ALERT_WEBHOOK` in `.env` the same line goes to Slack (runbook, "Pipeline alerts (Slack)").
 
 To stop the stack:
 
@@ -216,7 +220,7 @@ docker compose exec airflow-scheduler airflow dags trigger daily_pipeline -r sli
 docker compose exec airflow-scheduler airflow tasks states-for-dag-run daily_pipeline slice-2025
 ```
 
-Without the keys, add `--mark-success-pattern` as above (`airflow dags test daily_pipeline -c '{"start": "2025-01-01", "end": "2025-12-31"}' --mark-success-pattern ...`); that run took 31 seconds, state `success`, 26,280 cells in `daily_counts`. The downloads are the same for every range, so a slice refreshes `data/raw/` too. In the UI, Trigger opens a form with the two dates. `start` must be 2015-01-01 or later and `end` on or after it; an empty `end` means through the latest data. A bad range fails at `check_range`. Delete the slice's folder when you are done.
+Without the keys, add `--mark-success-pattern` as above (`airflow dags test daily_pipeline -c '{"start": "2025-01-01", "end": "2025-12-31"}' --mark-success-pattern ...`); that run took 45 seconds, state `success`: 26,280 cells in `daily_counts` and 8,760 in `surge_labels`. Labels and features read the full build's daily counts, since a label compares a day with the 3 years before it, so run the full build first. The downloads are the same for every range, so a slice refreshes `data/raw/` too. In the UI, Trigger opens a form with the two dates. `start` must be 2015-01-01 or later and `end` on or after it; an empty `end` means through the latest data. A bad range fails at `check_range`. Delete the slice's folder when you are done.
 
 The counts step takes the same range on the host (2 seconds, 26,280 cells):
 
@@ -239,17 +243,21 @@ Data-Pipeline/
 │   ├── nws.py                   NWS forecasts and alerts (#7)
 │   ├── tides.py                 Boston tide gauge, observed and predicted (#7)
 │   ├── raw_fetch.py             shared download helpers for the weather scripts
-│   ├── open_meteo.py            Open-Meteo history and archived forecasts (#8), by hand
+│   ├── open_meteo.py            Open-Meteo history and archived forecasts (#8)
+│   ├── alert_history.py         NWS alert history from the Iowa Environmental Mesonet (ADR-014)
 │   ├── legacy_311.py            parse the legacy yearly files
 │   ├── new_311.py               parse the new-system export
 │   ├── map_311.py               category map, switch dates, combine both systems
 │   ├── spatial_join.py          place requests in tracts and neighborhoods
 │   ├── daily_counts.py          neighborhood x day x storm group counts
+│   ├── surge_labels.py          surge labels per neighborhood and day (#16)
+│   ├── feature_table.py         the cutoff-safe feature table (#16), with weather_features.py and tide_features.py
 │   ├── validate_data.py         Great Expectations checks, raw and processed
 │   ├── schema_stats.py          schema, statistics and drift of the processed tables
 │   ├── alerts.py                failure alert line, to the log and Slack
 │   ├── credentials.py           read API keys from the environment
 │   ├── dvc_push.py              dvc push, skipped without bucket access
+│   ├── dvc_stages.py            writes dvc.yaml from step_plan (#18)
 │   ├── after_switch.py          analysis behind ADR-021
 │   ├── live_baselines.py        analysis behind ADR-005
 │   ├── compare_units.py         analysis behind ADR-004
@@ -260,13 +268,16 @@ Data-Pipeline/
 │   ├── static_layers.csv          sources of the static layers
 │   ├── open_meteo.csv             Open-Meteo sets
 │   ├── stats_thresholds.csv       drift thresholds for schema_stats
+│   ├── surge_rules.csv            surge label rules
+│   ├── labels_features.csv        label and feature settings (cutoff, windows)
+│   ├── feature_catalog.csv        every feature column and where it comes from
 │   ├── placeholder_locations.csv  the City Hall placeholder point
 │   ├── processing.csv             after_switch_policy (ADR-021)
 │   └── validation_bounds.csv      Great Expectations bounds
 ├── tests/                       pytest, with small fixture files
 ├── data/                        gitignored: raw/, state/, interim/, processed/, slices/
 ├── logs/                        gitignored: Airflow task logs
-├── dvc.yaml                     DVC stages (#18)
+├── dvc.yaml, dvc.lock           DVC stages, generated from step_plan (#18), and their hashes
 └── requirements.txt             pinned from the Airflow 3.3.2 constraints
 ```
 
@@ -276,19 +287,25 @@ Outside this folder: [docker-compose.yaml](../docker-compose.yaml) and [airflow.
 
 ## DVC and reproducibility
 
-**DVC.** The remote is `gs://boston-resilience-twin-data/dvc`, set in `.dvc/config` (#19):
+**DVC.** `Data-Pipeline/dvc.yaml` holds the pipeline's stages (#18, ADR-024): the same steps the DAG runs, for the full build, from the downloads to `processed/labels.parquet` and `processed/features.parquet`. `scripts/dvc_stages.py` writes it from `step_plan`, so each step is defined once, and every stage runs `python scripts/pipeline_steps.py <step>`, the same `run_step` the DAG task calls. `dvc.lock` records the hash of every input and output of the last full build. Run DVC from `Data-Pipeline/`:
 
 ```bash
+cd Data-Pipeline
 dvc remote list
+dvc dag
+dvc repro daily_counts
+dvc repro daily_counts
 ```
 
-prints `gcs  gs://boston-resilience-twin-data/dvc  (default)`. `push_data`, the last task of the DAG, runs `scripts/dvc_push.py`. Without access to the team bucket, a grader's own machine included, it logs `dvc push skipped: no Google credentials ...` and succeeds, so the run does not fail on it:
+`dvc remote list` prints `gcs  gs://boston-resilience-twin-data/dvc  (default)` (#19). On the fresh clone's data, the first `dvc repro daily_counts` ran the 20 stages it needs in 63 seconds, and the second printed `Data and pipelines are up to date.` A grader without bucket access rebuilds everything with `dvc repro`, which needs `NOAA_CDO_TOKEN` (about 2 GB of downloads; 630 seconds in Kirtan's clean-clone run). It updates `dvc.lock` in your working copy; keep the committed one with `git checkout dvc.lock`.
+
+`push_data`, the last task of the DAG, runs `scripts/dvc_push.py`. Without access to the team bucket, a grader's own machine included, it logs `dvc push skipped: no Google credentials ...` and succeeds, so the run does not fail on it:
 
 ```bash
 docker compose exec airflow-scheduler airflow tasks test daily_pipeline push_data
 ```
 
-Team members log in once with `gcloud auth application-default login`, then `dvc pull` fetches the data the current commit points to and `python Data-Pipeline/scripts/dvc_push.py` pushes. The stages that put the raw and processed files under DVC come with [#18](https://github.com/PritKalariya/boston-resilience-twin/issues/18), and their history with [#40](https://github.com/PritKalariya/boston-resilience-twin/issues/40). Until then the data is rebuilt from the public sources as above.
+Team members log in once with `gcloud auth application-default login`; then, in `Data-Pipeline/`, `dvc pull` fetches the data the committed `dvc.lock` names and `dvc repro` prints `Data and pipelines are up to date.` A pull of two outputs in a clean clone (`dvc pull daily_counts surge_labels`) fetched both, 310,752 and 103,584 rows. A DAG run writes newer files but does not update `dvc.lock`; turning DAG runs into versions with their history is [#40](https://github.com/PritKalariya/boston-resilience-twin/issues/40). The runbook, "Versioned data (DVC)", has the checks and fixes.
 
 **Reproducibility.**
 
@@ -306,14 +323,14 @@ Team members log in once with `gcloud auth application-default login`, then `dvc
 |---|---|---|
 | Proper documentation | this README, the [root README](../README.md), [runbook](../docs/runbook.md), [data card](../docs/data/data-card.md), [ADRs](../docs/decisions/) | done |
 | Modular syntax and code | [Code structure](#code-structure): one module per step, `step_plan` for arguments | done |
-| Pipeline orchestration (Airflow DAGs) | [Run it in Airflow](#run-it-in-airflow), `dags/daily_pipeline.py` | done: 311, static, weather and tide downloads run in the DAG (#6, #7); placeholders for #8, #16, #32 |
+| Pipeline orchestration (Airflow DAGs) | [Run it in Airflow](#run-it-in-airflow), `dags/daily_pipeline.py` | done: every step from the downloads (#6, #7, #8) to labels and features (#16) runs in the DAG; `bias_slicing` is a placeholder until #32 |
 | Tracking and logging | the per-task log line in [Run it in Airflow](#run-it-in-airflow) (#36) | done |
-| Data version control (DVC) | [DVC and reproducibility](#dvc-and-reproducibility) | remote and push task done (#19); stages [#18](https://github.com/PritKalariya/boston-resilience-twin/issues/18), history [#40](https://github.com/PritKalariya/boston-resilience-twin/issues/40) |
+| Data version control (DVC) | [DVC and reproducibility](#dvc-and-reproducibility), `dvc.yaml` and `dvc.lock` | done: remote and push task (#19), stages from the downloads to labels and features (#18); history of DAG runs [#40](https://github.com/PritKalariya/boston-resilience-twin/issues/40) |
 | Pipeline flow optimization (Gantt) | [Pipeline performance](../README.md#pipeline-performance-37) in the root README | done (#37): legacy years in parallel, full build 124 s to 73 s |
 | Schema and statistics generation | `schema_stats.py` in [Run it step by step](#run-it-step-by-step); runbook, "Schema and statistics (every run)" | done (#35): every run, with data docs and `drift.json` |
 | Anomaly detection and alerts | Great Expectations checks in [Run it step by step](#run-it-step-by-step); `ALERT` line and Slack in [Run it in Airflow](#run-it-in-airflow) | done (#17, #34) |
 | Bias detection and mitigation | [data card](../docs/data/data-card.md), "Reported demand, not need" | [#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32) slicing, [#33](https://github.com/PritKalariya/boston-resilience-twin/issues/33) mitigation |
-| Test modules | `tests/`, 631 tests, run in CI on every PR (`.github/workflows/ci.yml`) | done; coverage audit [#38](https://github.com/PritKalariya/boston-resilience-twin/issues/38), in review: [PR #94](https://github.com/PritKalariya/boston-resilience-twin/pull/94) |
+| Test modules | `tests/`, 895 tests, run in CI on every PR (`.github/workflows/ci.yml`) | done; coverage audit [#38](https://github.com/PritKalariya/boston-resilience-twin/issues/38), in review: [PR #94](https://github.com/PritKalariya/boston-resilience-twin/pull/94) |
 | Reproducibility | [Environment setup](#environment-setup) to [Small run](#small-run-one-year), [DVC and reproducibility](#dvc-and-reproducibility) | done here; second-machine test [#42](https://github.com/PritKalariya/boston-resilience-twin/issues/42) |
 | Error handling and logging | runbook, "Run the data pipeline DAG": retries, input checks, `check_range` (#36) | done |
 
