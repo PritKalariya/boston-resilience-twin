@@ -1,10 +1,14 @@
+import sys
 from datetime import date
 from pathlib import Path
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
+from shapely.geometry import box
 
+import after_switch
 from after_switch import (
     OVERLAP_COLUMNS,
     POLICIES,
@@ -281,3 +285,47 @@ def test_window_summary_outside_the_data():
     out = window_summary(frame, frame.astype(bool), frame.astype(bool), frame.astype(float), "2025-01-01", "2025-01-31")
     assert out["days"] == 0 and out["requests"] == 0 and out["labeled cells"] == 0
     assert np.isnan(out["per neighborhood-day"]) and np.isnan(out["ratio"])
+
+
+def test_overlap_window_runs_from_the_switch_days_midnight_to_the_end_of_the_last_legacy_day():
+    df = combined([
+        ("2025-01-10 00:00:00", "new", "Pruning Request", "tree", False),  # the switch day's first minute
+        ("2025-01-10 10:00:00", "legacy", "Pruning Request", "tree", True),
+        ("2025-01-12 23:59:59", "legacy", "Pruning Request", "tree", True),  # the last legacy row
+        ("2025-01-12 23:59:59", "new", "Pruning Request", "tree", False),  # same day: in the window
+        ("2025-01-13 00:00:00", "new", "Pruning Request", "tree", False),  # the next day: outside
+    ])
+    row = overlap_table(df).iloc[0]
+    assert (row["switch_date"], row["last_legacy"], row["days"]) == (date(2025, 1, 10), date(2025, 1, 12), 3)
+    assert row["new_in_window"] == 2
+
+
+def test_main_prints_every_table_behind_adr_021(tmp_path, monkeypatch, capsys):
+    area = box(-71.10, 42.30, -71.06, 42.32)
+    gpd.GeoDataFrame({"geoid20": ["25025000100"]}, geometry=[area], crs="EPSG:4326").to_parquet(tmp_path / "tracts.parquet")
+    gpd.GeoDataFrame({"neighborhood": ["Roxbury"]}, geometry=[area], crs="EPSG:4326").to_parquet(tmp_path / "hoods.parquet")
+    months = pd.date_range("2015-01-01", "2024-02-01", freq="MS") + pd.Timedelta(days=14)
+    rows = [(f"{day.date()} 09:00:00", "legacy", "Tree Emergencies", "tree", False) for day in months]
+    rows += [
+        ("2024-02-01 08:00:00", "new", "Pothole", "", False),  # Pothole switches
+        ("2024-02-05 10:00:00", "legacy", "Pothole", "", True),
+        ("2024-03-01 08:00:00", "new", "Tree Emergencies", "tree", False),  # the tree category switches
+        ("2024-03-02 10:00:00", "legacy", "Tree Emergencies", "tree", True),
+        ("2024-03-10 10:00:00", "legacy", "Tree Emergencies", "tree", True),
+        ("2024-03-20 08:00:00", "new", "Tree Emergencies", "tree", False),
+    ]
+    combined(rows).assign(latitude=42.31, longitude=-71.08).to_parquet(tmp_path / "combined.parquet", index=False)
+    settings = config(tmp_path, "setting,value\nafter_switch_policy,keep\n")
+    monkeypatch.setattr(sys, "argv", [
+        "after_switch.py", "--combined", str(tmp_path / "combined.parquet"), "--config", str(settings),
+        "--tracts", str(tmp_path / "tracts.parquet"), "--neighborhoods", str(tmp_path / "hoods.parquet")])
+    after_switch.main()
+    out = capsys.readouterr().out
+    assert f"- after_switch rows: 3 of {len(months) + 3:,} legacy rows" in out
+    # The legacy system's last request is on 2024-03-10, so 2024-03-09 is the last full day of both.
+    assert "- days 2015-01-01 to 2024-03-09 (the last full day of both systems)" in out
+    for heading in ("## After_switch rows by category", "## The 3 worst overlap windows", "## Storm surge labels by policy"):
+        assert heading in out
+    for policy in POLICIES:
+        assert f"| {policy} |" in out
+    assert "Coming year (2024-03-10 to 2025-03-09)" in out

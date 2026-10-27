@@ -1,7 +1,10 @@
+import sys
+
 import numpy as np
 import pandas as pd
 import pytest
 
+import live_baselines
 from live_baselines import (
     aligned,
     break_scan,
@@ -171,3 +174,65 @@ def test_coverage_share_from_match():
     assert row["requests"] == 3
     assert row["carried_over"] == pytest.approx(33.3)
     assert row["largest_without"].startswith("Unshoveled Sidewalk (67%)")
+
+
+def test_daily_counts_put_midnight_on_the_next_day_and_keep_the_end_day():
+    df = combined_rows([
+        ("2025-01-01 23:59:59", "legacy", "Tree Emergencies", "Fallen Tree or Branches", "tree", "renamed", False),
+        ("2025-01-02 00:00:00", "new", "Fallen Tree or Branches", "Fallen Tree or Branches", "tree", "renamed", False),
+        ("2025-01-02 23:59:59", "new", "Fallen Tree or Branches", "Fallen Tree or Branches", "tree", "renamed", False),
+        ("2025-01-03 00:00:00", "new", "Fallen Tree or Branches", "Fallen Tree or Branches", "tree", "renamed", False),
+    ])
+    assert daily_counts(df, "storm_group", "tree", "2025-01-01", "2025-01-02").tolist() == [1, 2]
+
+
+def test_load_gusts_reads_blank_or_malformed_values_as_missing(tmp_path):
+    path = tmp_path / "ghcnd.csv"
+    path.write_text('"DATE","WSF5"\n"2015-01-01","  223"\n"2015-01-02","    "\n"2015-01-03","gust"\n')
+    gusts, column, threshold = load_gusts(path)
+    assert (column, threshold) == ("WSF5", 20.0)
+    assert gusts.iloc[0] == pytest.approx(22.3)
+    assert gusts.iloc[1:].isna().all()
+
+
+def synthetic_inputs(tmp_path, seed=7):
+    """Citywide requests from 2015 to January 2026, the systems switching on 2025-06-01, plus
+    the change points and a Logan file with a heavy rain day every 20 days and a gust every 50."""
+    rng = np.random.default_rng(seed)
+    days = pd.date_range("2015-01-01", "2026-01-31")
+    switch = pd.Timestamp("2025-06-01")
+    rows = []
+    for day in days:
+        system = "new" if day >= switch else "legacy"
+        rows += [(day + pd.Timedelta(hours=9), system, "Tree Emergencies", "Fallen Tree or Branches", "tree",
+                  "renamed", False)] * int(rng.poisson(3))
+        rows += [(day + pd.Timedelta(hours=10), system, "Street Light Outages", "Street Light Outage", None,
+                  "same", False)] * int(rng.poisson(4))
+        if day < switch:
+            rows += [(day + pd.Timedelta(hours=11), "legacy", "Catchbasin", "Catchbasin", "flooding",
+                      "legacy_only", False)] * int(rng.poisson(1))
+    rows.append((pd.Timestamp("2026-01-31 12:00"), "legacy", "Pothole", "Pothole", None, "same", False))
+    combined_rows(rows).to_parquet(tmp_path / "combined.parquet", index=False)
+    (tmp_path / "change-points.csv").write_text(
+        "level,name,switch_date\nstorm_group,tree,2025-06-01\ncategory,Street Light Outage,2025-06-01\n"
+        "storm_group,snow_ice,2026-06-23\n")
+    weather = pd.DataFrame({"DATE": days.strftime("%Y-%m-%d"), "PRCP": "0", "SNOW": "0", "TMAX": "200", "WSF5": "100"})
+    weather.loc[::20, "PRCP"] = "300"
+    weather.loc[::50, "WSF5"] = "250"
+    weather.to_csv(tmp_path / "ghcnd.csv", index=False)
+
+
+def test_main_prints_every_table_behind_adr_005(tmp_path, monkeypatch, capsys):
+    synthetic_inputs(tmp_path)
+    monkeypatch.setattr(sys, "argv", [
+        "live_baselines.py", "--combined", str(tmp_path / "combined.parquet"), "--weather", str(tmp_path / "ghcnd.csv"),
+        "--change-points", str(tmp_path / "change-points.csv")])
+    live_baselines.main()
+    out = capsys.readouterr().out
+    assert "last full day used: 2026-01-30" in out
+    assert "- gust column: WSF5 (event at 20.0 m/s or more)" in out
+    for heading in ("## Weather event days within 21 days of each switch", "## Daily requests around each switch, by system",
+                    "## Switch dates as change points", "### Break-date scan (12 weeks either side)",
+                    "## Carry-over coverage", "## Surge rates by baseline method"):
+        assert heading in out
+    assert "| A seasonal | 1.5 | 3 |" in out and "| B post-switch only | 2.0 | 5 |" in out

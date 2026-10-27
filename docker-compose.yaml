@@ -178,5 +178,40 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
+  # The full test suite with coverage (#38): `docker compose run --rm --build test`.
+  # The Airflow image gives Python 3.12 (ADR-013) and Airflow for the DAG tests, so
+  # the host needs no Python. The profile keeps it out of `docker compose up`, and it
+  # starts nothing else. No anchor: no database, no API keys and no .env reach it,
+  # and it has no network (conftest.py already fails a test that tries). Only what
+  # the tests read is mounted, read-only, and an empty folder hides
+  # Data-Pipeline/data, so a run on a laptop sees what CI sees. Arguments replace
+  # the full suite and go to pytest, for example
+  # `docker compose run --rm test Data-Pipeline/tests/test_dvc_push.py --no-cov`.
+  test:
+    image: brt-airflow:local
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
+    profiles: ["test"]
+    entrypoint: ["bash", "Data-Pipeline/tests/run_tests.sh"]
+    working_dir: /opt/airflow/repo
+    network_mode: none
+    environment:
+      PYTHONPATH: /opt/airflow/repo/Data-Pipeline/scripts  # as in the stack, so the DAGs import the same way
+      PYTHONDONTWRITEBYTECODE: "1"  # the repo is read-only
+      COVERAGE_FILE: /tmp/.coverage
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      BRT_TEST_SERVICE: "1"  # the DAG tests fail instead of skipping when Airflow is missing
+    volumes:
+      - ./Data-Pipeline:/opt/airflow/repo/Data-Pipeline:ro
+      - ./docs/data:/opt/airflow/repo/docs/data:ro
+      - ./.coveragerc:/opt/airflow/repo/.coveragerc:ro
+      - ./.env.example:/opt/airflow/repo/.env.example:ro
+      - ./.dvc/config:/opt/airflow/repo/.dvc/config:ro  # the remote URL only, not DVC's cache
+    tmpfs:
+      - /opt/airflow/repo/Data-Pipeline/data
+    user: "${AIRFLOW_UID:-50000}:0"
+    logging: *default-logging
+
 volumes:
   postgres-db-volume:

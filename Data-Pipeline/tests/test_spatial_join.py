@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import geopandas as gpd
@@ -6,6 +7,7 @@ import pandas as pd
 import pytest
 from shapely.geometry import box
 
+import spatial_join
 from spatial_join import (
     LOCATIONS,
     NO_COORDINATES,
@@ -151,3 +153,23 @@ def test_hand_checked_landmarks():
     out, _ = locate(requests([(lat, lon) for _, lat, lon, _, _ in LANDMARKS]), tracts, units, PLACEHOLDERS)
     assert out["geoid20"].tolist() == [tract for *_, tract, _ in LANDMARKS]
     assert out["unit"].tolist() == [unit for *_, unit in LANDMARKS]
+
+
+def test_main_places_requests_and_writes_the_located_table(tmp_path, monkeypatch, capsys):
+    # The spatial_join task runs this main() (pipeline_steps.run_step).
+    TRACTS.to_parquet(tmp_path / "tracts.parquet")
+    NEIGHBORHOODS.to_parquet(tmp_path / "hoods.parquet")
+    requests([(42.31, -71.09), (42.33, -71.02), (np.nan, np.nan)]).to_parquet(tmp_path / "combined.parquet", index=False)
+    (tmp_path / "placeholders.csv").write_text("latitude,longitude\n42.32,-71.08\n")
+    out = tmp_path / "interim" / "311_located.parquet"
+    monkeypatch.setattr(sys, "argv", [
+        "spatial_join.py", "--combined", str(tmp_path / "combined.parquet"), "--tracts", str(tmp_path / "tracts.parquet"),
+        "--neighborhoods", str(tmp_path / "hoods.parquet"), "--placeholders", str(tmp_path / "placeholders.csv"),
+        "--out", str(out)])
+    spatial_join.main()
+    located = pd.read_parquet(out)
+    assert located["location"].tolist() == [PLACED, PLACED, NO_COORDINATES]
+    assert located["unit"].tolist()[:2] == ["West", "East"]
+    printed = capsys.readouterr().out
+    assert "placed 2 of 3 requests in 2 units" in printed
+    assert "| year | source_system | rows |" in printed

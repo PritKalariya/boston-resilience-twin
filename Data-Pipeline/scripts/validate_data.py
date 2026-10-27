@@ -63,6 +63,8 @@ class ValidationFailed(RuntimeError):
 
 @dataclass
 class Check:
+    """One expectation's result: table, expectation, column, whether it passed, what was observed, and whether
+    a failure stops the stage."""
     table: str
     expectation: str
     column: str
@@ -72,6 +74,8 @@ class Check:
 
 
 def load_bounds(path: Path | str) -> dict[str, float]:
+    """The validation bounds in validation_bounds.csv (name, value). Raises when a column, a number or a bound
+    is missing."""
     table = pd.read_csv(path, dtype=str, keep_default_na=False)
     if not {"name", "value"} <= set(table.columns):
         raise ValueError(f"{Path(path).name} needs name and value columns")
@@ -95,6 +99,8 @@ class Validator:
         self.checks: list[Check] = []
 
     def run(self, table: str, df: pd.DataFrame, expectations: list, blocking: bool = True) -> None:
+        """Run the expectations on df as one suite and record a Check per result; blocking=False records
+        warnings only."""
         suite = gx.ExpectationSuite(name=table)
         for expectation in expectations:
             suite.add_expectation(expectation)
@@ -120,6 +126,7 @@ class Validator:
 
     @property
     def warnings(self) -> list[Check]:
+        """Failed checks that do not block: reported, but the stage still passes."""
         return [c for c in self.checks if not c.success and not c.blocking]
 
 
@@ -152,6 +159,7 @@ def open_hours(times: pd.Series) -> pd.Series:
 
 
 def in_boston(lat: pd.Series, lon: pd.Series) -> pd.Series:
+    """Whether each point lies in BOSTON_BOUNDS; a coordinate that is not a number counts as outside."""
     west, south, east, north = BOSTON_BOUNDS
     lat, lon = pd.to_numeric(lat, errors="coerce"), pd.to_numeric(lon, errors="coerce")
     return lat.between(south, north) & lon.between(west, east)
@@ -171,6 +179,8 @@ def raw_frame(path: Path, time_column: str, keep: list[str], utc: bool) -> tuple
 
 
 def validate_raw(v: Validator, raw_dir: Path, years: list[int], published: pd.DataFrame, bounds: dict) -> None:
+    """Check each raw legacy file and the new-system export: columns, case ids, open times, the median open
+    hour, points in Boston and the published row count."""
     published = published.set_index("source")["published_rows"]
     hour = {"min_value": bounds["median_open_hour_min"], "max_value": bounds["median_open_hour_max"]}
 
@@ -221,6 +231,7 @@ def validate_raw(v: Validator, raw_dir: Path, years: list[int], published: pd.Da
 
 
 def parquet_frame(path: Path, keep: list[str]) -> tuple[list[str], pd.DataFrame]:
+    """A parquet file's column names and the wanted columns that exist in it."""
     import pyarrow.parquet as pq
 
     header = pq.read_schema(path).names
@@ -230,6 +241,8 @@ def parquet_frame(path: Path, keep: list[str]) -> tuple[list[str], pd.DataFrame]
 def validate_processed(
     v: Validator, combined_path: Path, located_path: Path, units: list[str], latest: date, bounds: dict
 ) -> None:
+    """Check 311_combined.parquet and 311_located.parquet: columns, ids, systems, groups, matches, the time
+    range and the location fields. A missing file fails the stage."""
     hour = {"min_value": bounds["median_open_hour_min"], "max_value": bounds["median_open_hour_max"]}
     for path in (combined_path, located_path):
         if not path.exists():
@@ -285,12 +298,15 @@ def validate_processed(
 
 
 def markdown(checks: list[Check]) -> str:
+    """The checks as a markdown table."""
     lines = ["| table | check | column | ok | observed |", "|---|---|---|---|---|"]
     lines += [f"| {c.table} | {c.expectation} | {c.column} | {'yes' if c.success else 'NO'} | {c.observed} |" for c in checks]
     return "\n".join(lines)
 
 
 def main() -> None:
+    """Run the raw or processed checks (--stage), write the results to --out, and fail naming each failed
+    check."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", choices=["raw", "processed"], required=True)
     parser.add_argument("--config", default="Data-Pipeline/config/validation_bounds.csv")

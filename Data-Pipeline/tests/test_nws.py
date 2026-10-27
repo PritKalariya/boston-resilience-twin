@@ -108,3 +108,19 @@ def test_missing_user_agent_fails_naming_it(monkeypatch, tmp_path):
     monkeypatch.delenv("NWS_USER_AGENT", raising=False)
     with pytest.raises(credentials.MissingCredentialError, match="NWS_USER_AGENT is not set"):
         nws.main(["forecasts", "--raw-dir", str(tmp_path)])
+
+
+def test_main_saves_a_snapshot_with_the_user_agent(monkeypatch, tmp_path, capsys):
+    # The ingest_nws_alerts task runs this main() (pipeline_steps.run_step).
+    monkeypatch.setenv("NWS_USER_AGENT", "boston-resilience-twin (test@example.org)")
+    fetch, sent = fake_nws(), []
+
+    def get(url, headers):
+        sent.append(headers)
+        return fetch(url)
+
+    monkeypatch.setattr(nws.rf, "get", get)
+    nws.main(["alerts", "--raw-dir", str(tmp_path)])
+    assert capsys.readouterr().out.startswith("NWS alerts: saved ")
+    assert sent == [{"User-Agent": "boston-resilience-twin (test@example.org)", "Accept": "application/geo+json"}]
+    assert len(list(tmp_path.rglob("*.json"))) == 1

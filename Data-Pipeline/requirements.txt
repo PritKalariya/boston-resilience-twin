@@ -15,8 +15,10 @@ pyarrow==25.0.1
 # Not in the constraints file: pinned to the versions the tests passed on.
 # pyproj comes in through geopandas, iniconfig through pytest, altair through
 # great-expectations (ADR-022 dry run). dvc-gs brings gcsfs and google-auth,
-# which the constraints file pins.
+# which the constraints file pins. pytest-cov reports test coverage (#38) and
+# needs coverage 7.10.6 or later.
 altair==6.3.0
+coverage==7.16.2
 dvc==3.67.1
 dvc-gs==3.1.0
 geopandas==1.2.0
@@ -25,4 +27,5 @@ iniconfig==2.3.1
 pyogrio==0.13.0
 pyproj==3.8.0
 pytest==9.1.1
+pytest-cov==7.1.0
 shapely==2.2.0

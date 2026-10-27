@@ -1,6 +1,7 @@
 import json
 import logging
 import threading
+import urllib.error
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
 
@@ -269,3 +270,27 @@ def test_a_failed_send_does_not_leak_a_key_either(monkeypatch, caplog):
         alerts.on_task_failure(failed_context())
     assert "noaa-token-0123456789" not in caplog.text
     assert caplog.messages[-1] == "could not send the failure alert: proxy said: bad header token <NOAA_CDO_TOKEN>"
+
+
+def test_post_to_slack_raises_when_slack_cannot_be_reached(monkeypatch):
+    def unreachable(request, timeout):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(alerts.urllib.request, "urlopen", unreachable)
+    with pytest.raises(alerts.AlertNotSent, match="Slack could not be reached: connection refused"):
+        alerts.post_to_slack("https://hooks.slack.com/services/T000/B000/xyz", "x")
+
+
+def test_post_to_slack_raises_on_an_answer_other_than_200():
+    server, url = serve(202)
+    try:
+        with pytest.raises(alerts.AlertNotSent, match="Slack answered HTTP 202"):
+            alerts.post_to_slack(url, "x", timeout=5)
+    finally:
+        server.server_close()
+
+
+def test_main_without_test_is_a_usage_error():
+    with pytest.raises(SystemExit) as exited:
+        alerts.main([])
+    assert exited.value.code == 2

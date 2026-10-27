@@ -43,6 +43,7 @@ AHEAD_DAYS = 365  # baselines are compared over the year after the data ends
 
 
 def check_policy(policy: str) -> str:
+    """The policy if it is one of POLICIES; otherwise ValueError naming the allowed ones."""
     if policy not in POLICIES:
         raise ValueError(f"unknown {SETTING} {policy!r}; use one of: {', '.join(POLICIES)}")
     return policy
@@ -172,6 +173,8 @@ def window_summary(counts, flags, labeled, expected, start, end) -> dict:
 
 
 def main() -> None:
+    """Print the tables behind ADR-021 (after_switch rows by category, the worst overlap windows and the storm
+    labels under each policy). Writes no files."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--combined", default="Data-Pipeline/data/interim/311_combined.parquet")
     parser.add_argument("--config", default="Data-Pipeline/config/processing.csv")

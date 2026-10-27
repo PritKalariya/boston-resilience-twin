@@ -104,6 +104,8 @@ ATTRIBUTION_COLUMNS = [
 
 @dataclass(frozen=True)
 class WeatherSet:
+    """One row of Data-Pipeline/config/open_meteo.csv: the API, model, hourly values, place and attribution of
+    a set."""
     name: str
     url: str
     model: str
@@ -161,6 +163,7 @@ def read_config(path: Path | str, today: date | None = None) -> list[WeatherSet]
 
 
 def parse_set(row: dict, where: str, today: date) -> WeatherSet:
+    """A config row as a WeatherSet. Raises ValueError, naming the row, when a field is not valid."""
     name = row["name"]
     if not SET_NAME.fullmatch(name):
         raise ValueError(f"{where}: set name {name!r} must be lowercase letters, digits and _, since it names the folder")
@@ -229,6 +232,8 @@ class OpenMeteoClient:
         self._last = None
 
     def get(self, url: str) -> bytes:
+        """GET url, trying a temporary server error (HTTP 5xx) again after each wait. Any other error is
+        raised at once."""
         for attempt in range(len(self.waits) + 1):
             try:
                 return self._get_once(url)
@@ -279,6 +284,7 @@ def hours(start: date, end: date) -> list[str]:
 
 
 def request_url(ws: WeatherSet, start: date, end: date) -> str:
+    """The API address for one set from start to end."""
     params = {
         "latitude": ws.latitude,
         "longitude": ws.longitude,
@@ -395,6 +401,7 @@ def set_end(ws: WeatherSet, client, now: datetime) -> date:
 
 
 def file_sha256(path: Path) -> str:
+    """SHA-256 of a file, read in 1 MB chunks."""
     digest = hashlib.sha256()
     with open(path, "rb") as f:
         while chunk := f.read(1 << 20):
@@ -403,12 +410,14 @@ def file_sha256(path: Path) -> str:
 
 
 def write_atomic(path: Path, body: bytes) -> None:
+    """Write body through a hidden temporary file and rename it, so a crash never leaves half a file."""
     tmp = path.with_name(f".{path.name}.part")
     tmp.write_bytes(body)
     os.replace(tmp, path)
 
 
 def write_json_atomic(path: Path, data: dict) -> None:
+    """Write data as sorted, indented JSON (write_atomic)."""
     write_atomic(path, json.dumps(data, indent=2, sort_keys=True, default=str).encode())
 
 
@@ -436,6 +445,7 @@ def load_manifest(state_folder: Path, legacy_folder: Path | None = None) -> dict
 
 
 def save_manifest(state_folder: Path, manifest: dict) -> None:
+    """Write a set's manifest to its state folder (write_json_atomic)."""
     Path(state_folder).mkdir(parents=True, exist_ok=True)
     write_json_atomic(Path(state_folder) / MANIFEST, manifest)
 
@@ -798,6 +808,8 @@ def write_attribution(path: Path, rows: list[dict]) -> bool:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Download each configured set up to its last finished day and, after a run with no failure, write the
+    attribution rows; --dry-run only sends the ERA5 end check."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="Data-Pipeline/config/open_meteo.csv")
     parser.add_argument("--raw-dir", default="Data-Pipeline/data/raw/open_meteo", help="the year files, and nothing else")

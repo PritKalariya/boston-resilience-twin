@@ -1,12 +1,24 @@
 import json
+import threading
+import urllib.error
 import urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import geopandas as gpd
 import pandas as pd
 import pytest
 from shapely.geometry import Polygon
 
-from static_layers import DefaultPortRedirect, load_layer, manifest_row, read_config, read_table, read_vector
+from static_layers import (
+    USER_AGENT,
+    DefaultPortRedirect,
+    download,
+    load_layer,
+    manifest_row,
+    read_config,
+    read_table,
+    read_vector,
+)
 
 CONFIG_HEADER = "name,kind,file,url,publisher,vintage,license,key,text_columns\n"
 
@@ -203,3 +215,68 @@ def test_redirect_drops_default_https_port():
     assert new.full_url == "https://s3.amazonaws.com/bucket/f.xlsx?X-Amz-Signature=a%2Fb"
     other = DefaultPortRedirect().redirect_request(req, None, 302, "Found", {}, "https://example.org:8443/f")
     assert other.full_url == "https://example.org:8443/f"
+
+
+class LayerServer(BaseHTTPRequestHandler):
+    """A local stand-in for a layer's download address (loopback is allowed in tests)."""
+
+    status, body, agents = 200, b"name,value\nA,1\n", []
+
+    def do_GET(self):
+        LayerServer.agents.append(self.headers["User-Agent"])
+        self.send_response(self.status)
+        self.send_header("Content-Length", str(len(self.body)))
+        self.end_headers()
+        self.wfile.write(self.body)
+
+    def log_message(self, *args):
+        pass
+
+
+def serve_layer(status):
+    LayerServer.status, LayerServer.agents = status, []
+    server = HTTPServer(("127.0.0.1", 0), LayerServer)
+    threading.Thread(target=server.handle_request, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}/population.csv"
+
+
+def test_download_writes_the_file_through_a_part_file(tmp_path):
+    # The real download path of `ingest_static_layers --download`.
+    server, url = serve_layer(200)
+    dest = tmp_path / "raw" / "population.csv"
+    try:
+        download(url, dest)
+    finally:
+        server.server_close()
+    assert dest.read_bytes() == LayerServer.body
+    assert sorted(p.name for p in dest.parent.iterdir()) == ["population.csv"]  # no .part file left
+    assert LayerServer.agents == [USER_AGENT]
+
+
+def test_a_failed_download_leaves_no_file(tmp_path):
+    server, url = serve_layer(404)
+    dest = tmp_path / "raw" / "population.csv"
+    try:
+        with pytest.raises(urllib.error.HTTPError):
+            download(url, dest)
+    finally:
+        server.server_close()
+    assert list(dest.parent.iterdir()) == []
+
+
+def test_a_document_layer_is_only_checked(tmp_path):
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "notes.pdf").write_bytes(b"%PDF-1.4")
+    layer = pd.Series({"name": "flood_notes", "kind": "document", "file": "notes.pdf", "key": "", "text_columns": ""})
+    report = load_layer(layer, raw, tmp_path / "out")
+    assert report.name == "flood_notes" and report.rows == 0
+    assert not (tmp_path / "out").exists()  # nothing written for a document
+    with pytest.raises(FileNotFoundError):
+        load_layer(layer.copy().replace({"notes.pdf": "missing.pdf"}), raw, tmp_path / "out")
+
+
+def test_vector_with_no_geometry_left_is_rejected(tmp_path):
+    path = write_geojson(tmp_path, [{"type": "Feature", "properties": {"id": 1}, "geometry": None}])
+    with pytest.raises(ValueError, match="has no features with geometry"):
+        read_vector(path)

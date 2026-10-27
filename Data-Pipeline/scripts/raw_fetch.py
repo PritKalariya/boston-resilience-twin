@@ -50,6 +50,7 @@ def get(url: str, headers: dict[str, str], timeout: float = TIMEOUT_SECONDS) -> 
 
 
 def parse_json(body: bytes, what: str):
+    """The JSON in an answer. FetchError, naming what, when it is empty or not valid JSON."""
     if not body.strip():
         raise FetchError(f"{what}: the answer is empty")
     try:
@@ -67,10 +68,12 @@ def write_atomic(path: Path, body: bytes) -> None:
 
 
 def sha256(body: bytes) -> str:
+    """SHA-256 of bytes, as hex."""
     return hashlib.sha256(body).hexdigest()
 
 
 def load_manifest(state_dir: Path) -> dict:
+    """The manifest in state_dir ({} when there is none). FetchError saying how to fix it when it is broken."""
     path = state_dir / MANIFEST
     if not path.exists():
         return {}
@@ -84,6 +87,7 @@ def load_manifest(state_dir: Path) -> dict:
 
 
 def save_manifest(state_dir: Path, manifest: dict) -> None:
+    """Write the manifest to state_dir, sorted (write_atomic)."""
     write_atomic(state_dir / MANIFEST, (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode())
 
 
@@ -97,6 +101,7 @@ class Period:
 
 
 def years(first: date, last: date) -> list[Period]:
+    """One Period per calendar year from first to last, the first and last years cut to those days."""
     return [
         Period(str(y), max(first, date(y, 1, 1)), min(last, date(y, 12, 31)))
         for y in range(first.year, last.year + 1)
@@ -141,4 +146,5 @@ def store(folder: Path, state_dir: Path, manifest: dict, filename: str, period: 
 
 
 def utc_now() -> datetime:
+    """The current time in UTC; tests replace it."""
     return datetime.now(timezone.utc)

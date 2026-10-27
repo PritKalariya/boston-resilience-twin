@@ -125,3 +125,27 @@ def test_a_rerun_with_nothing_new_leaves_raw_untouched(tmp_path):
     assert {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in raw.iterdir()} == before
     assert sorted(before) == ["2015.json", "2016.json"]  # the manifest lives in state/
     assert sorted(rf.load_manifest(tmp_path / "state")) == ["2015.json", "2016.json"]
+
+
+def test_an_answer_with_a_count_but_no_results_list_fails(tmp_path):
+    body = json.dumps({"metadata": {"resultset": {"count": 5}}, "results": "none"}).encode()
+    with pytest.raises(rf.FetchError, match="no results list"):
+        refresh(tmp_path, FakeCdo(overrides={(2015, 1): body}))
+    assert not (tmp_path / "raw" / "2015.json").exists()
+
+
+def test_main_sends_the_token_and_reports_each_year(tmp_path, monkeypatch, capsys):
+    # The ingest_noaa_logan task runs this main() (pipeline_steps.run_step).
+    monkeypatch.setenv("NOAA_CDO_TOKEN", "test-token")
+    fake, sent = FakeCdo({2015: 300, 2016: 20}), []
+
+    def get(url, headers):
+        sent.append(headers)
+        return fake(url)
+
+    monkeypatch.setattr(noaa_logan.rf, "get", get)
+    monkeypatch.setattr(noaa_logan.rf, "utc_now", lambda: NOW)
+    noaa_logan.main(["--raw-dir", str(tmp_path / "raw"), "--state-dir", str(tmp_path / "state")])
+    assert capsys.readouterr().out.strip() == (
+        f"NOAA {noaa_logan.STATION}: 2015.json downloaded (300 values), 2016.json downloaded (20 values)")
+    assert {headers["token"] for headers in sent} == {"test-token"}
