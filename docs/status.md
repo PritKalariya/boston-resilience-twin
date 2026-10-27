@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-27 by piyush1420. Edit this file in the PR that changes the state.
+Updated: 2026-10-27 by Kirtan. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
