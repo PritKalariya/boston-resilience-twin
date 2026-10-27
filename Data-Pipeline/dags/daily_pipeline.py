@@ -6,7 +6,7 @@ data). The defaults are the full build, written to Data-Pipeline/data/interim/
 and processed/. Any other range is a slice, written to
 Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/.
 
-Twelve tasks run pipeline scripts, four of them the weather and tide
+Thirteen tasks run pipeline scripts, four of them the weather and tide
 downloads (#7). parse_legacy_311 runs once per legacy year, at most
 LEGACY_PARALLEL at a time (4 unless .env sets it), and merge_legacy_311 joins
 the years (#37). The others are placeholders: they log the issue that builds
@@ -162,7 +162,7 @@ def daily_pipeline():
     parse_legacy >> merged
     [merged, parse_new] >> combined
     [combined, static] >> real("spatial_join") >> real("daily_counts") >> todo("labels_and_features") >> validated
-    validated >> [todo("schema_and_statistics"), todo("bias_slicing")] >> push_data()
+    validated >> [real("schema_and_statistics"), todo("bias_slicing")] >> push_data()
 
 
 daily_pipeline()

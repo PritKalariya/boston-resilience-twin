@@ -65,14 +65,15 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Twelve tasks run scripts: `ingest_static_layers`, the weather and tide
+- Thirteen tasks run scripts: `ingest_static_layers`, the weather and tide
   downloads (`ingest_noaa_logan`, `ingest_nws_forecasts`, `ingest_nws_alerts`
   and `ingest_tides`, #7), `validate_raw`, `parse_legacy_311`,
-  `parse_new_311`, `combine_311`, `spatial_join`, `validate_processed` and
-  `daily_counts`. `parse_legacy_311` runs once per legacy year, at most 4 at
-  a time by default (`LEGACY_PARALLEL`), and `merge_legacy_311` joins the
-  years with `legacy_311.read_years`' rule for repeated case ids (#37).
-- The other 6 are placeholders. Each logs the issue that builds it
+  `parse_new_311`, `combine_311`, `spatial_join`, `daily_counts`,
+  `validate_processed` and `schema_and_statistics`. `parse_legacy_311` runs
+  once per legacy year, at most 4 at a time by default (`LEGACY_PARALLEL`),
+  and `merge_legacy_311` joins the years with `legacy_311.read_years`' rule
+  for repeated case ids (#37).
+- The other 5 are placeholders. Each logs the issue that builds it
   (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
 - Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
   hand.
@@ -632,6 +633,23 @@ docker compose run --rm \
 - **`dvc: command not found`, or `No module named dvc` from `dvc_push.py`.** Run
   `pip install -r Data-Pipeline/requirements.txt` in the Python 3.12 venv. In
   Airflow, rebuild the image (above).
+
+## Schema and statistics (every run)
+
+`schema_stats.py` describes the processed tables on every run (#35): for each table, the schema (columns, types, share missing) and summary statistics (numeric spread, category shares, rows per year). In `daily_counts`, where every unit and group has the same number of rows, the category shares are shares of requests, so a storm group's share of the counts is tracked.
+
+```bash
+python Data-Pipeline/scripts/schema_stats.py            # located and daily_counts, into Data-Pipeline/data/processed/stats/
+python Data-Pipeline/scripts/schema_stats.py --no-docs  # skip the Great Expectations data docs
+```
+
+Outputs in `Data-Pipeline/data/processed/stats/` (versioned with the rest of `Data-Pipeline/data/` by DVC):
+
+- `<table>.json`: the schema and statistics. Replaced each run, so the previous run's numbers are the version before it.
+- `drift.json`: shifts from the previous run beyond the thresholds in `Data-Pipeline/config/stats_thresholds.csv`, plus every schema change (a column added, removed or retyped).
+- `data_docs/index.html`: Great Expectations data docs showing the same numbers. Open it in a browser.
+
+The run compares with the previous run's files before replacing them, and builds the data docs before it writes any JSON, so a failed run leaves the previous files as they were. If the statistics, the thresholds and the data docs are all unchanged it writes nothing, so a rerun on the same data leaves the folder as it was. `drift.json` keeps the statistics it compared against (`baselines`), so after a threshold change a rerun on the same data checks that same comparison again with the new values. Shifts are printed and saved but do not fail the run; the validation steps (#17) are what stop a run. To change a threshold, edit the config in a reviewed PR. A table that does not exist yet (`daily_counts` before #15 merges) is skipped and reported.
 
 ## Project 1 infrastructure (Terraform)
 

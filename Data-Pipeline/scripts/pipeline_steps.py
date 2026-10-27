@@ -57,6 +57,7 @@ log = logging.getLogger(__name__)
 
 # Task id -> pipeline script in Data-Pipeline/scripts.
 SCRIPTS = {
+    "schema_and_statistics": "schema_stats",
     "ingest_static_layers": "static_layers",
     "parse_legacy_311": "legacy_311",
     "parse_new_311": "new_311",
@@ -76,7 +77,6 @@ PLANNED = {
     "ingest_new_311": "#6",
     "ingest_open_meteo": "#8",
     "labels_and_features": "#16",
-    "schema_and_statistics": "#35",
     "bias_slicing": "#32",
 }
 # Task id -> the outputs a slice cuts to its days afterwards, with their time column.
@@ -242,6 +242,17 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
     raw, interim = paths.raw, paths.interim
     config = root / "Data-Pipeline" / "config"
     hint_311 = "(by hand until #6 lands)"
+    if step == "schema_and_statistics":
+        # #35. No data_out: the step compares with the previous run's files, so
+        # they must not be cleared first, and it writes nothing when they are unchanged.
+        located, counts = interim / "311_located.parquet", paths.processed / "daily_counts.parquet"
+        thresholds = config / "stats_thresholds.csv"
+        return StepPlan(
+            args=["--located", located, "--daily-counts", counts,
+                  "--thresholds", thresholds, "--out-dir", paths.processed / "stats"],
+            files=StepFiles(data_in=[located], config_in=[thresholds]),
+            hint="Run spatial_join and daily_counts for the same range first.",
+        )
     if step == "ingest_static_layers":
         layers, raw_dir, out_dir = config / "static_layers.csv", raw / "static", interim / "static"
         return StepPlan(
@@ -512,7 +523,7 @@ def run_step(
                 before, kept = trim_to_range(interim / name, column, days)
                 log.info("run %s task %s: kept %s of %s rows of %s in %s", run_id, task, f"{kept:,}", f"{before:,}", name, days.label)
         rows_in = sum(count_rows(path) for path in plan.files.data_in) if plan.files.data_in else None
-        rows_out = sum(count_rows(path) for path in plan.files.data_out)
+        rows_out = sum(count_rows(path) for path in plan.files.data_out) if plan.files.data_out else None
     except Exception as e:
         log.error("run %s task %s failed: %s: %s", run_id, task, type(e).__name__, e)
         raise

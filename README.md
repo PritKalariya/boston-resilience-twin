@@ -163,6 +163,10 @@ The outputs did not change: `legacy_311.parquet` (3,039,046 rows), `new_311.parq
 
 **Memory.** Both runs stay under the 4 GB this README asks Docker to have (Setup). `docker stats` was sampled about every 2.5 s. The scheduler cgroup's `memory.peak`, which records the true peak, was 2.52 GiB after the first run and 2.59 GiB after both, so the whole stack stayed under 3.3 GiB. At the peak, 1.95 GiB of the scheduler's memory was the tasks' own and 0.1 GiB was file cache. More years at once would raise the peak, which is why `LEGACY_PARALLEL` caps it. On the 2-vCPU VM the gain will be smaller; #61 measures memory there.
 
+## Data quality
+
+Every pipeline run checks the raw and processed data (#17) and writes a schema and summary statistics of the processed tables (#35): `Data-Pipeline/data/processed/stats/`, with Great Expectations data docs at `Data-Pipeline/data/processed/stats/data_docs/index.html` and the shifts from the previous run in `drift.json`. How to read them and change the thresholds: [Schema and statistics](docs/runbook.md#schema-and-statistics-every-run) in the runbook.
+
 ## Data and licenses
 
 Boston 311 data is published on Analyze Boston under the PDDL. NWS, NOAA, and Census data are U.S. government works. Weather data by [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0).
