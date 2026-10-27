@@ -62,7 +62,6 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `uv venv --python 3.12 --seed .venv && source .venv/bin/activate`: create and enter a Python 3.12 venv with pip in it (ADR-013); `.venv/` is gitignored
 - `pip install -r Data-Pipeline/requirements.txt`: pinned from the Airflow 3.3.2 constraints (the `-c` line). A new package takes the constraints file's version; if the file has none, pin the version the tests passed on.
 - `python Data-Pipeline/scripts/legacy_311.py`: parse legacy 311 files in `Data-Pipeline/data/raw/311/` to `Data-Pipeline/data/interim/legacy_311.parquet`, with per-file drop counts
-- `Data-Pipeline/README.md`, "Get the raw data": download the 13 raw 311 files to `Data-Pipeline/data/raw/311/`, looking up each current link by the resource id in `Data-Pipeline/config/published_311_counts.csv` (1.7 GB, about 2 minutes)
 - `python Data-Pipeline/scripts/measure_311.py`: reconciliation, sparsity, and storm ratio tables (markdown)
 - `python Data-Pipeline/scripts/new_311.py`: parse the new-system export to `Data-Pipeline/data/interim/new_311.parquet`, with drop counts
 - `python Data-Pipeline/scripts/map_311.py`: apply `docs/data/category-map.csv`, combine both systems into `Data-Pipeline/data/interim/311_combined.parquet`, write `docs/data/change-points.csv`
