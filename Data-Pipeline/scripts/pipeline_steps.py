@@ -66,19 +66,21 @@ SCRIPTS = {
     "combine_311": "map_311",
     "spatial_join": "spatial_join",
     "daily_counts": "daily_counts",
+    "ingest_alert_history": "alert_history",
+    "surge_labels": "surge_labels",
+    "feature_table": "feature_table",
     "validate_raw": "validate_data",
     "validate_processed": "validate_data",
     "ingest_noaa_logan": "noaa_logan",
     "ingest_nws_forecasts": "nws",
     "ingest_nws_alerts": "nws",
     "ingest_tides": "tides",
+    "ingest_open_meteo": "open_meteo",
     "ingest_legacy_311": "ingest_311",
     "ingest_new_311": "ingest_311",
 }
 # Task id -> the issue that builds it; a placeholder in the DAG until then.
 PLANNED = {
-    "ingest_open_meteo": "#8",
-    "labels_and_features": "#16",
     "bias_slicing": "#32",
 }
 # Task id -> the outputs a slice cuts to its days afterwards, with their time column.
@@ -330,6 +332,45 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
             files=StepFiles(data_in=[located], config_in=[hoods, processing], data_out=[out]),
             hint="Run spatial_join for the same range first.",
         )
+    if step == "ingest_alert_history":
+        # #16, ADR-014: one IEM bulk pull per year for office BOX into the shared raw folder; the
+        # prepared alerts cover every year whatever the range, since the features need the history.
+        # When each year was pulled goes to data/state/, like the #7 and #8 manifests.
+        raw_dir, alert_map = raw / "nws_alerts", root / "docs" / "data" / "alert-map.csv"
+        out = interim / "nws_alerts.parquet"
+        return StepPlan(
+            args=["--raw-dir", raw_dir, "--state-dir", raw.parent / "state" / "nws_alerts",
+                  "--map", alert_map, "--out", out, "--download"],
+            files=StepFiles(config_in=[alert_map], data_out=[out]),
+            hint="Restore docs/data/alert-map.csv from git.",
+            refetch=raw_dir,
+        )
+    if step in ("surge_labels", "feature_table"):
+        # #16. A label needs the same weeks of the 3 years before its day (ADR-005) and a feature the
+        # 28 days before, so both read the full build's daily counts; a slice writes only its days.
+        counts = run_paths(DateRange(), root).processed / "daily_counts.parquet"
+        settings, end = config / "labels_features.csv", (["--end", days.end] if days.end else [])
+        if step == "surge_labels":
+            rules, out = config / "surge_rules.csv", paths.processed / "labels.parquet"
+            return StepPlan(
+                args=["--counts", counts, "--rules", rules, "--settings", settings,
+                      "--start", days.start, *end, "--out", out],
+                files=StepFiles(data_in=[counts], config_in=[rules, settings], data_out=[out]),
+                hint="Run daily_counts for the full build (start 2015-01-01, no end) first.",
+            )
+        # Weather and tides (#7, #8) come from the shared raw folders the ingest tasks fill; the
+        # folders are required, so a missing download stops the task before it runs.
+        alerts, static, out = interim / "nws_alerts.parquet", interim / "static", paths.processed / "features.parquet"
+        noaa, forecasts = raw / "weather" / "noaa_logan", raw / "open_meteo" / "day_before_ncep_gfs_global"
+        tides = raw / "tides" / "predicted"
+        return StepPlan(
+            args=["--counts", counts, "--alerts", alerts, "--static-dir", static, "--settings", settings,
+                  "--noaa-dir", noaa, "--forecast-dir", forecasts, "--tides-dir", tides,
+                  "--start", days.start, *end, "--out", out],
+            files=StepFiles(data_in=[counts, alerts], config_in=[static, settings, noaa, forecasts, tides], data_out=[out]),
+            hint="Run daily_counts for the full build, ingest_alert_history, ingest_static_layers, "
+                 "ingest_noaa_logan, ingest_tides and ingest_open_meteo first.",
+        )
     if step in ("ingest_noaa_logan", "ingest_nws_forecasts", "ingest_nws_alerts", "ingest_tides"):
         # #7. Raw downloads add to their folders and keep history, so they have no
         # data_out to clear; a missing key fails before the script runs. Their
@@ -343,6 +384,18 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
             "ingest_tides": (["--raw-dir", raw / "tides", "--state-dir", state / "tides"], ()),
         }[step]
         return StepPlan(args=args, files=StepFiles(), hint='Team members: fill .env with the runbook command ("API keys in .env").', env=env)
+    if step == "ingest_open_meteo":
+        # #8: every set in config/open_meteo.csv. The year files add to the shared raw folder and keep
+        # their history, so there is no data_out to clear; no key is needed. Manifests, run logs and the
+        # attribution rows go to data/state/, since docs/data is read-only in the containers (the
+        # committed docs/data/open-meteo.csv comes from a run of the script, runbook #8 section).
+        sets, state = config / "open_meteo.csv", raw.parent / "state" / "open_meteo"
+        return StepPlan(
+            args=["--config", sets, "--raw-dir", raw / "open_meteo", "--state-dir", state,
+                  "--attribution", state / "open-meteo.csv"],
+            files=StepFiles(config_in=[sets]),
+            hint="Restore Data-Pipeline/config/open_meteo.csv from git.",
+        )
     if step == "validate_raw":
         # #17. Only rows in are counted: the step writes a JSON of check results, not data.
         raw_dir, bounds, published = raw / "311", config / "validation_bounds.csv", config / "published_311_counts.csv"

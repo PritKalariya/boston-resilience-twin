@@ -65,16 +65,18 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Fifteen tasks run scripts: the 311 downloads (`ingest_legacy_311` and
-  `ingest_new_311`, #6), `ingest_static_layers`, the weather and tide
-  downloads (`ingest_noaa_logan`, `ingest_nws_forecasts`, `ingest_nws_alerts`
-  and `ingest_tides`, #7), `validate_raw`, `parse_legacy_311`,
-  `parse_new_311`, `combine_311`, `spatial_join`, `daily_counts`,
+- Nineteen tasks run scripts: the 311 downloads (`ingest_legacy_311` and
+  `ingest_new_311`, #6), `ingest_static_layers`, `ingest_alert_history`, the
+  five weather and tide downloads (`ingest_noaa_logan`, `ingest_nws_forecasts`,
+  `ingest_nws_alerts`, `ingest_tides` and `ingest_open_meteo`, #7 and #8),
+  `validate_raw`, `parse_legacy_311`, `parse_new_311`, `combine_311`,
+  `spatial_join`, `daily_counts`, `surge_labels`, `feature_table`,
   `validate_processed` and `schema_and_statistics`. `parse_legacy_311` runs
   once per legacy year, at most 4 at a time by default (`LEGACY_PARALLEL`),
   and `merge_legacy_311` joins the years with `legacy_311.read_years`' rule
-  for repeated case ids (#37).
-- The other 3 are placeholders. Each logs the issue that builds it
+  for repeated case ids (#37). `check_range` starts the run and `push_data`
+  ends it.
+- The other one, `bias_slicing`, is a placeholder. It logs the issue that builds it
   (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
 - `ingest_legacy_311` and then `ingest_new_311` refresh the raw 311 files in
   `Data-Pipeline/data/raw/311/` on their schedule, for any range (see "311
@@ -515,7 +517,7 @@ What a run does, for each set:
 2. Splits the dates into calendar years. A year already stored through that day is skipped without a request. For `end = yesterday`, a year counts as stored only once its last day has every hour of every value that has data. A last day with gaps, for example a 31 December downloaded before Open-Meteo had its evening hours, is never taken as complete. It is fetched again on every run for 7 days after that day, then once a week until the gaps are filled. Until then its manifest entry has `final_day_complete: false`, the values with gaps (`final_day_gaps`) and the date of the last check (`final_day_checked`), `docs/data/open-meteo.csv` shows the missing hours, and a run that skips it prints `last day still has gaps in [...], next check on or after <date>`. A check that brings nothing new rewrites no year file. A value with no data at all (showers in ECMWF IFS before 2025) stays missing and is not a gap.
 3. Downloads each other year whole and checks the answer: not empty, valid JSON, no Open-Meteo error, in UTC, every hour and value present, numbers only, grid point within 0.5 degrees of Logan. Only then does it replace the year file, and only if its bytes changed. A failed check keeps the stored file, logs the year as `failed`, and the run exits with code 1.
 4. Updates the set's `_manifest.json` (download time, start date, last hour stored, grid point, hours with data per value, whether the last day is complete) and adds a line to `_runs.jsonl`, both under `Data-Pipeline/data/state/open_meteo/<set>/`.
-5. After a run with no failure, writes `docs/data/open-meteo.csv` with the attribution, coverage, download time and SHA-256 of every file, and only if its content changed. With `--only`, the other sets keep their rows as they are, and so does a set with no files on this machine. A run with a failure leaves the file alone. Commit it with the change; a DAG run should write it under `Data-Pipeline/data/` with `--attribution`.
+5. After a run with no failure, writes `docs/data/open-meteo.csv` with the attribution, coverage, download time and SHA-256 of every file, and only if its content changed. With `--only`, the other sets keep their rows as they are, and so does a set with no files on this machine. A run with a failure leaves the file alone. Commit it with the change; a DAG run should write it under `Data-Pipeline/data/` with `--attribution`, and the `ingest_open_meteo` task does: `Data-Pipeline/data/state/open_meteo/open-meteo.csv` (docs/data is read-only in the containers).
 
 Output: `Data-Pipeline/data/raw/open_meteo/<set>/<year>.json` (the downloads, nothing else) and `Data-Pipeline/data/state/open_meteo/<set>/` (`_manifest.json`, `_runs.jsonl`), gitignored and local only. A rerun with nothing new rewrites no year file and no attribution row. Nothing is uploaded; raw data reaches Cloud Storage only through DVC (#18, #19). No API key is needed.
 
@@ -562,6 +564,29 @@ python Data-Pipeline/scripts/daily_counts.py --start 2025-01-01 --end 2025-12-31
 ```
 
 `requests` counts every request kept under `after_switch_policy` (ADR-021); `baseline_requests` counts the ones baselines may use, which under `keep` is the same number. The run prints each step from the combined table to the counted total (unmapped, not storm-related, after_switch, each no-location reason, no date, outside the range) and stops if the counts do not add up to the total.
+
+## Surge labels and features (#16)
+
+Three scripts, each a `daily_pipeline` task (`ingest_alert_history`, `surge_labels`, `feature_table`):
+
+```bash
+python Data-Pipeline/scripts/alert_history.py --download   # NWS alert history (ADR-014 A+): pull every year not yet final, then prepare
+python Data-Pipeline/scripts/surge_labels.py --grid        # labels under the chosen rule, plus the surge rate of every rule
+python Data-Pipeline/scripts/feature_table.py              # features per unit and day, without weather and tides
+python Data-Pipeline/scripts/feature_table.py --noaa-dir Data-Pipeline/data/raw/weather/noaa_logan \
+  --forecast-dir Data-Pipeline/data/raw/open_meteo/day_before_ncep_gfs_global \
+  --tides-dir Data-Pipeline/data/raw/tides/predicted       # with weather and tides, as the feature_table task runs it
+```
+
+**Alert history.** `alert_history.py` pulls the Iowa Environmental Mesonet bulk VTEC download for NWS office BOX one year at a time into `Data-Pipeline/data/raw/nws_alerts/box_<year>.csv`, as published. IEM files an alert under the year it starts, so from 15 December the next year is pulled too. A year is final once it was pulled at least 14 days after it ended, because alerts that start late in December are still cancelled or upgraded in January; until then every `--download` pulls it again, and `--refresh` pulls every year. `_downloads.json` in `Data-Pipeline/data/state/nws_alerts/` (`--state-dir`) records when each year was pulled, so `raw/nws_alerts/` holds the IEM files and nothing else, as with #7 and #8; a pull that brings the same bytes leaves the stored file as it was. The first `--download` after the A+ change pulls every year once. A pull without IEM's columns (an error page) never replaces a stored year. It writes `Data-Pipeline/data/interim/nws_alerts.parquet`: one row per area and first bulletin for zone MAZ015 and county MAC025, with the first bulletin (`utc_prodissue`), the first-announced end (`utc_init_expire`) and `ended_early_utc`, the time IEM records a cancellation or upgrade (status CAN or UPG with `utc_expire` equal to `utc_updated`). The other last-state fields are dropped, so no feature can use them (ADR-014, Option A+). The run prints alerts per year and area, to compare with ADR-014, how many alerts ended early, a warning for any CAN or UPG row that fails the check, and any alert type missing from `docs/data/alert-map.csv`; add a row for it in a reviewed PR.
+
+**Evening freshness check (pending #39).** In the evening run, after 18:00 and after #7's `ingest_nws_alerts` has saved a snapshot, `alert_history.py --download --check-nws Data-Pipeline/data/raw/weather/nws_alerts --settings Data-Pipeline/config/labels_features.csv` stops with `FreshnessError` before writing when the IEM pull or the newest snapshot is older than the cutoff, or when a Boston alert message the NWS sent before 18:00 (or its cancellation or upgrade) is not in the pull yet. The task retries on its own; if it keeps failing, check https://mesonet.agron.iastate.edu and run the task again later. Never build the features without the check: a missing alert would count as zero. It logs how many minutes IEM's newest update is older than the pull, the most IEM can have lagged. The daily DAG does not run the check yet: the evening schedule is #39 and the snapshots come from #7.
+
+**Labels.** `surge_labels.py` compares each storm group's requests with its ADR-005 baseline (built from `baseline_requests`) under the rule marked `chosen` in `Data-Pipeline/config/surge_rules.csv`. A cell is a surge when any group in `label_groups` (`Data-Pipeline/config/labels_features.csv`) surges (ADR-004). With fewer than 20 history days there is no label: `surge` is blank, not false, so labels start on 2016-01-06. To change the rule, mark another row `chosen` in a reviewed PR; the rule is frozen by ADR before Model Development.
+
+**Features.** `feature_table.py` writes `Data-Pipeline/data/processed/features.parquet`, one row per unit and day: 311 lags up to day D minus `feature_min_lag_days`; NWS alerts first sent before `forecast_cutoff_local` (18:00 Boston time) the evening before D whose first-announced end is after D begins and that were not cancelled or upgraded before that cutoff, one count per alert even when it covers both zone and county; calendar fields; static attributes from `Data-Pipeline/data/interim/static/`. With `--noaa-dir` and `--forecast-dir` it adds weather: Logan's observed values of day D up to 2023-12-31, and after that the GFS day-before forecasts known at the cutoff (ADR-003), with `wx_source` saying which. With `--tides-dir` it adds the highest predicted water level of the Boston day. Missing weather and tide values stay blank, and the run prints how many forecast days are missing. If this year's NOAA or GFS file or this half-year's tide file is not stored yet, its days stay blank and the task log has a warning naming the file and the features left blank; a missing earlier file stops the task. It stops if a row uses a later 311 day, a 311 feature differs from the counts read by date, a cutoff is not before D, a row after 2023 has observed weather of its own day or a forecast available only after the cutoff, or a day has no weather or tide row at all. `Data-Pipeline/config/feature_catalog.csv` lists every column and whether the model may use it. The `feature_table` task passes the three folders the ingest tasks fill and stops before it runs, naming the folder, if one is missing (for example when `ingest_noaa_logan` has never run because `NOAA_CDO_TOKEN` is not set). A GFS value counts as available 7 hours after its run started (`forecast_issue_margin_hours`), so day D takes 1-day values only from runs up to 12 UTC on D-1 and 2-day values for its later hours; the evidence is in `docs/feature-table.md`.
+
+**Slices.** A label needs the 3 years before its day and a feature the 28 days before, so in a slice both tasks read the full build's `Data-Pipeline/data/processed/daily_counts.parquet` and write only the slice's days. Run the full build once before a slice. If its counts end before the slice does, both tasks stop before writing and name the missing days (`daily counts cover ... have no counts`); run the full build again, then the slice.
 
 ## Versioned data (DVC)
 

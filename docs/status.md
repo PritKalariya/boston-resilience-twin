@@ -25,6 +25,7 @@ Week 2: Processing (due 2026-10-18)
 | #13 Format mapping, legacy to new 311 | Srikar | 2026-10-14 | done | PR #52 merged; results below; new-system clock in ADR-020; flooding gap needs a team call |
 | #14 Spatial joins | Alekhya (built by Srikar for the Oct 25 deadline) | 2026-10-16 | in review | every request tagged with tract and unit by coordinates; 99.14% placed; results below |
 | #15 Daily counts | Srikar | 2026-10-17 | in review | neighborhood x day x storm group, zero-filled; 215,701 requests counted and reconciled; results below |
+| #16 Surge labels and feature table | Piyush | 2026-10-18 | in review | All six acceptance criteria met on real data (2026-10-26; `docs/feature-table.md`). Rule recommended: sd, k 2, m 5 (train 3.44%; provisional until the freeze, m 4 the alternative: from m 3 to m 5 the five smallest neighborhoods lose 45% of their training surges against 29% citywide, and flooding keeps 38 surges); 94,560 of 103,440 cells labeled, byte-identical in every build. Full build on real inputs: 103,440 rows (24 neighborhoods x 4,310 days), 44 columns, 31 of them model inputs: 311 lags, NWS alerts from the IEM archive under ADR-014 Option A+ (18:00 cutoff; an alert cancelled or upgraded before it is left out), calendar, static attributes, Logan's observed weather to 2023 and GFS day-before forecasts from 2024 (ADR-003), predicted tides. NOAA Logan and tides downloaded by #7's own tasks; every column recomputed from the raw files with no difference. Three `daily_pipeline` tasks, and `ingest_open_meteo` is a real task. Review fixes for Kirtan and Alekhya (2026-10-27): the leakage check recomputes the 311 lags by date, a range the counts do not cover stops both tasks, a missing current-period weather or tide file is named in a warning, `k` must be finite, a missing age group leaves its share blank, and the alert-start limit and the m 5 trade-off are documented; labels and features rebuild byte-identical (results below). Open: ADR-014 (PR #88, Blocked) and the evening run (#39). Every column is in `Data-Pipeline/config/feature_catalog.csv`; results below |
 | #35 Schema and statistics every run | Srikar | 2026-10-22 | in review | schema, statistics and Great Expectations data docs of 311_located and daily_counts each run, drift against the previous run; results below |
 | #20 Airflow on the VM | Prit | 2026-10-18 | done | PR #59 merged. Airflow stack on airflow-vm (LocalExecutor, Postgres 16; ADR-016); UI by SSH tunnel only; VM stopped. Runbook: "Airflow on the VM". After #58 merges, run the update step in the runbook on the VM |
 | #23 Write ADRs 001, 009, 010, 011, 012 | Prit | 2026-10-18 | done | PR #65 merged; ADRs in docs/decisions/ |
@@ -47,9 +48,19 @@ Week 2: Processing (due 2026-10-18)
 | #12 Decision: alert-history source for 2015 to 2023 | Piyush | 2026-10-14 | done | PR #88 merged. ADR-014 revised to Option A+ after Punith's review (approved by Punith on PR #88, 2026-10-26): NWS alert history from the Iowa Environmental Mesonet bulk download (office BOX, rows for Boston zone MAZ015 and county MAC025), with alerts in every year 2015 to 2026, so the alert feature meets ADR-003. Each alert counts from its first bulletin to its first-announced end and stops earlier only at a cancellation or upgrade IEM recorded before the 18:00 Boston cutoff (`utc_expire` = `utc_updated`); checked against the bulletins of all 584 cancelled or upgraded Boston rows, the rule never used a later bulletin. History and evening features both come from IEM with the same logic. #16 still needs the A+ code; evening scheduling is separate (#39); results below |
 
 ## Blocked
+- #16 alert history follows ADR-014 Option A+, which is still proposed (PR #88). Merge #88 before or with #16. One sentence needs its owner: ADR-014 says re-fetching the previous year in January is not needed, but under A+ a cancellation in early January of an alert that started in late December is only in the previous year's file, so `alert_history.py` re-pulls a year until 14 days after it ends.
 - #6: raw 311 reaches Cloud Storage only through DVC, and nothing is tracked yet. The DVC remote, `dvc_push.py` and the `push_data` task are in place (#19), but the stages that track `raw/311/` (`Data-Pipeline/dvc.yaml`, #18) are not, so until #18 lands the raw 311 files exist only on the machine that ran the DAG. Since the #6 review, `raw/311/` holds only the downloaded CSVs and changes only when a source changed.
 
 ## Risks raised
+- **No surge rule reaches the spec's 1.3 to 2.9%.** With the ADR-004 unit the training rate runs 3.44% (sd, k 2, m 5) to 14.86% (top 10%) across the #16 grid. Small neighborhoods stay thin: under the recommended rule Harbor Islands, Chinatown, Longwood and South Boston Waterfront have fewer than 5 surges in 2024, so their recall is noisy or undefined in 30-day fairness windows (#32). The floor of 5 requests is what thins them most: from m 3 to m 5 the five smallest neighborhoods lose 45% of their training surges, Mission Hill 55% and Longwood 58%, against 29% citywide (`docs/feature-table.md`, "Surge rule recommendation"; the freeze ADR decides).
+- **Alert features include alerts that begin after D (#16, ADR-014).** IEM's archive has no first-announced start, so a watch sent on D-1 for D+1 counts on D. On the real build that is 15.2% of snow_ice, 8.4% of tree and 12.3% of flooding alert-days, mostly watches (`docs/feature-table.md`, Rules). The features stay as they are: bounding by the final start could leak.
+- **Harbor Islands has no population or ACS values** in the 2025 tables, so its six population-based static attributes are blank (not filled in, ADR-003). Its flood-zone shares are set.
+- **Alert-to-storm-group calls need review** (`docs/data/alert-map.csv`): blizzard counts for snow_ice only, severe thunderstorm and tropical storm for tree and flooding, coastal flood statements for flooding. History and the evening run use the same rule (ADR-014 A+): an alert counts as first announced unless IEM records its cancellation or upgrade before the cutoff; extensions and later changes are not used.
+- **Observed weather lags cannot be filled live (#16).** CDO ran about 5 days behind on 2026-10-25 (#7's data card, PR #90), so Logan's observations of day D-2 fail ADR-003's live rule; `feature_catalog.csv` keeps them out of the model. A lag of 6 days or more (`observed_weather_lag_days`) or a faster live source would change that.
+- **Forecast snowfall is missing for most of the validation year (#16).** GFS day-before forecasts have no snowfall before 2024-12-06 (#8), so `wx_snowfall_mm` is blank in 2024 until its first full day, 2024-12-07, and every forecast value is blank before 2024-01-21 (341 and 20 of the 366 validation days on the real build). The gaps are kept, not filled (ADR-003).
+- **Live weather and tides need tomorrow's data (#16, #39).** #8's day-before forecasts end yesterday and #7's tide predictions end today, so the evening run needs both for tomorrow, or those features are blank live.
+- **The forecast cutoff rests on a measured GFS delay, not a guaranteed one (#16).** A GFS value counts as available 7 hours after its run starts (`forecast_issue_margin_hours`). Open-Meteo's metadata showed 5.6 to 6.0 hours for one run (2026-10-26 12 UTC), and the run behind each value matched single runs on 48 of 48 hours of 2026. So day D uses 1-day values only from runs up to 12 UTC on D-1; a 12 UTC run more than 10 hours late would miss the cutoff unseen, and runs before 2026-04-02 cannot be checked this way.
+- **The alert freshness check sees only what #7's NWS snapshot lists (#16).** The snapshot holds the active alerts for zone MAZ015, so a county-only alert, or a cancellation that ended an alert before the snapshot, is not checked (ADR-014).
 - **DVC stage files in the Airflow containers (#18).** The containers now mount `.git`, `.dvc`, `.dvcignore` and `Data-Pipeline/data`, enough for `push_data`. `Data-Pipeline/dvc.yaml` and its `dvc.lock` are not mounted, so #18 must add them before a task runs `dvc repro` or pushes stage outputs.
 - Legacy storm groups cover only 6.9% of legacy requests (210,049 of 3,037,969), against about 15% in the pre-scoping check. The groups now live in `docs/data/category-map.csv` (`storm_group` column) and may be narrower than the first run's. Worth a look before #10 locks the unit.
 - **New-system times are Boston local, not UTC.** `open_date` ends in `+00`, but 1,283 cases resubmitted from the legacy system open a median 2.6 minutes before the legacy close time, in both EST and EDT. Real UTC would be 4 to 5 hours later. Converting from UTC would shift every new-system time 4 to 5 hours early and move 1,124 requests (1.6%) to the previous day. The pipeline treats them as local and re-checks this on every run (`map_311.check_clock`). Recorded in ADR-020, accepted by the team on 2026-10-16; CLAUDE.md is updated to match.
@@ -68,7 +79,7 @@ Week 2: Processing (due 2026-10-18)
 - **Open-Meteo's archived forecasts for 2021 to 2023 are first-hours data.** The Historical Forecast API joins the first hours of each model run, so its values are almost the real weather, not what was forecast the evening before. ADR-003 (Srikar, PR #67) uses Open-Meteo archived forecasts from 2021 for validation and test, but only day-before forecasts (Previous Runs API) are safe there. This changes what ADR-003 means by archived forecasts, and the team must confirm it. #8 keeps them as set b, labeled not for validation or test (`docs/data/README.md`).
 - **Open-Meteo's Previous Runs data does not reach January 2024, although its docs say most models start then.** ECMWF IFS, HRRR and GFS return no values for 2024-01-01 to 2024-01-07 (requests of 2026-10-21 and 22). Set c (GFS) starts 2024-01-21, its first full day of 1-day and 2-day values, so validation loses January 2024 before it: no day-before forecasts for 2024-01-01 to 2024-01-20. ECMWF has none even on 2025-01-01.
 - **Early set c has no rain or snowfall.** In GFS day-before data, precipitation, showers, temperature and gusts are complete from 2024-01-21, but rain and snowfall start 2024-12-06 18:00 for 1 day ahead (first full day 2024-12-07) and 2024-12-07 18:00 for 2 days ahead (first full day 2024-12-08). #16 must decide how to handle snow in set c before then, for example from precipitation and temperature.
-- **Boston-local days and the cutoff rule moved to #16.** #8 stores hourly UTC values only; set c holds the 1-day and 2-day forecasts side by side. Note for #16: cutoff 00:00 UTC, 6-hour publish delay; set c holds both values from 2024-01-21. A 1-day value for hour H comes from a run that started about 24 hours before H and is published about 6 hours later, so it is known at the cutoff only up to 18:00 UTC on the target day. Use the 1-day value up to 18:00 UTC and the 2-day value for the evening hours.
+- **Boston-local days and the cutoff rule moved to #16.** #8 stores hourly UTC values only; set c holds the 1-day and 2-day forecasts side by side. Note for #16: cutoff 00:00 UTC, 6-hour publish delay; set c holds both values from 2024-01-21. (#16 uses the project's 18:00 Boston cutoff and each value's own run, with a 7-hour margin, so the 1-day value covers hours up to 17:00 UTC; `docs/feature-table.md`.) A 1-day value for hour H comes from a run that started about 24 hours before H and is published about 6 hours later, so it is known at the cutoff only up to 18:00 UTC on the target day. Use the 1-day value up to 18:00 UTC and the 2-day value for the evening hours.
 - **ECMWF's `rain` changes meaning in 2025.** Until 2024 shower rain is inside `rain` and `showers` is empty; from 2025 ECMWF fills `showers` (2,232 of 8,760 hours in 2025, every hour in 2026). Rain plus showers plus snow adds up to precipitation in every year, so #16 should use `precipitation`, or rain plus showers.
 - **Notes for #16 on alerts (ADR-014).** #16 downloads and prepares the alert history: the Iowa Environmental Mesonet bulk download for office BOX, one request per year, rows for zone MAZ015 and county MAC025, raw pulls versioned by DVC (#18, #19); #7 lands only live alerts (ADR-002). Count an alert for day D only if its first bulletin (`utc_prodissue`) is before the 18:00 Boston cutoff on day D-1, and end it at its first-announced end (`utc_init_expire`, written `YYYYMMDDHHMM`), or earlier if IEM shows it cancelled or upgraded (`CAN`, `UPG`) with `utc_expire` = `utc_updated` before that cutoff; all times are UTC and are converted to `America/New_York` first, daylight saving included. In 2015 to 2023, 429 of 684 zone alerts (62.7%) and 97 of 235 county alerts (41.3%) ended at another time than first announced, and 138 zone alerts end before they start. Evening features use the same rule on a fresh IEM pull, checked against the NWS API's active Boston alerts, failing clearly instead of writing zeros, and including the next year's file around New Year. Extensions before the cutoff are not used, and the bulk download has no first-announced start; ADR-014 lists these limits, and the latest-bulletin option as later work. The committed #16 code still needs the A+ check, the next-year pull and the freshness check. County severe thunderstorm, flash flood and tornado warnings start when first sent, so they are never known the evening before. NWS alert types were renamed during 2015 to 2026 (freezing rain advisory, blizzard watch, flash flood watch, excessive heat, wind chill), so #16 needs a reviewed map from alert type to storm group. Once Punith confirms ADR-014, spec risk 4 (alert history needs a source) can close; the spec's owner updates it.
 - The Analyze Boston catalog `size` for the new-system file is stale (488,098 bytes listed; the file is 24,763,502 bytes with 70,208 records on 2026-10-15). #6 treats the new-system file as having no reliable change detection and downloads it whenever it is due.
@@ -219,6 +230,125 @@ Command: `python Data-Pipeline/scripts/after_switch.py`. Data: legacy files 2015
 | Pruning Request, tree (109 days) | 27 / 179 | 0.80 (1.57%) | 0.17 (0%) | 0.14 (0%) |
 
 Storm labels (ADR-004 unit, 94,512 labeled cells): drop changes 1, exclude_from_baselines none. Snow Plowing and Emergency Responder Snow Plowing switched on 2026-06-23 with 2 test requests and held 50.5% of last winter's legacy snow requests, so drop could delete half of this winter's snow signal. Decision in ADR-021: keep.
+
+## W2-4 results (2026-10-25)
+
+Commands: `alert_history.py --download`, then `surge_labels.py --grid` and `feature_table.py` after `daily_counts.py`. Data: Analyze Boston files of 2026-10-25 (days 2015-01-01 to 2026-10-19), IEM alerts queried 2026-10-25, static layers loaded 2026-10-25.
+
+**Labels.** 103,440 cells (24 neighborhoods x 4,310 days), 94,560 labeled (91.4%). Labels start on 2016-01-06, the first day with 20 history days. Surge rate per rule, labeled cells only:
+
+| rule | surge rate | train 2015 to 2023 | validate 2024 | 2025 onward | snow_ice surges | tree surges | flooding surges | flooding only |
+|---|---|---|---|---|---|---|---|---|
+| sd, k 1.5, m 3 | 6.27% | 5.99% | 7.34% | 6.90% | 2,137 | 3,695 | 211 | 167 |
+| sd, k 1.5, m 4 | 5.22% | 4.91% | 6.27% | 6.01% | 2,022 | 2,885 | 89 | 68 |
+| sd, k 1.5, m 5 | 4.39% | 4.06% | 5.34% | 5.34% | 1,914 | 2,245 | 38 | 25 |
+| sd, k 1.75, m 3 | 5.63% | 5.38% | 6.71% | 6.17% | 1,981 | 3,241 | 211 | 168 |
+| sd, k 1.75, m 4 | 4.75% | 4.46% | 5.83% | 5.44% | 1,879 | 2,583 | 89 | 68 |
+| sd, k 1.75, m 5 | 4.06% | 3.74% | 5.07% | 4.93% | 1,784 | 2,056 | 38 | 25 |
+| sd, k 2, m 3 | 5.12% | 4.85% | 6.25% | 5.68% | 1,851 | 2,872 | 211 | 170 |
+| sd, k 2, m 4 | 4.35% | 4.06% | 5.45% | 5.04% | 1,764 | 2,316 | 89 | 68 |
+| **sd, k 2, m 5** | **3.76%** | **3.44%** | **4.82%** | **4.60%** | 1,684 | 1,871 | 38 | 25 |
+| top 10%, m 1 | 14.86% | 14.29% | 15.27% | 17.14% | 3,737 | 7,346 | 3,898 | 3,245 |
+| top 10%, m 3 | 8.12% | 7.59% | 8.96% | 10.00% | 2,871 | 4,773 | 211 | 154 |
+
+sd, k 2, m 3 gives the 4.85% training rate of ADR-004. Recommendation: **sd, k 2, m 5**, marked `chosen` in `Data-Pipeline/config/surge_rules.csv`. It has the lowest rate in the grid, keeps the snow surges (1,684 against 1,851 at m 3) and cuts flooding-only surges from 170 to 25, which matters while flooding has no live source. The cost:
+- neighborhoods with fewer than 5 surges in 2024 go from 3 to 4 (Harbor Islands 0, Chinatown 0, Longwood 2, South Boston Waterfront 4);
+- the floor takes the most surges where reports are fewest: m 5 keeps 71% of the training surges citywide but 55% in the five smallest neighborhoods, 45% in Mission Hill and 42% in Longwood (every neighborhood in `docs/feature-table.md`, "Surge rule recommendation", 2026-10-27);
+- flooding gives 38 surges under m 5 (211 at m 3), so the label is in effect snow and tree.
+
+The recommendation stays provisional. m 4 (train 4.06%, 3 neighborhoods under 5 in 2024, 89 flooding surges) is the alternative for the freeze. The team freezes the rule by ADR before Model Development.
+
+**NWS alerts (ADR-014).** 12 IEM bulk pulls for office BOX, 67,110 rows; 1,144 Boston alerts, one row per first bulletin, with the same counts per year and area as ADR-014 (2015: 70 zone, 13 county; 2026 to 2026-10-23: 46 and 7). All 45 alert types in the data map to a row of `docs/data/alert-map.csv`; no first-announced end comes before its first bulletin. With the 18:00 cutoff, the 2015 blizzard warning (first sent 2015-01-25 20:58 UTC, 15:58 in Boston) counts from 2015-01-26, not for 2015-01-25. Surge rate under the recommended rule on days when an alert was out the evening before: snow_ice 11.5%, tree 8.4%, flooding 6.2%, against 3.5% on days without one.
+
+**Feature table.** 103,440 rows, 25 features: 8 lags of snow_ice and tree (flooding is left out, ADR-003 live rule), 6 alert features (count and warning flag per storm group), 3 calendar fields and 8 static attributes. Two builds give byte-identical files. In the Airflow 3.3.2 image, `airflow tasks test daily_pipeline` ran `ingest_alert_history` (1.9 s), `surge_labels` (5.2 s) and `feature_table` (4.0 s).
+
+**A+ alerts, weather and tides (2026-10-26).** The numbers above came before A+. Commands as in the runbook, in the Airflow 3.3.2 image (Python 3.12.14), with the repo's data mounted read-only and every output in a scratch folder:
+- `alert_history.py` without `--download`, on the IEM files of 2026-10-25;
+- `surge_labels.py --grid`, run twice;
+- `feature_table.py`.
+
+**Labels.** Byte-identical to the 2026-10-25 build and to a rebuild. The grid now gives each storm group's rate and the spread over neighborhoods for every rule (0.00% is Harbor Islands in every rule):
+
+| rule | snow_ice rate | tree rate | flooding rate | train rate per neighborhood | neighborhoods under 5 validation surges |
+|---|---|---|---|---|---|
+| sd, k 1.5, m 3 | 2.26% | 3.91% | 0.22% | 0.00% to 10.66% | 3 |
+| sd, k 1.5, m 4 | 2.14% | 3.05% | 0.09% | 0.00% to 9.70% | 3 |
+| sd, k 1.5, m 5 | 2.02% | 2.37% | 0.04% | 0.00% to 9.02% | 4 |
+| sd, k 1.75, m 3 | 2.09% | 3.43% | 0.22% | 0.00% to 9.63% | 3 |
+| sd, k 1.75, m 4 | 1.99% | 2.73% | 0.09% | 0.00% to 8.71% | 3 |
+| sd, k 1.75, m 5 | 1.89% | 2.17% | 0.04% | 0.00% to 8.06% | 4 |
+| sd, k 2, m 3 | 1.96% | 3.04% | 0.22% | 0.00% to 8.23% | 3 |
+| sd, k 2, m 4 | 1.87% | 2.45% | 0.09% | 0.00% to 7.34% | 3 |
+| **sd, k 2, m 5** | 1.78% | 1.98% | 0.04% | 0.00% to 6.82% | 4 |
+| top 10%, m 1 | 3.95% | 7.77% | 4.12% | 0.00% to 20.84% | 1 |
+| top 10%, m 3 | 3.04% | 5.05% | 0.22% | 0.00% to 14.84% | 3 |
+
+**NWS alerts under A+.** The same 1,144 Boston alerts. 584 alert rows were cancelled or upgraded with `utc_expire` equal to `utc_updated`, and no CAN or UPG row failed that check. A+ only removes alert days. Days with an alert the evening before go from 177 to 170 (snow_ice), from 239 to 178 (tree) and from 330 to 283 (flooding). Surge rate under the recommended rule on those days: snow_ice 10.6%, tree 9.4% and flooding 6.9%, against 3.2% on days with none.
+
+**Feature table** (real counts, A+ alerts and static layers):
+- 103,440 rows, one per neighborhood and day (24 x 4,310), with no repeated (unit, date);
+- `check_no_leakage` passed, the alert values are the same for every neighborhood on a day, and every column is in the catalog;
+- the weather and tide columns were not built, because no NOAA Logan or tide files were on that machine yet (see the full build below).
+
+**GFS set c as stored** (hours 2024-01-21 to 2026-10-22; 1,025 target days from 2024-01-01):
+- precipitation, temperature and gusts are missing on 20 days, 2024-01-01 to 2024-01-20;
+- snowfall is missing on 341 days (first full day 2024-12-07);
+- the newest run behind every day is 12 UTC on D-1, at least 3 hours before the cutoff;
+- daily minimum temperature is never above the maximum.
+
+**Tides.** One real half-year of predictions (2025-H1, 4,344 hours), through #7's own code into the scratch folder: 23 hours on 2025-03-09 and daily highs of 2.87 to 3.02 m.
+
+**Tests.** `ruff check .` clean and 715 tests pass. They include the DAG as Airflow parses it (22 tasks, none repeated) and the #7 and #8 downloads feeding the #16 readers (`test_feature_sources.py`).
+
+**Full build on real inputs (2026-10-26, evening).** First, `NOAA_CDO_TOKEN` was checked: it was set, and CDO answered HTTP 200 (the value was never printed). Then, in one-off containers of the compose `airflow-scheduler` service (`docker compose run --rm --no-deps`, so the keys come from `.env` and no scheduler starts):
+- `ingest_noaa_logan` and `ingest_tides` ran through `pipeline_steps.run_step`, as the DAG tasks run them:
+  - NOAA: 12 year files (2015 to 2026, values through 2026-10-22) in 20 s;
+  - tides: 48 half-year files (24 predicted, 24 observed) in 20 s, every half complete.
+- `alert_history.py` ran with the step's arguments without `--download`, on the IEM pull of 2026-10-25 (newest bulletin 2026-10-25 18:02 UTC).
+- `surge_labels` and `feature_table` ran through `run_step`, into the standard `interim/` and `processed/` folders.
+- The 311 counts (to 2026-10-19), the static layers and the GFS set c files (hours to 2026-10-22) were reused as stored.
+
+Results:
+- **Labels.** Unchanged: 103,440 cells, 94,560 labeled, 3,556 surges (3.76%), byte-identical to the 2026-10-25 build (sha256 944c36ab2518b1fb).
+- **Alerts.** 1,144 Boston alerts; 584 ended early (A+).
+- **Features:**
+  - 103,440 rows (24 x 4,310, 2015-01-01 to 2026-10-19) and no repeated (unit, date);
+  - 44 columns: 4 keys, 31 model inputs and 9 information columns, every column in the catalog both ways;
+  - a rebuild is byte-identical.
+- **Weather.** Observed on 3,287 days (2015 to 2023) and forecast on 1,023 (from 2024-01-01).
+- **Missing values,** kept missing (`docs/feature-table.md`):
+  - training: 8 days without Logan's peak gust (WSF5);
+  - 2024: 20 days without any forecast (before 2024-01-21) and 341 without forecast snowfall (before 2024-12-07);
+  - 2025 onward: none;
+  - Harbor Islands: six census-based static columns blank.
+- **Tides.** Complete on every day: 12 days of 23 hours and 11 of 25.
+- **Checked against the raw files.** A check script (plain `json`, `datetime` and `zoneinfo`, not the #16 readers) recomputed every source and matched every day, with no difference:
+  - observed weather on 3,287 of 3,287 days, and the D-2 lags on 4,310 of 4,310;
+  - GFS values and `wx_known_by_utc` on 1,023 of 1,023 days (the newest run used is 12 UTC on D-1 on all 1,003 days with a forecast, at least 3.0 hours before the cutoff);
+  - tides on 4,310 of 4,310 days, and alert counts and warnings under A+ on 4,310 of 4,310 per group;
+  - the 311 lags on all 103,440 rows (every window ends on D-2), and static population and land area by unit name;
+  - the cutoff: 18:00 Boston time on D-1 on every day (22:00 UTC on 2,843 days, 23:00 UTC on 1,467).
+- **Units.** The NOAA values are metric (795 to 1,355 mm of precipitation a year, TMAX up to 37.8 °C), and none has a quality flag.
+- **Leakage.** `check_no_leakage` passes, and fails on copies with a 311 window ending on D-1, observed weather of its own day in 2024, or a forecast available one minute after the cutoff.
+- **Tests,** after the build, in `apache/airflow:3.3.2-python3.12` (Python 3.12.14):
+  - `ruff check .` (0.17.2) is clean;
+  - 715 tests pass;
+  - `daily_pipeline` parses with no import errors (22 tasks).
+
+**Review fixes (2026-10-27, PR #93, Kirtan's suggestions 1 to 8 and Alekhya's comment).** In the Airflow 3.3.2 image, with the repo mounted read-only and every output in a scratch folder, nothing downloaded:
+- **Rebuilt with the DAG's own arguments** from the stored inputs: labels and features are byte-identical to the 2026-10-26 build (sha256 `944c36ab2518b1fb`, `97c01a6ce47aaa02`), and the stored files are unchanged.
+- **A slice the counts do not cover** (they end on 2026-10-19) now stops both tasks with exit 1 and no output:
+  - 2026-11-01 to 2026-11-30 names all 30 days;
+  - 2026-10-01 to 2026-10-31 names the 12 days from 2026-10-20.
+- **Leakage:** on the real table, copies with `tree_last` or `snow_ice_sum28` read one day later fail the by-date check.
+- **Missing current files:** read as of 2027-01-02, the real folders give one warning each, naming `noaa_logan/2027.json`, `day_before_ncep_gfs_global/2027.json` and `predicted/2027-H1.json` and the features left blank. Today every current file is stored, so the build logs none.
+- **The new tests guard the fixes:** each fix undone in a scratch copy makes its tests fail (7 of 7). Undoing the by-date check fails 2 tests; a lag that reads D-1 fails 21.
+- **Alert-start limit and per-neighborhood table:** recomputed for `docs/feature-table.md` (alert-days counted as the features count them).
+- **Tests:**
+  - `ruff check .` (0.17.2) is clean;
+  - 876 tests pass in `apache/airflow:3.3.2-python3.12` (Python 3.12.14);
+  - in plain `python:3.12-slim`, as CI runs them, 873 pass and the 3 DAG tests skip;
+  - `daily_pipeline` parses with no import errors (23 tasks).
 
 ## W2-3 results (2026-10-24)
 

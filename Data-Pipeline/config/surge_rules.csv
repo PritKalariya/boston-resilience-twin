@@ -1,0 +1,12 @@
+rule_id,rule,k,m,chosen,note
+sd_k1.5_m3,sd,1.5,3,no,requests > mean + 1.5 sd and at least 3 requests
+sd_k1.5_m4,sd,1.5,4,no,
+sd_k1.5_m5,sd,1.5,5,no,
+sd_k1.75_m3,sd,1.75,3,no,
+sd_k1.75_m4,sd,1.75,4,no,
+sd_k1.75_m5,sd,1.75,5,no,
+sd_k2_m3,sd,2,3,no,the analysis point in ADR-004 and ADR-005 (train 4.85%)
+sd_k2_m4,sd,2,4,no,the alternative for the freeze (train 4.06%): keeps more surges in small neighborhoods (docs/feature-table.md)
+sd_k2_m5,sd,2,5,yes,provisional recommendation of #16 (2026-10-25): lowest rate in the grid (train 3.44%) and fewest flooding-only surges (25) but the most surges lost in small neighborhoods (docs/feature-table.md); frozen by ADR before Model Development
+q90_m1,q90,,1,no,top-10-percent rule: requests above the 90th percentile of the same ADR-005 history
+q90_m3,q90,,3,no,top-10-percent rule with the same 3-request floor as the smallest sd option
