@@ -166,7 +166,13 @@ python -m pytest Data-Pipeline/tests
 pip install ruff==0.17.2 && ruff check .
 ```
 
-895 tests pass and 3 skip (they need data on disk) in 26 seconds. They never reach the network (`tests/conftest.py` fails any test that tries).
+933 tests pass and 14 skip in 29 seconds; the skipped ones are the DAG tests, which need Airflow. To run all of them with coverage, in the Airflow image on Python 3.12 (#38):
+
+```bash
+docker compose run --rm --build test
+```
+
+946 passed and 1 skipped in 96 seconds, with 97.8% line coverage of `Data-Pipeline/scripts/`; the run fails below 70% (`.coveragerc`). They never reach the network (`tests/conftest.py` fails any test that tries).
 
 ## Run it in Airflow
 
@@ -305,7 +311,16 @@ dvc repro daily_counts
 docker compose exec airflow-scheduler airflow tasks test daily_pipeline push_data
 ```
 
-Team members log in once with `gcloud auth application-default login`; then, in `Data-Pipeline/`, `dvc pull` fetches the data the committed `dvc.lock` names and `dvc repro` prints `Data and pipelines are up to date.` A pull of two outputs in a clean clone (`dvc pull daily_counts surge_labels`) fetched both, 310,752 and 103,584 rows. A DAG run writes newer files but does not update `dvc.lock`; turning DAG runs into versions with their history is [#40](https://github.com/PritKalariya/boston-resilience-twin/issues/40). The runbook, "Versioned data (DVC)", has the checks and fixes.
+Team members log in once with `gcloud auth application-default login`; then, in `Data-Pipeline/`, `dvc pull` fetches the data the committed `dvc.lock` names and `dvc repro` prints `Data and pipelines are up to date.` A pull of two outputs in a clean clone (`dvc pull daily_counts surge_labels`) fetched both, 310,752 and 103,584 rows. **Data versions (#40).** Each commit that changes `dvc.lock` is a data version; there are two so far, `a86e6e5` (#18) and `0812b8b` (#94). From `Data-Pipeline/`:
+
+```bash
+git log --oneline -- dvc.lock          # the data versions, newest first
+dvc diff a86e6e5 HEAD                  # 49 files changed between the two
+git checkout a86e6e5 -- dvc.lock && dvc pull     # the previous version
+git checkout HEAD -- dvc.lock && dvc checkout    # back to the current one
+```
+
+All four were run in a clean clone on 2026-10-27, with team credentials: the previous version pulled in 11 seconds and switching back took 1 second, ending with `Data and pipelines are up to date.` Labels are identical in the two versions; the features and the 311 tables differ, with the same row counts. A DAG run writes newer files but does not update `dvc.lock`: the next version is a DAG run (or the ingest steps) followed by `dvc repro`, a push and a commit of `dvc.lock`. The runbook, "Data versions (#40)", has the steps.
 
 **Reproducibility.**
 
@@ -325,12 +340,12 @@ Team members log in once with `gcloud auth application-default login`; then, in 
 | Modular syntax and code | [Code structure](#code-structure): one module per step, `step_plan` for arguments | done |
 | Pipeline orchestration (Airflow DAGs) | [Run it in Airflow](#run-it-in-airflow), `dags/daily_pipeline.py` | done: every step from the downloads (#6, #7, #8) to labels and features (#16) runs in the DAG; `bias_slicing` is a placeholder until #32 |
 | Tracking and logging | the per-task log line in [Run it in Airflow](#run-it-in-airflow) (#36) | done |
-| Data version control (DVC) | [DVC and reproducibility](#dvc-and-reproducibility), `dvc.yaml` and `dvc.lock` | done: remote and push task (#19), stages from the downloads to labels and features (#18); history of DAG runs [#40](https://github.com/PritKalariya/boston-resilience-twin/issues/40) |
+| Data version control (DVC) | [DVC and reproducibility](#dvc-and-reproducibility), `dvc.yaml` and `dvc.lock` | done: remote and push task (#19), stages from the downloads to labels and features (#18), two data versions with checkout steps (#40) |
 | Pipeline flow optimization (Gantt) | [Pipeline performance](../README.md#pipeline-performance-37) in the root README | done (#37): legacy years in parallel, full build 124 s to 73 s |
 | Schema and statistics generation | `schema_stats.py` in [Run it step by step](#run-it-step-by-step); runbook, "Schema and statistics (every run)" | done (#35): every run, with data docs and `drift.json` |
 | Anomaly detection and alerts | Great Expectations checks in [Run it step by step](#run-it-step-by-step); `ALERT` line and Slack in [Run it in Airflow](#run-it-in-airflow) | done (#17, #34) |
-| Bias detection and mitigation | [data card](../docs/data/data-card.md), "Reported demand, not need" | [#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32) slicing, [#33](https://github.com/PritKalariya/boston-resilience-twin/issues/33) mitigation |
-| Test modules | `tests/`, 895 tests, run in CI on every PR (`.github/workflows/ci.yml`) | done; coverage audit [#38](https://github.com/PritKalariya/boston-resilience-twin/issues/38), in review: [PR #94](https://github.com/PritKalariya/boston-resilience-twin/pull/94) |
+| Bias detection and mitigation | [data card](../docs/data/data-card.md), "Reported demand, not need" | slicing [#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32), in review: [PR #98](https://github.com/PritKalariya/boston-resilience-twin/pull/98) (Fairlearn slices by neighborhood, poverty, race and ethnicity, limited English, flood zone and 311 system); mitigation and write-up [#33](https://github.com/PritKalariya/boston-resilience-twin/issues/33) |
+| Test modules | `tests/`, 946 tests with 97.8% coverage (`docker compose run --rm --build test`), run in CI on every PR (`.github/workflows/ci.yml`) | done (#38) |
 | Reproducibility | [Environment setup](#environment-setup) to [Small run](#small-run-one-year), [DVC and reproducibility](#dvc-and-reproducibility) | done here; second-machine test [#42](https://github.com/PritKalariya/boston-resilience-twin/issues/42) |
 | Error handling and logging | runbook, "Run the data pipeline DAG": retries, input checks, `check_range` (#36) | done |
 
