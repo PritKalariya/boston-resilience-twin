@@ -17,7 +17,7 @@ KEYS = (NOAA_CDO_TOKEN, CENSUS_API_KEY, NWS_USER_AGENT)
 
 
 class MissingCredentialError(RuntimeError):
-    pass
+    """A key the pipeline needs is not set. The message names the key, never a value."""
 
 
 def require(name: str) -> str:

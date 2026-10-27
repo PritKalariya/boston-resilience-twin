@@ -41,6 +41,8 @@ log = logging.getLogger(__name__)
 
 
 def request_url(period: rf.Period, offset: int) -> str:
+    """The CDO API address for one page of a year: Logan's GHCN-D daily values in metric units, PAGE results
+    from offset."""
     query = [("datasetid", "GHCND"), ("stationid", STATION), ("startdate", period.start.isoformat()),
              ("enddate", period.end.isoformat()), ("units", "metric"), ("limit", PAGE), ("offset", offset),
              *(("datatypeid", d) for d in DATATYPES)]
@@ -114,6 +116,8 @@ def refresh(raw_dir: Path, state_dir: Path, fetch, today: date, now: datetime, p
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Bring Logan's yearly files up to today with the NOAA_CDO_TOKEN key and print what changed (the
+    ingest_noaa_logan task)."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--raw-dir", type=Path, default=Path("Data-Pipeline/data/raw/weather/noaa_logan"))
     parser.add_argument("--state-dir", type=Path, default=Path("Data-Pipeline/data/state/weather/noaa_logan"))

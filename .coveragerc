@@ -1,0 +1,13 @@
+# Test coverage (#38): line coverage of every module in Data-Pipeline/scripts, the code
+# the DAG tasks run. A module no test imports still counts, at 0%, and nothing is left
+# out. The test service runs it (Data-Pipeline/tests/run_tests.sh):
+#   python -m pytest Data-Pipeline/tests --cov --cov-report=term-missing
+# The run fails below fail_under (issue #38: 70 percent; the suite measured 98.3% on
+# main d5652b9 with #38's tests).
+[run]
+source = Data-Pipeline/scripts
+
+[report]
+show_missing = true
+precision = 1
+fail_under = 70

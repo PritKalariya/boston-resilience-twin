@@ -352,3 +352,10 @@ def test_main_processed_reads_units_from_the_neighborhoods(tmp_path, monkeypatch
     ])
     main()
     assert all(c["success"] for c in json.loads(out.read_text())["checks"])
+
+
+def test_bounds_need_name_and_value_columns(tmp_path):
+    path = tmp_path / "bounds.csv"
+    path.write_text("bound,amount\nin_boston_min,0.9\n")
+    with pytest.raises(ValueError, match="needs name and value columns"):
+        load_bounds(path)
