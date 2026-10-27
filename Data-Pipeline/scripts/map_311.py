@@ -70,6 +70,8 @@ MIN_LINKED_CASES = 20
 
 
 def load_category_map(path: Path | str) -> pd.DataFrame:
+    """The category map, checked: known systems, unique and non-blank categories, valid match values and storm
+    groups, and one storm group per category."""
     cmap = pd.read_csv(path, dtype=str, keep_default_na=False)
     missing = set(MAP_COLUMNS) - set(cmap.columns)
     if missing:
@@ -95,12 +97,15 @@ def load_category_map(path: Path | str) -> pd.DataFrame:
 
 
 def standardize(df: pd.DataFrame, system: str) -> pd.DataFrame:
+    """One system's table with the shared column names and its source_system."""
     rename = LEGACY_RENAME if system == "legacy" else NEW_RENAME
     out = df.rename(columns=rename).assign(source_system=system)
     return out.reindex(columns=[c for c in COLUMNS if c not in {"category", "storm_group", "match", "after_switch"}])
 
 
 def apply_map(df: pd.DataFrame, cmap: pd.DataFrame, system: str) -> pd.DataFrame:
+    """Add category, storm_group and match from the category map. A source category the map does not list gets
+    UNMAPPED."""
     # A lookup, not a merge: a merge copies every column of the 3M-row legacy table.
     side = cmap.loc[cmap["system"] == system].set_index("source_category")
     source = df["source_category"]
@@ -113,6 +118,8 @@ def apply_map(df: pd.DataFrame, cmap: pd.DataFrame, system: str) -> pd.DataFrame
 
 
 def drop_resubmitted(legacy: pd.DataFrame, new_ids: pd.Series) -> tuple[pd.DataFrame, int]:
+    """Drop legacy rows resubmitted to the new system (their copy is among new_ids). Returns the rest and how
+    many were dropped."""
     copied = legacy["resubmitted_as"].isin(set(new_ids))
     return legacy[~copied], int(copied.sum())
 
@@ -133,6 +140,8 @@ def clock_offset_hours(legacy: pd.DataFrame, new: pd.DataFrame) -> tuple[float, 
 
 
 def check_clock(legacy: pd.DataFrame, new: pd.DataFrame) -> tuple[float, int]:
+    """The new system's clock offset from legacy, from resubmitted cases. Raises when enough cases show it off
+    by more than MAX_CLOCK_OFFSET_HOURS (ADR-020)."""
     offset, n = clock_offset_hours(legacy, new)
     if n >= MIN_LINKED_CASES and abs(offset) > MAX_CLOCK_OFFSET_HOURS:
         raise ValueError(
@@ -188,6 +197,8 @@ def flag_after_switch(combined: pd.DataFrame, points: pd.DataFrame) -> pd.Series
 
 
 def combine(legacy: pd.DataFrame, new: pd.DataFrame, cmap: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """Both systems in one table: clock checked, resubmitted legacy rows dropped, categories mapped and
+    after_switch flagged. Returns the table and its counts."""
     offset, linked = check_clock(legacy, new)
     legacy, resubmitted = drop_resubmitted(legacy, new["case_id"])
     parts = [
@@ -207,12 +218,15 @@ def combine(legacy: pd.DataFrame, new: pd.DataFrame, cmap: pd.DataFrame) -> tupl
 
 
 def summary(combined: pd.DataFrame) -> pd.DataFrame:
+    """Rows per system and match type, with a total per system."""
     counts = combined.groupby(["source_system", "match"]).size().unstack(fill_value=0)
     counts["total"] = counts.sum(axis=1)
     return counts
 
 
 def main() -> None:
+    """Combine the parsed legacy and new-system tables into 311_combined.parquet and write the switch dates
+    (change points)."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--legacy", default="Data-Pipeline/data/interim/legacy_311.parquet")
     parser.add_argument("--new", default="Data-Pipeline/data/interim/new_311.parquet")

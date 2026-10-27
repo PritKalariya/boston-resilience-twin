@@ -131,3 +131,49 @@ def test_a_rerun_with_nothing_new_leaves_raw_untouched(tmp_path):
     tides.refresh(raw, state, FakeCoops(), TODAY, NOW + timedelta(days=1))
     assert files_in(raw) == before
     assert not any(p.name.startswith("_") for p in before)
+
+
+def test_main_reports_what_it_stored_and_a_rerun_finds_the_closed_halves_final(tmp_path, monkeypatch, capsys):
+    fake, sent = FakeCoops(), []
+
+    def get(url, headers):
+        sent.append(headers)
+        return fake(url)
+
+    monkeypatch.setattr(tides.rf, "get", get)
+    monkeypatch.setattr(tides.rf, "utc_now", lambda: NOW)
+    argv = ["--raw-dir", str(tmp_path / "raw"), "--state-dir", str(tmp_path / "state")]
+    tides.main(argv)
+    out = capsys.readouterr().out
+    assert out.startswith("tides 8443970: 4 half-year files downloaded or updated, 0 final, 0 unchanged")
+    assert "  predicted/2015-H2.json: downloaded (2 hours)" in out
+    assert {headers["User-Agent"] for headers in sent} == {tides.APPLICATION}
+    tides.main(argv)
+    # Same day: both H1 files are final (observed was fetched 77 days after June 30), and so is
+    # the current predicted half, which already runs to today. Only observed H2 is fetched again.
+    assert capsys.readouterr().out == (
+        "tides 8443970: 0 half-year files downloaded or updated, 3 final, 1 unchanged\n"
+        "  observed/2015-H2.json: unchanged (2 hours)\n")
+
+
+def test_an_answer_that_is_not_a_json_object_fails_and_stores_nothing(tmp_path):
+    fake = FakeCoops({("predictions", "20150101"): b"[]"})
+    with pytest.raises(rf.FetchError, match="not a JSON object"):
+        tides.refresh(tmp_path / "raw", tmp_path / "state", fake, TODAY, NOW)
+    assert not (tmp_path / "raw" / "predicted" / "2015-H1.json").exists()
+
+
+def predictions(*times):
+    return json.dumps({"predictions": [{"t": t, "v": "1.0"} for t in times]}).encode()
+
+
+def test_half_years_meet_at_midnight_gmt():
+    # Requests ask for GMT (time_zone=gmt): H1 ends with 06-30 23:00 and H2 starts at 07-01
+    # 00:00, so an hour on the wrong side of that midnight is outside the half.
+    h1, h2 = rf.half_years(date(2015, 1, 1), date(2015, 12, 31))
+    assert tides.check_answer(predictions("2015-01-01 00:00", "2015-06-30 23:00"), "predictions", h1) == 2
+    assert tides.check_answer(predictions("2015-07-01 00:00", "2015-12-31 23:00"), "predictions", h2) == 2
+    with pytest.raises(rf.FetchError, match="outside"):
+        tides.check_answer(predictions("2015-01-01 00:00", "2015-07-01 00:00"), "predictions", h1)
+    with pytest.raises(rf.FetchError, match="outside"):
+        tides.check_answer(predictions("2015-06-30 23:00", "2015-12-31 23:00"), "predictions", h2)

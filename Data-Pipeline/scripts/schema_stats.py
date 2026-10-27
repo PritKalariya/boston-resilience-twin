@@ -46,6 +46,8 @@ logging.getLogger("great_expectations").setLevel(logging.WARNING)
 
 
 def load_thresholds(path: Path | str) -> dict[str, float]:
+    """The drift thresholds in stats_thresholds.csv (name, value). Raises when a column, a number or a
+    threshold is missing."""
     table = pd.read_csv(path, dtype=str, keep_default_na=False)
     if not {"name", "value"} <= set(table.columns):
         raise ValueError(f"{Path(path).name} needs name and value columns")
@@ -142,6 +144,7 @@ def drift(previous: dict, current: dict, thresholds: dict[str, float]) -> list[d
 
 
 def docs_columns(stats: dict) -> list[str]:
+    """The columns the data docs describe: the date column, then the numeric and category columns in stats."""
     date = [c for c in DATE_COLUMNS if c in stats["schema"]]
     return [*date, *stats["numeric"], *stats["categories"]]
 
@@ -246,6 +249,8 @@ def run(tables: dict[str, Path], thresholds: dict[str, float], out_dir: Path, do
 
 
 def main() -> None:
+    """Write each processed table's schema and statistics and the drift flags, as the schema_and_statistics
+    task does."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--located", default="Data-Pipeline/data/interim/311_located.parquet")
     parser.add_argument("--daily-counts", default="Data-Pipeline/data/processed/daily_counts.parquet")

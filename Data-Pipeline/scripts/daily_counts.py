@@ -31,6 +31,8 @@ def last_full_day(df: pd.DataFrame) -> pd.Timestamp:
 
 
 def check(df: pd.DataFrame, units: list[str]) -> None:
+    """Fail on a located table the counts cannot trust: missing columns, unknown storm groups, or placed rows
+    with no unit or a unit not in the neighborhood layer."""
     missing = REQUIRED_COLUMNS - set(df.columns)
     if missing:
         raise ValueError(f"located table is missing columns: {sorted(missing)}; rerun spatial_join.py")
@@ -85,6 +87,7 @@ def daily_counts(
 
 
 def markdown(df: pd.DataFrame) -> str:
+    """A table as GitHub markdown, missing values left blank."""
     cells = df.astype(object).where(df.notna(), "").astype(str)
     lines = ["| " + " | ".join(map(str, df.columns)) + " |", "|" + "---|" * len(df.columns)]
     lines += ["| " + " | ".join(row) + " |" for row in cells.itertuples(index=False)]
@@ -92,6 +95,8 @@ def markdown(df: pd.DataFrame) -> str:
 
 
 def main() -> None:
+    """Write daily_counts.parquet for --start to --end (default: the last full day of both systems) and print
+    how the rows reconcile."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--located", default="Data-Pipeline/data/interim/311_located.parquet")
     parser.add_argument("--neighborhoods", default="Data-Pipeline/data/interim/static/neighborhoods_by_tract20.parquet")

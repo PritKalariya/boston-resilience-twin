@@ -49,12 +49,17 @@ def to_boston(values: pd.Series, clock: str = CLOCK) -> pd.Series:
 
 
 def has_other_offset(values: pd.Series) -> pd.Series:
+    """Whether each time carries a UTC offset other than +00, which the export would only have if it changed
+    (ADR-020)."""
     stripped = values.str.strip()
     offset = stripped.str.extract(r"\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?([+-]\d{2}(?::?\d{2})?)$")[0]
     return offset.notna() & ~offset.isin(["+00", "+0000", "+00:00", "-00", "-0000", "-00:00"])
 
 
 def read_new_system(path: Path | str, clock: str = CLOCK) -> tuple[pd.DataFrame, ParseReport]:
+    """Parse the new-system export, its times read as Boston local (ADR-020). Malformed lines and rows with no
+    case id, another offset, no readable open time or a repeated case id are dropped and counted in the
+    report."""
     path = Path(path)
     report = ParseReport(source=path.name)
 
@@ -106,6 +111,7 @@ def read_new_system(path: Path | str, clock: str = CLOCK) -> tuple[pd.DataFrame,
 
 
 def main() -> None:
+    """Parse the new-system export to new_311.parquet and print the rows dropped."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw", default="Data-Pipeline/data/raw/311/new_system.csv")
     parser.add_argument("--out", default="Data-Pipeline/data/interim/new_311.parquet")

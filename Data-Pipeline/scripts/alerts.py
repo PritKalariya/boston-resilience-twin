@@ -147,6 +147,7 @@ def on_task_failure(context: Mapping) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Send one test alert (--test): to Slack when SLACK_ALERT_WEBHOOK is set, otherwise to the log only."""
     parser = argparse.ArgumentParser(description="Send a test alert through the configured channel.")
     parser.add_argument("--test", action="store_true", help="post one test alert")
     args = parser.parse_args(argv)
