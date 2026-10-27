@@ -15,8 +15,8 @@ from pipeline_steps import DateRange, run_paths, run_script, run_step, script_ar
 SCRIPTS_DIR = Path(steps.__file__).resolve().parent
 FULL = DateRange()
 SLICE = DateRange(date(2025, 1, 1), date(2025, 12, 31))
-OUTPUT_FLAGS = {"--out", "--out-dir", "--manifest", "--change-points"}
-INPUT_FLAGS = {"--raw-dir", "--raw", "--legacy", "--new", "--config", "--map", "--published"}
+OUTPUT_FLAGS = {"--out", "--out-dir", "--manifest", "--change-points", "--prepared-dir"}
+INPUT_FLAGS = {"--raw-dir", "--raw", "--legacy", "--new", "--config", "--map", "--published", "--sources"}
 STATE_FLAGS = {"--state-dir"}
 
 
@@ -111,9 +111,9 @@ def test_every_path_is_absolute(step):
 
 
 def test_versioned_inputs_exist_in_the_repo():
-    for step in ("ingest_static_layers", "combine_311", "validate_raw", "validate_processed"):
+    for step in ("ingest_static_layers", "combine_311", "validate_raw", "validate_processed", "ingest_legacy_311", "ingest_new_311"):
         values = flag_values(script_args(step, FULL))
-        for flag in ("--config", "--map", "--published"):
+        for flag in ("--config", "--map", "--published", "--sources"):
             if flag in values:
                 assert Path(values[flag]).is_file(), values[flag]
 
@@ -569,6 +569,125 @@ def test_static_step_runs_on_a_slice_without_downloading(tmp_path, monkeypatch):
     interim = run_paths(SLICE, root).interim
     assert pd.read_parquet(interim / "static" / "population.parquet")["people"].tolist() == [10, 20]
     assert pd.read_csv(interim / "static-layers.csv")["name"].tolist() == ["population"]
+
+
+# The 311 ingest steps (#6), with a stand-in for Analyze Boston: no network.
+
+SOURCES_CONFIG = (
+    "source,resource_id,filename,system,refresh_days,change_detection\n"
+    "legacy_2025,r2025,2025.csv,legacy,7,catalog\n"
+    "new_system,rnew,new_system.csv,new_system,1,none\n"
+)
+CATALOG_FILES = {"r2025": LEGACY_2025, "rnew": NEW_SYSTEM}
+
+
+class OfflineCatalog:
+    """Stands in for ingest_311.CkanClient: serves CATALOG_FILES by resource id."""
+
+    def __init__(self, base_url=None):
+        pass
+
+    def resource(self, resource_id):
+        return {"hash": "h1", "last_modified": "2026-10-01", "size": "1", "url": f"https://example.test/{resource_id}"}
+
+    def download(self, url, dest):
+        Path(dest).write_text(CATALOG_FILES[url.rsplit("/", 1)[1]])
+
+
+class UnreachableCatalog(OfflineCatalog):
+    def resource(self, resource_id):
+        raise OSError("network is unreachable")
+
+
+def make_ingest_repo(root):
+    config = root / "Data-Pipeline" / "config"
+    config.mkdir(parents=True)
+    (config / "ingest_311_sources.csv").write_text(SOURCES_CONFIG)
+    return root / "Data-Pipeline" / "data"
+
+
+def files_in(folder):
+    return {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in sorted(folder.iterdir())}
+
+
+@pytest.mark.parametrize("days", [FULL, SLICE], ids=["full", "slice"])
+def test_ingest_steps_share_raw_and_state_across_ranges(tmp_path, days):
+    data = tmp_path / "Data-Pipeline" / "data"
+    for step, system in (("ingest_legacy_311", "legacy"), ("ingest_new_311", "new_system")):
+        values = flag_values(script_args(step, days, tmp_path))
+        assert values["--raw-dir"] == str(data / "raw" / "311")
+        assert values["--state-dir"] == str(data / "state" / "311")
+        assert values["--prepared-dir"] == str(run_paths(days, tmp_path).interim)
+        assert values["--system"] == system
+
+
+def test_ingest_outputs_are_the_configured_downloads(tmp_path):
+    raw = make_ingest_repo(tmp_path) / "raw" / "311"
+    assert steps.step_files("ingest_legacy_311", SLICE, tmp_path).data_out == [raw / "2025.csv"]
+    assert steps.step_files("ingest_new_311", SLICE, tmp_path).data_out == [raw / "new_system.csv"]
+    assert all(steps.step_plan(step, SLICE, tmp_path).keep_outputs for step in ("ingest_legacy_311", "ingest_new_311"))
+
+
+def test_downloads_are_never_cleared_before_an_ingest_step(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    raw = make_ingest_repo(root) / "raw" / "311"
+    raw.mkdir(parents=True)
+    (raw / "2025.csv").write_text(LEGACY_2025)
+    monkeypatch.setattr(steps, "run_script", lambda module, args: None)  # nothing due, nothing written
+    assert run_step("ingest_legacy_311", SLICE, root, run_id="test-run") == (None, 2)
+    assert (raw / "2025.csv").read_text() == LEGACY_2025
+
+
+def test_a_failed_download_fails_the_ingest_task(tmp_path, monkeypatch, caplog):
+    import ingest_311
+
+    monkeypatch.setattr(ingest_311, "CkanClient", UnreachableCatalog)
+    root = tmp_path / "repo"
+    raw = make_ingest_repo(root) / "raw" / "311"
+    raw.mkdir(parents=True)
+    (raw / "2025.csv").write_text(LEGACY_2025)
+    monkeypatch.chdir(tmp_path)
+    with caplog.at_level(logging.ERROR, logger="pipeline_steps"), pytest.raises(RuntimeError, match="ingest_311.py exited with code 1"):
+        run_step("ingest_legacy_311", SLICE, root, run_id="test-run")
+    assert caplog.messages[-1].startswith("run test-run task ingest_legacy_311 failed: RuntimeError")
+    assert (raw / "2025.csv").read_text() == LEGACY_2025
+
+
+def test_ingest_without_its_config_fails_before_the_script_runs(tmp_path, monkeypatch):
+    monkeypatch.setattr(steps, "run_script", lambda *args: pytest.fail("the script must not run"))
+    with pytest.raises(steps.InputError, match=r"ingest_legacy_311 cannot start: missing .*ingest_311_sources\.csv\. Restore"):
+        run_step("ingest_legacy_311", SLICE, tmp_path, run_id="test-run")
+
+
+def test_ingest_steps_end_to_end_on_a_slice(tmp_path, monkeypatch, caplog):
+    import ingest_311
+
+    monkeypatch.setattr(ingest_311, "CkanClient", OfflineCatalog)
+    root = tmp_path / "repo"
+    data = make_ingest_repo(root)
+    raw = data / "raw" / "311"
+    raw.mkdir(parents=True)
+    (raw / "2025.csv").write_bytes(b"")  # an empty download is fetched again
+    monkeypatch.chdir(tmp_path)
+
+    with caplog.at_level(logging.INFO, logger="pipeline_steps"):
+        assert run_step("ingest_legacy_311", SLICE, root, run_id="test-run") == (None, 2)
+        assert run_step("ingest_new_311", SLICE, root, run_id="test-run") == (None, 1)
+    assert "deleted the empty download" in caplog.messages[0]
+    assert re.fullmatch(r"run test-run task ingest_new_311: rows in n/a, rows out 1 in \d+\.\d s", caplog.messages[-1])
+
+    assert sorted(files_in(raw)) == ["2025.csv", "new_system.csv"]
+    assert sorted(files_in(data / "state" / "311")) == ["_manifest.json", "_runs.jsonl"]
+    parquet = pd.read_parquet(run_paths(SLICE, root).interim / "new_system_as_published.parquet")
+    assert parquet["source_system"].tolist() == ["new"]
+    assert parquet["open_date"].tolist() == ["2025-10-27 10:00:00+00"]  # as published
+    assert not (data / "interim").exists()  # the full-build folder is untouched
+    assert [p.name for p in tmp_path.iterdir()] == ["repo"]  # nothing in the working directory
+
+    before = files_in(raw)
+    for step in ("ingest_legacy_311", "ingest_new_311"):  # same day: nothing due
+        run_step(step, SLICE, root, run_id="second")
+    assert files_in(raw) == before
 
 
 def test_every_placeholder_names_an_issue():

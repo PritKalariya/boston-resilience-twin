@@ -25,6 +25,8 @@ input file is missing or empty (InputError), and the DAG fails such a task
 without retrying, since a retry cannot fix it. A step's outputs are deleted
 before it runs, so a file left by an earlier run cannot pass for new output,
 and empty files in a download folder are deleted so the download runs again.
+The 311 ingest steps keep their outputs instead (keep_outputs): they are the
+current downloads, which ingest_311.py replaces only when a source changed.
 A script error is logged with the run and the task before it is raised again
 unchanged. Tasks in NETWORK retry; the others fail at once, and their failure
 alert comes from alerts.py.
@@ -70,11 +72,11 @@ SCRIPTS = {
     "ingest_nws_forecasts": "nws",
     "ingest_nws_alerts": "nws",
     "ingest_tides": "tides",
+    "ingest_legacy_311": "ingest_311",
+    "ingest_new_311": "ingest_311",
 }
 # Task id -> the issue that builds it; a placeholder in the DAG until then.
 PLANNED = {
-    "ingest_legacy_311": "#6",
-    "ingest_new_311": "#6",
     "ingest_open_meteo": "#8",
     "labels_and_features": "#16",
     "bias_slicing": "#32",
@@ -90,8 +92,8 @@ TRIM = {
 
 # Tasks that fetch from the network retry twice. Airflow's exponential backoff
 # adds a random spread, so the waits are about 5 to 10 minutes and then 10 to 15
-# (capped). The placeholders are listed too, so #6, #7 and #8 get the same
-# retries when they fill them.
+# (capped). The placeholders are listed too, so #8 gets the same retries when
+# it fills its placeholder.
 NETWORK = {task for task in (*SCRIPTS, *PLANNED) if task.startswith("ingest_")}
 RETRIES = 2
 RETRY_DELAY = timedelta(minutes=5)
@@ -213,13 +215,15 @@ class StepFiles:
 class StepPlan:
     """One real step in one place: the script's arguments, the files behind them,
     what to do when an input is missing, and a download folder whose empty files
-    are fetched again."""
+    are fetched again. keep_outputs: the outputs are downloads the script replaces
+    only when their source changed, so they are not deleted before it runs."""
 
     args: list
     files: StepFiles
     hint: str
     refetch: Path | None = None
     env: tuple[str, ...] = ()  # credentials the script needs (#4), checked before it runs
+    keep_outputs: bool = False
 
 
 def configured_layers(config: Path) -> list[str]:
@@ -230,9 +234,17 @@ def configured_layers(config: Path) -> list[str]:
         return [row["name"] for row in csv.DictReader(f) if row.get("kind") in ("vector", "table")]
 
 
+def configured_311_files(config: Path, system: str) -> list[str]:
+    """Files that ingest_311.py keeps in raw/311 for one system (legacy or new_system)."""
+    if not config.is_file():
+        return []
+    with config.open(newline="", encoding="utf-8-sig") as f:
+        return [row["filename"].strip() for row in csv.DictReader(f) if (row.get("system") or "").strip() == system]
+
+
 def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = None) -> StepPlan:
     """The table of real steps. Each path is named once and used for the arguments
-    and the checks, so a step that #6, #7 or #8 adds is one more block. Every
+    and the checks, so a step that #8, #16 or #32 adds is one more block. Every
     path is explicit, because the scripts' defaults are relative to the working
     directory. With a year, parse_legacy_311 parses only that year into its own
     file (#37)."""
@@ -241,7 +253,19 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
     paths = run_paths(days, root)
     raw, interim = paths.raw, paths.interim
     config = root / "Data-Pipeline" / "config"
-    hint_311 = "(by hand until #6 lands)"
+    if step in ("ingest_legacy_311", "ingest_new_311"):
+        # The downloads and their schedule state are the same for every range;
+        # only the new-system parquet goes to the run's folder.
+        system = "legacy" if step == "ingest_legacy_311" else "new_system"
+        sources, raw_dir = config / "ingest_311_sources.csv", raw / "311"
+        return StepPlan(
+            args=["--raw-dir", raw_dir, "--sources", sources, "--state-dir", root / "Data-Pipeline" / "data" / "state" / "311",
+                  "--prepared-dir", interim, "--system", system],
+            files=StepFiles(config_in=[sources], data_out=[raw_dir / name for name in configured_311_files(sources, system)]),
+            hint="Restore Data-Pipeline/config/ingest_311_sources.csv from git.",
+            refetch=raw_dir,
+            keep_outputs=True,
+        )
     if step == "schema_and_statistics":
         # #35. No data_out: the step compares with the previous run's files, so
         # they must not be cleared first, and it writes nothing when they are unchanged.
@@ -269,7 +293,7 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
         return StepPlan(
             args=["--raw-dir", raw_dir, "--years", *years, "--out", out],
             files=StepFiles(data_in=[raw_dir / f"{y}.csv" for y in years], data_out=[out]),
-            hint=f"Put the yearly legacy 311 files in Data-Pipeline/data/raw/311/ {hint_311}.",
+            hint="Put the yearly legacy 311 files in Data-Pipeline/data/raw/311/ (ingest_legacy_311 downloads them).",
         )
     if step == "merge_legacy_311":
         return StepPlan(
@@ -285,7 +309,7 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
         return StepPlan(
             args=["--raw", export, "--out", out],
             files=StepFiles(data_in=[export], data_out=[out]),
-            hint=f"Put the new-system export in Data-Pipeline/data/raw/311/ {hint_311}.",
+            hint="Put the new-system export in Data-Pipeline/data/raw/311/ (ingest_new_311 downloads it).",
         )
     if step == "combine_311":
         legacy, new, out = interim / "legacy_311.parquet", interim / "new_311.parquet", interim / "311_combined.parquet"
@@ -329,7 +353,7 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
                 data_in=[*(raw_dir / f"{year}.csv" for year in days.legacy_years), raw_dir / "new_system.csv"],
                 config_in=[bounds, published],
             ),
-            hint=f"Put the legacy 311 files and the new-system export in Data-Pipeline/data/raw/311/ {hint_311}.",
+            hint="Put the legacy 311 files and the new-system export in Data-Pipeline/data/raw/311/ (ingest_legacy_311 and ingest_new_311 download them).",
         )
     if step == "validate_processed":
         combined, located = interim / "311_combined.parquet", interim / "311_located.parquet"
@@ -381,7 +405,10 @@ def check_inputs(step: str, plan: StepPlan) -> None:
 
 
 def clear_outputs(plan: StepPlan) -> None:
-    """Delete the step's outputs, so a file left by an earlier run cannot pass for new output."""
+    """Delete the step's outputs, so a file left by an earlier run cannot pass for new output.
+    Downloads (keep_outputs) stay: deleting them would force every file to be fetched again."""
+    if plan.keep_outputs:
+        return
     for path in plan.files.data_out:
         path.unlink(missing_ok=True)
 
