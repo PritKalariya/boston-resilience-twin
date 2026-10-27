@@ -1,6 +1,6 @@
 # ADR-017: Components as top-level folders, one shared Airflow stack at the root
 
-- Status: accepted
+- Status: accepted, amended by ADR-023
 - Date: 2026-10-17
 - Owner: PritKalariya
 - Phase: setup
