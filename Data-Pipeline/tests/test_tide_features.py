@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import date
 
 import pandas as pd
@@ -71,6 +72,15 @@ def test_every_past_half_year_must_be_stored(tmp_path):
     # 2026-H2 is the current half-year, not downloaded yet: its days stay missing.
     day = tide_features(pd.DatetimeIndex(["2026-10-20"]), folder, TODAY).iloc[0]
     assert day["tide_pred_hours"] == 0 and pd.isna(day["tide_pred_max_m"])
+
+
+def test_a_missing_current_half_year_is_named_in_a_warning(tmp_path, caplog):
+    folder = write(tmp_path / "predicted", "2026-H1", answer("2026-01-01", "2026-06-30"))
+    with caplog.at_level(logging.WARNING, logger="period_files"):
+        day = tide_features(pd.DatetimeIndex(["2026-10-20"]), folder, TODAY).iloc[0]
+    assert pd.isna(day["tide_pred_max_m"])
+    assert "2026-H2.json is not stored yet" in caplog.text and "tide_pred_max_m" in caplog.text
+    assert "run tides.py (#7)" in caplog.text
 
 
 def test_predictions_must_be_hourly_numbers(tmp_path):

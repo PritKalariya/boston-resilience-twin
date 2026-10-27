@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import date
 
 import pandas as pd
@@ -146,6 +147,14 @@ def test_every_past_year_must_be_stored(tmp_path):
     with pytest.raises(FileNotFoundError, match="2023.json"):
         read_observed(noaa, [2023, 2024], TODAY)
     assert len(read_observed(noaa, [2024, 2026], TODAY)) == 366  # 2026 is this year, not downloaded yet
+
+
+def test_a_missing_current_year_is_named_in_a_warning(tmp_path, caplog):
+    noaa = write(tmp_path / "noaa_logan", 2025, noaa_answer("2025-01-01", "2025-12-31"))
+    with caplog.at_level(logging.WARNING, logger="period_files"):
+        assert len(read_observed(noaa, [2025, 2026], TODAY)) == 365
+    assert "2026.json is not stored yet" in caplog.text and "obs_*_lag*" in caplog.text
+    assert "run noaa_logan.py (#7)" in caplog.text
 
 
 def test_rows_after_2023_need_the_forecasts(tmp_path):

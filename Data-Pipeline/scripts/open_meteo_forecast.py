@@ -48,6 +48,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from period_files import stored_periods
+
 FORMAT_CHECKED = "#8 as merged (PR #76, main df56bd4) and the stored set c files for 2024 to 2026"
 SET = "day_before_ncep_gfs_global"  # #8's set c, the only one for validation and test
 FIRST_YEAR = 2024  # set c starts on 2024-01-21
@@ -125,17 +127,13 @@ def read_hourly(forecast_dir, years, today: date | None = None) -> pd.DataFrame:
     Years before FIRST_YEAR are not asked for. Every other year before the
     current one must be stored, since a gap in the stored set is a missing
     input, not missing weather; the current year may be absent (not downloaded
-    yet), and its days stay missing.
+    yet), and its days stay missing, with a warning (period_files).
     """
     forecast_dir = Path(forecast_dir)
     this_year = (today or datetime.now(timezone.utc).date()).year
     years = sorted(year for year in set(years) if year >= FIRST_YEAR)
-    absent = [year for year in years if not (forecast_dir / f"{year}.json").is_file()]
-    missing = [year for year in absent if year < this_year]
-    if missing:
-        raise FileNotFoundError(f"{forecast_dir} lacks {', '.join(f'{year}.json' for year in missing)}; "
-                                f"run open_meteo.py --only {SET}")
-    stored = [year for year in years if year not in absent]
+    stored = stored_periods(forecast_dir, years, this_year, f"run open_meteo.py --only {SET}",
+                            "the forecast weather values (wx_* after 2023-12-31)")
     if not stored:
         return pd.DataFrame({column: pd.Series(dtype="float64") for column in columns()}).set_axis(
             pd.DatetimeIndex([], tz="UTC", name="valid_utc").as_unit("ns"))

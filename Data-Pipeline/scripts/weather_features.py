@@ -29,7 +29,8 @@ reports none from 2015.
 Missing stays missing: a GHCN-D value with a quality flag counts as missing,
 and no gap is filled, with an observation or anything else. Every year file
 from FIRST_YEAR to last year must be stored; only the current year may be
-absent (not downloaded yet), and its days stay missing.
+absent (not downloaded yet), and its days stay missing, with a warning that
+names the file (period_files.py).
 
 #7 stores Data-Pipeline/data/raw/weather/noaa_logan/<year>.json exactly as CDO
 returned it: {"metadata": ..., "results": [{"date", "datatype", "station",
@@ -49,6 +50,7 @@ import pandas as pd
 
 import open_meteo_forecast as om
 from alert_history import cutoff_utc
+from period_files import stored_periods
 
 NOAA_CHECKED = "#7 as merged (noaa_logan.py, main df56bd4)"
 STATION = "GHCND:USW00014739"  # Boston Logan (#7)
@@ -108,17 +110,15 @@ def read_observed(noaa_dir, years, today: date | None = None) -> pd.DataFrame:
     """Logan's GHCN-D values per station day (index date, one column per OBSERVED value) for the given years.
 
     Years before FIRST_YEAR are not asked for. Every other year before the
-    current one must be stored; the current year may be absent.
+    current one must be stored; the current year may be absent, with a warning
+    (period_files).
     """
     noaa_dir = Path(noaa_dir)
     this_year = (today or datetime.now(timezone.utc).date()).year
     years = sorted(year for year in set(years) if year >= FIRST_YEAR)
-    absent = [year for year in years if not (noaa_dir / f"{year}.json").is_file()]
-    missing = [year for year in absent if year < this_year]
-    if missing:
-        raise FileNotFoundError(f"{noaa_dir} lacks {', '.join(f'{year}.json' for year in missing)}; "
-                                "run noaa_logan.py (#7)")
-    frames = [_read_noaa_year(noaa_dir / f"{year}.json") for year in years if year not in absent]
+    stored = stored_periods(noaa_dir, years, this_year, "run noaa_logan.py (#7)",
+                            "Logan's observed values (obs_*_lag*, and wx_* up to 2023-12-31)")
+    frames = [_read_noaa_year(noaa_dir / f"{year}.json") for year in stored]
     columns = list(OBSERVED.values())
     if not frames:
         return pd.DataFrame(columns=columns, index=pd.DatetimeIndex([], name="date"), dtype="float64")

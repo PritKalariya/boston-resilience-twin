@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import date
 
 import pandas as pd
@@ -151,6 +152,14 @@ def test_every_year_before_this_one_must_be_stored(tmp_path):
         read_hourly(tmp_path, [2024, 2025], TODAY)
     # 2023 is before set c starts and 2026 is this year, not downloaded yet: neither is an error.
     assert len(read_hourly(tmp_path, [2023, 2025, 2026], TODAY)) == 48
+
+
+def test_a_missing_current_year_is_named_in_a_warning(tmp_path, caplog):
+    write(tmp_path, 2025, answer("2025-01-01", "2025-01-02"))
+    with caplog.at_level(logging.WARNING, logger="period_files"):
+        assert len(read_hourly(tmp_path, [2025, 2026], TODAY)) == 48
+    assert "2026.json is not stored yet" in caplog.text and "forecast weather values (wx_*" in caplog.text
+    assert "run open_meteo.py --only day_before_ncep_gfs_global" in caplog.text
 
 
 def test_an_hour_stored_in_two_files_is_refused(tmp_path):

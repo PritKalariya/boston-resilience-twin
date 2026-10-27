@@ -33,9 +33,12 @@ out of the model:
 
 Leakage: each row stores the last 311 day it uses (`features_last_day`) and the
 moment the forecast is made (`forecast_cutoff_utc`); the run stops if a row
-reaches past D - min_lag, the cutoff is not before D starts, a row after the
-training years takes observed weather of its own day, or a forecast it uses
-became available only after the cutoff (`wx_known_by_utc`).
+reaches past D - min_lag, a 311 feature is not what the counts give when read by
+date up to features_last_day (lags_by_date), the cutoff is not before D starts,
+a row after the training years takes observed weather of its own day, or a
+forecast it uses became available only after the cutoff (`wx_known_by_utc`).
+It also stops before any of this when a day from --start to --end is not in the
+counts (surge_labels.requested_days).
 """
 
 from __future__ import annotations
@@ -44,11 +47,12 @@ import argparse
 from pathlib import Path
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 
 from alert_history import alert_feature_names, alert_features, cutoff_utc, day_start_utc
 from daily_counts import STORM_GROUPS
-from surge_labels import check_counts, load_settings
+from surge_labels import check_counts, load_settings, requested_days
 from tide_features import TIDE_FEATURES, tide_features
 from weather_features import OBSERVED_UNTIL, WEATHER_FEATURES, weather_features
 
@@ -146,7 +150,9 @@ def static_attributes(static_dir: Path | str) -> pd.DataFrame:
         "static_land_sqmi": numbers["arealand_sqmi"].round(4),
         "static_density": _share(numbers[POPULATION], numbers["arealand_sqmi"]).round(1),
         "static_poverty_share": _share(numbers[POVERTY[0]], numbers[POVERTY[1]]),
-        "static_older_adult_share": _share(numbers[OLDER_ADULTS].sum(axis=1), numbers[POPULATION]),
+        # min_count: one missing age group leaves the share missing instead of too low
+        "static_older_adult_share": _share(numbers[OLDER_ADULTS].sum(axis=1, min_count=len(OLDER_ADULTS)),
+                                           numbers[POPULATION]),
         "static_no_vehicle_share": _share(numbers[NO_VEHICLE[0]], numbers[NO_VEHICLE[1]]),
     })
     shapes = hoods.to_crs(AREA_CRS).geometry.make_valid()
@@ -157,14 +163,54 @@ def static_attributes(static_dir: Path | str) -> pd.DataFrame:
     return out[["unit", *STATIC_FEATURES]]
 
 
-def check_no_leakage(features: pd.DataFrame, min_lag: int) -> None:
-    """Every row uses 311 days up to D - min_lag and data known before a cutoff that comes before D (ADR-003)."""
+def lags_by_date(counts: pd.DataFrame, rows: pd.DataFrame, groups: list[str]) -> pd.DataFrame:
+    """The 311 features of each row recomputed by date: each group's count on the row's
+    features_last_day and its sums over WINDOWS ending there, missing where a day they need is not
+    in the counts. lag_features shifts rows; this looks the days up, so the two agree only if every
+    feature reads exactly the days up to features_last_day."""
+    df = check_counts(counts)
+    first = df["date"].min()
+    calendar = pd.date_range(first, df["date"].max())
+    units = pd.Index(sorted(df["unit"].unique()))
+    column = units.get_indexer(rows["unit"])
+    position = ((pd.DatetimeIndex(rows["features_last_day"]) - first) // pd.Timedelta(days=1)).to_numpy()
+    known = (column >= 0) & (position >= 0) & (position < len(calendar))
+    col, pos = np.where(known, column, 0), np.where(known, position, 0)
+    out = pd.DataFrame(index=rows.index)
+    for group in groups:
+        grid = (df[df["storm_group"] == group].pivot(index="date", columns="unit", values="requests")
+                .reindex(index=calendar, columns=units).to_numpy(dtype="float64"))
+        before = np.vstack([np.zeros((1, len(units))), grid.cumsum(axis=0)])  # before[i]: days 0 to i - 1
+        out[f"{group}_last"] = np.where(known, grid[pos, col], np.nan)
+        for w in WINDOWS:
+            whole = known & (position >= w - 1)
+            out[f"{group}_sum{w}"] = np.where(whole, before[pos + 1, col] - before[np.maximum(pos + 1 - w, 0), col], np.nan)
+    return out
+
+
+def check_no_leakage(features: pd.DataFrame, min_lag: int, counts: pd.DataFrame | None = None,
+                     groups: list[str] = ()) -> None:
+    """Every row uses 311 days up to D - min_lag and data known before a cutoff that comes before D (ADR-003).
+
+    With the counts, each 311 feature must also equal lags_by_date, its value read by date up to
+    features_last_day. features_last_day is date - min_lag by construction, so the gap check alone
+    cannot see a lag that reads a later day than it says; this comparison can.
+    """
     if features.empty:
         return
     gap = (features["date"] - features["features_last_day"]).dt.days
     if (gap < min_lag).any():
         worst = features.loc[gap < min_lag, ["unit", "date", "features_last_day"]].head(3)
         raise AssertionError(f"features reach past day D - {min_lag}:\n{worst.to_string(index=False)}")
+    if counts is not None:
+        expected = lags_by_date(counts, features, list(groups))
+        for name in feature_names(list(groups)):
+            got, want = features[name].to_numpy(dtype="float64"), expected[name].to_numpy()
+            wrong = ~((got == want) | (np.isnan(got) & np.isnan(want)))
+            if wrong.any():
+                worst = features.loc[wrong, ["unit", "date", "features_last_day", name]].assign(by_date=want[wrong])
+                raise AssertionError(f"{name} is not the counts up to features_last_day, read by date:\n"
+                                     f"{worst.head(3).to_string(index=False)}")
     if "forecast_cutoff_utc" in features:
         begins = day_start_utc(pd.DatetimeIndex(features["date"])).as_unit("ns").asi8
         cutoff = pd.DatetimeIndex(features["forecast_cutoff_utc"]).as_unit("ns").asi8
@@ -182,13 +228,9 @@ def check_no_leakage(features: pd.DataFrame, min_lag: int) -> None:
 
 
 def written_days(counts: pd.DataFrame, start=None, end=None) -> pd.DatetimeIndex:
-    """The days the table writes: every day in the counts from start to end."""
-    days = pd.DatetimeIndex(pd.to_datetime(counts["date"], format="ISO8601").unique()).sort_values()
-    if start is not None:
-        days = days[days >= pd.Timestamp(start)]
-    if end is not None:
-        days = days[days <= pd.Timestamp(end)]
-    return days
+    """The days the table writes: every day from start to end, each of them in the counts
+    (requested_days stops the run when one is not)."""
+    return requested_days(counts, start, end)
 
 
 def build_features(
@@ -248,7 +290,7 @@ def build_features(
             raise ValueError(f"{name} has no row for {absent.nunique()} of the days written, from "
                              f"{absent.min().date()}; build it for every day")
     table = table.drop(columns=list(joined.values())).sort_values(["unit", "date"], ignore_index=True)
-    check_no_leakage(table, min_lag)
+    check_no_leakage(table, min_lag, counts, groups)
     return table
 
 

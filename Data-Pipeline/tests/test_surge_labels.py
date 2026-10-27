@@ -16,6 +16,7 @@ from surge_labels import (
     group_flags,
     load_rules,
     load_settings,
+    requested_days,
     unit_table,
 )
 
@@ -79,6 +80,17 @@ def test_no_baseline_means_no_label_not_false():
     first = cell(labels_for(counts_table()), "East", "2015-06-01")
     assert pd.isna(first["surge"]) and pd.isna(first["surge_groups"])
     assert all(pd.isna(first[f"surge_{g}"]) for g in STORM_GROUPS)
+
+
+def test_a_group_without_a_baseline_never_turns_a_label_false():
+    """label_cells' nullable OR: True | NA is True and False | NA stays NA; fillna(False) would break the second."""
+    cells = group_baselines(check_counts(set_count(counts_table(), "East", "2016-03-01", "tree", 10)))
+    on_day = (cells["date"] == pd.Timestamp("2016-03-01")) & (cells["storm_group"] == "snow_ice")
+    cells.loc[on_day, ["mean", "sd", "q90"]] = np.nan  # snow_ice has no baseline that day in either unit
+    labels = build_labels(cells, SD, list(STORM_GROUPS))
+    east, west = cell(labels, "East", "2016-03-01"), cell(labels, "West", "2016-03-01")
+    assert bool(east["surge"]) and east["surge_groups"] == "tree"  # tree surges, so the label is known
+    assert pd.isna(west["surge"]) and pd.isna(west["surge_groups"])  # the others are quiet: unknown, not false
 
 
 def test_a_spike_is_a_surge_and_names_its_group():
@@ -262,6 +274,21 @@ def test_bad_rules_are_rejected(tmp_path, body, message):
         load_rules(path)
 
 
+@pytest.mark.parametrize("k", ["nan", "NaN", "inf", "-inf", "Infinity", "1e999", "0", "0.0", "-1", "", "two"])
+def test_sd_k_must_be_a_finite_number_above_0(tmp_path, k):
+    path = tmp_path / "rules.csv"
+    path.write_text(HEADER + f"a,sd,{k},3,yes,\n")
+    with pytest.raises(ValueError, match="needs k above 0 as a finite number"):
+        load_rules(path)
+
+
+@pytest.mark.parametrize("k", ["2", "1.5", "0.25"])
+def test_a_finite_k_above_0_is_kept(tmp_path, k):
+    path = tmp_path / "rules.csv"
+    path.write_text(HEADER + f"a,sd,{k},3,yes,\n")
+    assert load_rules(path)[1].k == float(k)
+
+
 def test_rules_file_without_a_column_is_rejected(tmp_path):
     path = tmp_path / "rules.csv"
     path.write_text("rule_id,rule,k,m\na,sd,2,3\n")
@@ -364,6 +391,49 @@ def test_main_writes_labels_and_prints_the_grid(tmp_path, monkeypatch, capsys):
     assert bool(cell(written, "East", "2016-03-01")["surge"])
     out = capsys.readouterr().out
     assert "## Surge rate per rule" in out and "q90_m3" in out and "## Per neighborhood" in out
+
+
+# Requested days must all be in the counts (counts_table: 2015-01-01 to 2017-03-10)
+
+
+@pytest.mark.parametrize(
+    "start, end, message",
+    [
+        ("2017-04-01", "2017-04-30",  # entirely after the counts: a full build older than the slice
+         r"cover 2015-01-01 to 2017-03-10, so 30 of the 30 days from 2017-04-01 to 2017-04-30 have no counts"),
+        ("2017-03-01", "2017-03-31", r"21 of the 31 days .*\(2017-03-11 to 2017-03-31\)"),  # partly after
+        ("2014-12-15", "2015-01-15", r"17 of the 32 days .*\(2014-12-15 to 2014-12-31\)"),  # partly before
+        ("2014-12-31", "2017-03-11", r"2 of the 802 days .*\(2014-12-31 to 2014-12-31 and 2017-03-11 to 2017-03-11\)"),
+        ("2017-04-01", None, "end on 2017-03-10, before start 2017-04-01"),
+        ("2016-02-01", "2016-01-01", "start 2016-02-01 is after end 2016-01-01"),
+    ],
+)
+def test_days_the_counts_lack_are_refused(start, end, message):
+    with pytest.raises(ValueError, match=message):
+        requested_days(counts_table(), start, end)
+
+
+def test_a_covered_range_is_every_day_and_its_history_is_not_asked_for():
+    counts = counts_table()
+    assert list(requested_days(counts, "2016-06-01", "2016-06-30")) == list(pd.date_range("2016-06-01", "2016-06-30"))
+    assert len(requested_days(counts)) == len(requested_days(counts, "2015-01-01")) == 800  # its first days have no baseline
+    with pytest.raises(ValueError, match="no rows"):
+        requested_days(counts.iloc[0:0])
+
+
+def test_main_stops_on_days_after_the_counts_and_writes_nothing(tmp_path, monkeypatch):
+    counts_table().to_parquet(tmp_path / "counts.parquet", index=False)
+    out = tmp_path / "labels.parquet"
+    argv = ["surge_labels.py", "--counts", str(tmp_path / "counts.parquet"),
+            "--rules", str(CONFIG / "surge_rules.csv"), "--settings", str(CONFIG / "labels_features.csv"), "--out", str(out)]
+    monkeypatch.setattr(sys, "argv", [*argv, "--start", "2017-03-01", "--end", "2017-03-31"])
+    with pytest.raises(ValueError, match="21 of the 31 days"):
+        surge_labels.main()
+    assert not out.exists()
+    monkeypatch.setattr(sys, "argv", [*argv, "--start", "2016-06-01", "--end", "2016-06-30"])
+    surge_labels.main()  # covered; the days before June 2016 are its baseline history
+    written = pd.read_parquet(out)
+    assert len(written) == 2 * 30 and written["surge"].notna().all()
 
 
 def test_main_names_a_missing_column(tmp_path, monkeypatch):

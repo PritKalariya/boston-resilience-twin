@@ -142,6 +142,31 @@ def test_every_row_records_the_last_day_it_uses():
         check_no_leakage(leaky, LAG)
 
 
+def test_the_leakage_check_reads_the_counts_by_date():
+    counts = counts_table()
+    table = build_features(counts, GROUPS, LAG)
+    check_no_leakage(table, LAG, counts, GROUPS)  # every 311 feature is the counts up to features_last_day
+    window_into_d = table.assign(tree_sum3=table.groupby("unit")["tree_sum3"].shift(-LAG))  # the 3 days ending on D
+    with pytest.raises(AssertionError, match="tree_sum3 is not the counts up to features_last_day"):
+        check_no_leakage(window_into_d, LAG, counts, GROUPS)
+    day_before = table.assign(snow_ice_last=table["snow_ice_last"] + 2)  # snow_ice of D - 1: 2 more requests each day
+    with pytest.raises(AssertionError, match="snow_ice_last is not the counts"):
+        check_no_leakage(day_before, LAG, counts, GROUPS)
+
+
+def test_a_lag_off_by_one_day_stops_the_build_although_features_last_day_says_d_minus_2(monkeypatch):
+    """The mistake the gap check alone cannot see: features_last_day is date - min_lag whatever the lags read."""
+    real = feature_table.lag_features
+
+    def off_by_one(counts, groups, min_lag):  # reads D - 1, records D - 2
+        table = real(counts, groups, min_lag - 1)
+        return table.assign(features_last_day=table["date"] - pd.Timedelta(days=min_lag))
+
+    monkeypatch.setattr(feature_table, "lag_features", off_by_one)
+    with pytest.raises(AssertionError, match="is not the counts up to features_last_day"):
+        build_features(counts_table(), GROUPS, LAG)
+
+
 def test_a_lag_below_one_is_refused():
     with pytest.raises(ValueError, match="1 or more"):
         lag_features(counts_table(), GROUPS, 0)
@@ -310,6 +335,18 @@ def test_static_attributes_math(tmp_path):
     assert static.loc["East", "static_no_vehicle_share"] == 0.125
 
 
+def test_a_missing_age_group_leaves_the_older_adult_share_missing(tmp_path):
+    path = make_static_dir(tmp_path / "static")
+    file = path / "population_2025_neighborhood.parquet"
+    population = pd.read_parquet(file)
+    population[OLDER_ADULTS[3]] = population[OLDER_ADULTS[3]].astype("float64")
+    population.loc[population["name"] == "East", OLDER_ADULTS[3]] = np.nan  # one of the ten groups unknown
+    population.to_parquet(file, index=False)
+    static = static_attributes(path).set_index("unit")
+    assert pd.isna(static.loc["East", "static_older_adult_share"])  # not the 0.1 the other nine give
+    assert static.loc["West", "static_older_adult_share"] == 0.1
+
+
 def test_static_attributes_need_every_neighborhood_and_column(tmp_path):
     with pytest.raises(ValueError, match="no 2025 population row"):
         static_attributes(make_static_dir(tmp_path / "a", population_units=["East"]))
@@ -347,6 +384,18 @@ def test_missing_and_malformed_counts_are_rejected():
         build_features(broken, GROUPS, LAG)
 
 
+def test_days_the_counts_lack_are_refused_and_earlier_days_are_not_asked_for():
+    counts = counts_table()  # 2016-01-01 to 2016-04-29
+    with pytest.raises(ValueError, match="30 of the 30 days from 2016-06-01 to 2016-06-30 have no counts"):
+        written_days(counts, "2016-06-01", "2016-06-30")
+    with pytest.raises(ValueError, match=r"1 of the 30 days .*\(2016-04-30 to 2016-04-30\)"):
+        written_days(counts, "2016-04-01", "2016-04-30")
+    assert len(written_days(counts, "2016-03-01", "2016-03-31")) == 31  # its lags read February, not asked for
+    assert len(written_days(counts)) == 120  # the full table: its first days have no lags, as before
+    with pytest.raises(ValueError, match="no rows"):
+        written_days(counts.iloc[0:0])
+
+
 # Command line
 
 
@@ -365,6 +414,23 @@ def test_main_writes_the_full_table(tmp_path, monkeypatch, capsys):
     assert set(STATIC_FEATURES) <= set(written.columns)
     printed = capsys.readouterr().out
     assert "D - 2" in printed and "18:00" in printed and "not yet in the table" in printed
+
+
+def test_main_stops_on_days_after_the_counts_and_writes_nothing(tmp_path, monkeypatch):
+    counts_table().to_parquet(tmp_path / "counts.parquet", index=False)  # 2016-01-01 to 2016-04-29
+    alerts_table().to_parquet(tmp_path / "alerts.parquet", index=False)
+    out = tmp_path / "features.parquet"
+    argv = ["feature_table.py", "--counts", str(tmp_path / "counts.parquet"), "--alerts", str(tmp_path / "alerts.parquet"),
+            "--static-dir", str(make_static_dir(tmp_path / "static")), "--settings", str(CONFIG / "labels_features.csv"),
+            "--out", str(out)]
+    monkeypatch.setattr(sys, "argv", [*argv, "--start", "2016-04-15", "--end", "2016-05-14"])
+    with pytest.raises(ValueError, match=r"15 of the 30 days .*\(2016-04-30 to 2016-05-14\)"):
+        feature_table.main()
+    assert not out.exists()
+    monkeypatch.setattr(sys, "argv", [*argv, "--start", "2016-03-01", "--end", "2016-03-31"])
+    feature_table.main()
+    written = pd.read_parquet(out)
+    assert len(written) == 2 * 31 and written[feature_names(GROUPS)].notna().all().all()  # lags reach into February
 
 
 def write_json(folder, name, body):

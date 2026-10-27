@@ -17,15 +17,17 @@ has no baseline and no label (ADR-005): its label is missing, not false, so
 label coverage can be reported. Everything is plain arithmetic on sorted data,
 so the same counts always give the same labels.
 
-The run writes labels.parquet. With --grid it also prints the surge rate of
-every rule in surge_rules.csv, overall and per period, storm group and
-neighborhood, for the recommendation. The rule is frozen by ADR before Model
+The run writes labels.parquet, and stops before that when a day from --start to
+--end is not in the counts (requested_days). With --grid it also prints the
+surge rate of every rule in surge_rules.csv, overall and per period, storm group
+and neighborhood, for the recommendation. The rule is frozen by ADR before Model
 Development (CLAUDE.md); until then the chosen row is provisional.
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -78,8 +80,8 @@ def load_rules(path: Path | str) -> tuple[list[Rule], Rule]:
                 k_value = float(k)
             except ValueError:
                 k_value = 0.0
-            if k_value <= 0:
-                raise ValueError(f"{path}: sd rule {rule_id} needs k above 0, got {k!r}")
+            if not math.isfinite(k_value) or k_value <= 0:  # nan or inf would pass k <= 0 and never fire
+                raise ValueError(f"{path}: sd rule {rule_id} needs k above 0 as a finite number, got {k!r}")
         elif k:
             raise ValueError(f"{path}: q90 rule {rule_id} takes no k, got {k!r}")
         else:
@@ -188,6 +190,35 @@ def check_counts(counts: pd.DataFrame) -> pd.DataFrame:
     return df.sort_values(KEY, ignore_index=True)
 
 
+def requested_days(counts: pd.DataFrame, start=None, end=None) -> pd.DatetimeIndex:
+    """Every day from start to end, both included (by default the counts' first and last day), or a
+    ValueError naming the days the counts lack, so an empty or partial table never passes as a run.
+
+    In the DAG a slice reads the full build's counts (pipeline_steps), so a day after their last one
+    means the full build is older than the slice. check_counts requires every unit and storm group on
+    every day from the counts' first day to their last, so each day in that span is complete. Days
+    before start are not asked for: they only feed baselines and lags, and the first days have none.
+    """
+    dates = pd.to_datetime(counts["date"], format="ISO8601")
+    if dates.empty:
+        raise ValueError("daily counts have no rows; rerun daily_counts.py")
+    first, last = dates.min(), dates.max()
+    rebuild = "rerun daily_counts.py so the counts cover them (a DAG slice reads the full build's counts)"
+    start = first if start is None else pd.Timestamp(start)
+    if end is None and start > last:
+        raise ValueError(f"daily counts end on {last.date()}, before start {start.date()}; {rebuild}")
+    end = last if end is None else pd.Timestamp(end)
+    if start > end:
+        raise ValueError(f"start {start.date()} is after end {end.date()}")
+    days = pd.date_range(start, end)
+    outside = [part for part in (days[days < first], days[days > last]) if len(part)]
+    if outside:
+        spans = " and ".join(f"{part[0].date()} to {part[-1].date()}" for part in outside)
+        raise ValueError(f"daily counts cover {first.date()} to {last.date()}, so {sum(map(len, outside))} of the "
+                         f"{len(days)} days from {start.date()} to {end.date()} have no counts ({spans}); {rebuild}")
+    return days
+
+
 def group_baselines(counts: pd.DataFrame) -> pd.DataFrame:
     """mean, sd, q90 and n of every unit, day and storm group (ADR-005 method A), next to its requests."""
     frames = []
@@ -225,6 +256,9 @@ def label_cells(cells: pd.DataFrame, rule: Rule, label_groups: list[str]) -> pd.
                      "q90": f"q90_{group}", "flag": f"surge_{group}"})
         wide = wide.join(part)
 
+    # Nullable OR: False | NA is NA and True | NA is True, so a cell without a baseline stays
+    # unlabeled (ADR-005) unless a group surges. Never fillna(False) here: that would turn missing
+    # labels into false ones. Every group has the same history days, so a cell is labeled in all or none.
     surge = pd.Series(False, index=wide.index, dtype="boolean")
     for group in label_groups:
         surge = surge | wide[f"surge_{group}"].astype("boolean")
@@ -329,7 +363,9 @@ def main() -> None:
 
     rules, chosen = load_rules(args.rules)
     settings = load_settings(args.settings)
-    cells = group_baselines(check_counts(pd.read_parquet(args.counts)))
+    counts = check_counts(pd.read_parquet(args.counts))
+    requested_days(counts, args.start, args.end)
+    cells = group_baselines(counts)
     labels = build_labels(cells, chosen, settings["label_groups"], args.start, args.end)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

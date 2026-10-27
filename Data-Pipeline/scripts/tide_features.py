@@ -18,8 +18,8 @@ fail ADR-003's live rule and would leak.
 
 Every half-year file from FIRST_YEAR up to the current half must be stored;
 the current half may be absent (not downloaded yet), and its days stay
-missing. Checked against TIDES_CHECKED: test_feature_sources.py reads what
-tides.py itself stores.
+missing, with a warning that names the file (period_files.py). Checked against
+TIDES_CHECKED: test_feature_sources.py reads what tides.py itself stores.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 
 from alert_history import day_start_utc
+from period_files import stored_periods
 
 TIDES_CHECKED = "#7 as merged (tides.py, main df56bd4)"
 FIRST_YEAR = 2015  # #7 downloads from 2015-01-01
@@ -75,11 +76,8 @@ def read_predictions(tides_dir, days, today: date | None = None) -> pd.Series:
     days = pd.DatetimeIndex(days)
     current = half_year(today or datetime.now(timezone.utc).date())
     halves = sorted({half_year(day) for day in days.append(days + pd.Timedelta(days=1)) if day.year >= FIRST_YEAR})
-    absent = [half for half in halves if not (tides_dir / f"{half}.json").is_file()]
-    missing = [half for half in absent if half < current]
-    if missing:
-        raise FileNotFoundError(f"{tides_dir} lacks {', '.join(f'{half}.json' for half in missing)}; run tides.py (#7)")
-    frames = [_read_half(tides_dir / f"{half}.json") for half in halves if half not in absent]
+    stored = stored_periods(tides_dir, halves, current, "run tides.py (#7)", "the tide_pred_max_m values")
+    frames = [_read_half(tides_dir / f"{half}.json") for half in stored]
     if not frames:
         return pd.Series(dtype="float64", index=pd.DatetimeIndex([], tz="UTC").as_unit("ns"), name="predicted_m")
     predictions = pd.concat(frames)
