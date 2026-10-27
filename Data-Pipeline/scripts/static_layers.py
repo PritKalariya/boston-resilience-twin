@@ -105,7 +105,7 @@ def check_file(path: Path) -> None:
 
 
 def check_key(df: pd.DataFrame, key: str, source: str) -> None:
-    """Fail when the key column is missing or has blank values; an empty key checks nothing."""
+    """Fail when the key column is missing, blank or duplicated; an empty key checks nothing."""
     if not key:
         return
     if key not in df.columns:
@@ -118,8 +118,9 @@ def check_key(df: pd.DataFrame, key: str, source: str) -> None:
 
 
 def read_vector(path: Path | str, key: str = "") -> tuple[gpd.GeoDataFrame, LayerReport]:
-    """Read a vector layer: drop features without geometry, repair invalid ones, reproject to EPSG:4326 and
-    check it lies in Boston."""
+    """Read a vector layer: fail on a missing, empty or unreadable file, a layer with no features, no CRS or
+    no features with geometry, and a bad key (check_key); drop features without geometry, repair invalid
+    ones, reproject to EPSG:4326 and check it lies in Boston."""
     path = Path(path)
     report = LayerReport(name=path.stem)
     check_file(path)
