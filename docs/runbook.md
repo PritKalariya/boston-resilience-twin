@@ -65,10 +65,15 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Eight tasks run scripts: `ingest_static_layers`, `validate_raw`,
-  `parse_legacy_311`, `parse_new_311`, `combine_311`, `spatial_join`,
-  `validate_processed` and `daily_counts`.
-- The other 10 are placeholders. Each logs the issue that builds it
+- Thirteen tasks run scripts: `ingest_static_layers`, the weather and tide
+  downloads (`ingest_noaa_logan`, `ingest_nws_forecasts`, `ingest_nws_alerts`
+  and `ingest_tides`, #7), `validate_raw`, `parse_legacy_311`,
+  `parse_new_311`, `combine_311`, `spatial_join`, `daily_counts`,
+  `validate_processed` and `schema_and_statistics`. `parse_legacy_311` runs
+  once per legacy year, at most 4 at a time by default (`LEGACY_PARALLEL`),
+  and `merge_legacy_311` joins the years with `legacy_311.read_years`' rule
+  for repeated case ids (#37).
+- The other 5 are placeholders. Each logs the issue that builds it
   (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
 - Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
   hand.
@@ -98,9 +103,16 @@ those days. A run fails at `check_range`
 on a start before 2015, an end before the start, or an unknown conf key.
 Each task's log, with everything its script printed, is in
 `Data-Pipeline/logs/dag_id=daily_pipeline/run_id=<run>/task_id=<task>/`.
-On a laptop (2026-10-21), a one-year slice took 40 seconds and the full
-build about 2.5 minutes. The full build peaked at 3.4 GiB in the scheduler
-container, with `map_311.py` before #68.
+On a laptop (2026-10-24, the `brt-airflow:local` image, #68 in), the full
+build took 73 s with the legacy years side by side, against 124 s one after
+another, and peaked at 2.5 GiB in the scheduler container (`docker stats`).
+The README's "Pipeline performance" section has the Gantt charts and numbers.
+To parse fewer years at once, for example 2 on the VM if #61 shows memory is
+tight, put `LEGACY_PARALLEL=2` in `.env` next to `docker-compose.yaml` and run
+`docker compose up -d --build --wait`. Without it the DAG runs 4, and
+Airflow's parallelism (4) caps any higher value. A value that is not a whole
+number of 1 or more stops the DAG from importing; `list-import-errors` shows
+why.
 
 Logging and failures (#36):
 
@@ -272,16 +284,19 @@ environment block in `docker-compose.yaml` passes one value to all of them.
 
 Pipeline tasks read `NOAA_CDO_TOKEN`, `CENSUS_API_KEY` and `NWS_USER_AGENT`
 from the environment (docs/data-access.md). Locally they come from `.env`.
+This section is for a laptop; on airflow-vm the keys reach `.env` with #64.
 A team member fills them from Secret Manager (needs `gcloud auth login`; the
 command names project 1, so another default gcloud project does not matter).
-It replaces any existing lines for the three keys and keeps the rest of
-`.env`:
+Run it in the repo root. It replaces any existing lines for the three keys,
+keeps the rest of `.env`, and makes the file readable only by you (writing
+`.env.tmp` and moving it resets the permissions):
 
 ```bash
 touch .env && grep -vE "^(NOAA_CDO_TOKEN|CENSUS_API_KEY|NWS_USER_AGENT)=" .env > .env.tmp; mv .env.tmp .env
 for s in noaa-cdo-token census-api-key nws-user-agent; do
   printf "%s='%s'\n" "$(echo "$s" | tr a-z- A-Z_)" "$(gcloud secrets versions access latest --secret="$s" --project=boston-resilience-twin)" >> .env
 done
+chmod 600 .env
 docker compose up -d --wait
 ```
 
@@ -480,6 +495,48 @@ python Data-Pipeline/scripts/static_layers.py --refresh    # fetch every file ag
 
 Raw files go to `Data-Pipeline/data/raw/static/` and the loaded layers to `Data-Pipeline/data/interim/static/` (vectors as GeoParquet in EPSG:4326), both gitignored. The run rewrites `docs/data/static-layers.csv` with the source CRS, row count, retrieval date and SHA-256 of each file; commit it with the change. A changed hash after `--refresh` means the city published a new version, so check the row counts before using it. The run stops on a missing, empty or unreadable file, a missing or duplicate key, or a layer that falls outside Boston after reprojection (usually a wrong CRS).
 
+## Weather download (Open-Meteo, issue #8)
+
+`Data-Pipeline/scripts/open_meteo.py` downloads hourly Open-Meteo weather at Boston Logan for each set in `Data-Pipeline/config/open_meteo.csv`. What each set is, and which one validation and test may use: the table in [docs/data/README.md](data/README.md#open-meteo-weather). To change a model, start date, value or the place, change the config in a reviewed PR. Set c (day-before forecasts) starts 2024-01-21, GFS's first full day of day-before values, and has no rain or snowfall before early December 2024 (README table).
+
+```bash
+python Data-Pipeline/scripts/open_meteo.py --dry-run                              # what a run would download; writes nothing
+python Data-Pipeline/scripts/open_meteo.py                                        # download what is missing or newly finished
+python Data-Pipeline/scripts/open_meteo.py --only first_hours_ecmwf_ifs --force   # download one set again, every year
+```
+
+What a run does, for each set:
+1. Finds the last day to store. `end = yesterday`: yesterday in UTC, so no hour after the download is stored. `end = latest_values` (ERA5, about 5 days behind): one small request finds the last full day with values.
+2. Splits the dates into calendar years. A year already stored through that day is skipped without a request. For `end = yesterday`, a year counts as stored only once its last day has every hour of every value that has data. A last day with gaps, for example a 31 December downloaded before Open-Meteo had its evening hours, is never taken as complete. It is fetched again on every run for 7 days after that day, then once a week until the gaps are filled. Until then its manifest entry has `final_day_complete: false`, the values with gaps (`final_day_gaps`) and the date of the last check (`final_day_checked`), `docs/data/open-meteo.csv` shows the missing hours, and a run that skips it prints `last day still has gaps in [...], next check on or after <date>`. A check that brings nothing new rewrites no year file. A value with no data at all (showers in ECMWF IFS before 2025) stays missing and is not a gap.
+3. Downloads each other year whole and checks the answer: not empty, valid JSON, no Open-Meteo error, in UTC, every hour and value present, numbers only, grid point within 0.5 degrees of Logan. Only then does it replace the year file, and only if its bytes changed. A failed check keeps the stored file, logs the year as `failed`, and the run exits with code 1.
+4. Updates the set's `_manifest.json` (download time, start date, last hour stored, grid point, hours with data per value, whether the last day is complete) and adds a line to `_runs.jsonl`, both under `Data-Pipeline/data/state/open_meteo/<set>/`.
+5. After a run with no failure, writes `docs/data/open-meteo.csv` with the attribution, coverage, download time and SHA-256 of every file, and only if its content changed. With `--only`, the other sets keep their rows as they are, and so does a set with no files on this machine. A run with a failure leaves the file alone. Commit it with the change; a DAG run should write it under `Data-Pipeline/data/` with `--attribution`.
+
+Output: `Data-Pipeline/data/raw/open_meteo/<set>/<year>.json` (the downloads, nothing else) and `Data-Pipeline/data/state/open_meteo/<set>/` (`_manifest.json`, `_runs.jsonl`), gitignored and local only. A rerun with nothing new rewrites no year file and no attribution row. Nothing is uploaded; raw data reaches Cloud Storage only through DVC (#18, #19). No API key is needed.
+
+Rate limits: the free API allows 600 calls a minute and 10,000 a day, and a request counts as one call per 2 weeks of data for up to 10 values. A year of one set is about 26 calls, about 31 for set c, which asks for 12 values. The first full downloads were 13 requests for sets a and b (about 300 calls) and 3 requests for set c (about 85 calls), 5 seconds apart (`--pause`). A daily rerun sends 1 to 4 requests: the ERA5 check and the latest year of each set that has new days, plus one for each year whose incomplete last day is due for a check (step 2). HTTP 429 stops the run at once: the remaining years and sets are listed as not tried and nothing more is requested. A temporary server error (HTTP 5xx) is tried again after 10 and 30 seconds.
+
+Run it after about 01:00 UTC, when the model run that covers yesterday's last hours has been published (4 to 6 hours after it starts). An earlier run is still valid, and the next day's run replaces that year whole.
+
+Moving files from the old layout (once). Before the #8 review, each set's `_manifest.json` and `_runs.jsonl` sat in its raw folder. Move them from the repo root before the next run; the year files stay where they are and nothing is downloaded again:
+```
+mkdir -p Data-Pipeline/data/state/open_meteo/history_era5 Data-Pipeline/data/state/open_meteo/first_hours_ecmwf_ifs Data-Pipeline/data/state/open_meteo/day_before_ncep_gfs_global
+mv -n Data-Pipeline/data/raw/open_meteo/history_era5/_manifest.json Data-Pipeline/data/raw/open_meteo/history_era5/_runs.jsonl Data-Pipeline/data/state/open_meteo/history_era5/
+mv -n Data-Pipeline/data/raw/open_meteo/first_hours_ecmwf_ifs/_manifest.json Data-Pipeline/data/raw/open_meteo/first_hours_ecmwf_ifs/_runs.jsonl Data-Pipeline/data/state/open_meteo/first_hours_ecmwf_ifs/
+mv -n Data-Pipeline/data/raw/open_meteo/day_before_ncep_gfs_global/_manifest.json Data-Pipeline/data/raw/open_meteo/day_before_ncep_gfs_global/_runs.jsonl Data-Pipeline/data/state/open_meteo/day_before_ncep_gfs_global/
+ls -a Data-Pipeline/data/raw/open_meteo/*
+```
+`mv -n` never overwrites; `ls -a` should show only year files. Until the move, the script reads the old manifests in place, never changes them, and logs a warning. If a run already wrote a manifest under `state/`, the old one in the raw folder is out of date: delete it, and keep the old log as `_runs_before_move.jsonl` next to the new one.
+
+When something goes wrong:
+- A year shows `failed`: the reason is in the output and in `_runs.jsonl` under `Data-Pipeline/data/state/open_meteo/<set>/`. The stored file is unchanged; fix the cause and rerun.
+- `its files were downloaded with other settings`: the config's model, place or values changed under an existing set name. Give the set a new name (a new folder), or rerun with `--force` to replace its files.
+- `start moved from <old> to <new>`: the config's start date moved later under an existing set name. Give the set a new name, or rerun with `--force`, which drops the stored years before the new start (manifest entries and year files) and downloads the rest again. An earlier start just downloads the new years.
+- `_manifest.json is not valid JSON`, or `entry '<year>.json' lacks ...` (or another entry problem): the manifest under `Data-Pipeline/data/state/open_meteo/<set>/` is broken. Fix the entry, or delete the entry or the whole manifest; the next run downloads those years again.
+- `no full day with values in the 14 days up to ...`: ERA5 is late or the API is down. Try again later.
+- HTTP 429: the run stopped at once. Wait an hour and rerun; finished years are not downloaded again.
+- `docs/data/open-meteo.csv not written`: the run had a failure (fix it and rerun), or the file lost its attribution columns (restore it from git).
+
 ## Spatial join (311 requests to tracts and neighborhoods)
 
 `spatial_join.py` places every request in `311_combined.parquet` by its coordinates, in a 2020 tract and the ADR-004 neighborhood that holds it, and writes `Data-Pipeline/data/interim/311_located.parquet`. It needs the static layers loaded first.
@@ -576,6 +633,23 @@ docker compose run --rm \
 - **`dvc: command not found`, or `No module named dvc` from `dvc_push.py`.** Run
   `pip install -r Data-Pipeline/requirements.txt` in the Python 3.12 venv. In
   Airflow, rebuild the image (above).
+
+## Schema and statistics (every run)
+
+`schema_stats.py` describes the processed tables on every run (#35): for each table, the schema (columns, types, share missing) and summary statistics (numeric spread, category shares, rows per year). In `daily_counts`, where every unit and group has the same number of rows, the category shares are shares of requests, so a storm group's share of the counts is tracked.
+
+```bash
+python Data-Pipeline/scripts/schema_stats.py            # located and daily_counts, into Data-Pipeline/data/processed/stats/
+python Data-Pipeline/scripts/schema_stats.py --no-docs  # skip the Great Expectations data docs
+```
+
+Outputs in `Data-Pipeline/data/processed/stats/` (versioned with the rest of `Data-Pipeline/data/` by DVC):
+
+- `<table>.json`: the schema and statistics. Replaced each run, so the previous run's numbers are the version before it.
+- `drift.json`: shifts from the previous run beyond the thresholds in `Data-Pipeline/config/stats_thresholds.csv`, plus every schema change (a column added, removed or retyped).
+- `data_docs/index.html`: Great Expectations data docs showing the same numbers. Open it in a browser.
+
+The run compares with the previous run's files before replacing them, and builds the data docs before it writes any JSON, so a failed run leaves the previous files as they were. If the statistics, the thresholds and the data docs are all unchanged it writes nothing, so a rerun on the same data leaves the folder as it was. `drift.json` keeps the statistics it compared against (`baselines`), so after a threshold change a rerun on the same data checks that same comparison again with the new values. Shifts are printed and saved but do not fail the run; the validation steps (#17) are what stop a run. To change a threshold, edit the config in a reviewed PR. A table that does not exist yet (`daily_counts` before #15 merges) is skipped and reported.
 
 ## Project 1 infrastructure (Terraform)
 

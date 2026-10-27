@@ -1,5 +1,7 @@
 """The #7 downloads as pipeline steps (pipeline_steps.step_plan)."""
 
+from pathlib import Path
+
 import pytest
 
 import pipeline_steps as steps
@@ -23,7 +25,9 @@ def test_the_four_downloads_are_real_steps_and_retry():
 def test_plans_write_to_the_raw_folders_and_name_their_keys(tmp_path, step, args, env):
     plan = steps.step_plan(step, SLICE, tmp_path)
     data = tmp_path / "Data-Pipeline" / "data"
-    shown = [str(a).replace(f"{data}/raw/", "").replace(f"{data}/state", "STATE") for a in plan.args]
+    # as_posix on both sides, so the check also holds with Windows backslashes
+    shown = [Path(a).as_posix().replace(f"{data.as_posix()}/raw/", "").replace(f"{data.as_posix()}/state", "STATE")
+             if isinstance(a, Path) else str(a) for a in plan.args]
     assert shown == args
     assert plan.env == env
     assert plan.files.data_out == []  # raw history is never cleared before a run
