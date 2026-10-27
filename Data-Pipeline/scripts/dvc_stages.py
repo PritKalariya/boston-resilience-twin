@@ -59,6 +59,7 @@ STEPS = [
     "feature_table",
     "validate_processed",
     "schema_and_statistics",
+    "bias_slicing",
 ]
 LEFT_OUT = {
     "ingest_nws_forecasts": "a live snapshot of the current forecast: no public source rebuilds past ones, and no stage reads them",

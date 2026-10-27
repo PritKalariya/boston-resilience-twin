@@ -363,3 +363,30 @@ stages:
     outs:
     - data/processed/stats:
         persist: true
+  bias_slicing:
+    cmd: python scripts/pipeline_steps.py bias_slicing
+    deps:
+    - scripts/after_switch.py
+    - scripts/alert_history.py
+    - scripts/bias_slicing.py
+    - scripts/compare_units.py
+    - scripts/daily_counts.py
+    - scripts/feature_table.py
+    - scripts/legacy_311.py
+    - scripts/live_baselines.py
+    - scripts/measure_311.py
+    - scripts/open_meteo_forecast.py
+    - scripts/period_files.py
+    - scripts/pipeline_steps.py
+    - scripts/static_layers.py
+    - scripts/surge_labels.py
+    - scripts/tide_features.py
+    - scripts/weather_features.py
+    - data/processed/labels.parquet
+    - data/interim/311_located.parquet
+    - data/interim/static
+    - config/bias_slicing.csv
+    outs:
+    - data/interim/reports/bias/slices.csv
+    - data/interim/reports/bias/gaps.csv
+    - data/interim/reports/bias/report.md
