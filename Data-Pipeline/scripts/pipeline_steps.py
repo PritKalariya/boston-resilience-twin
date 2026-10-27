@@ -6,11 +6,16 @@ conftest.py. It uses the standard library only, so Airflow parses the DAG
 without loading pandas or geopandas.
 
 A real step calls a pipeline script's own main() with the arguments it would
-get on the command line (run_script), so the scripts stay unchanged and the
-DAG and the dvc.yaml stages (#18) share one entry point per script. Each real
+get on the command line (run_script), so the scripts stay unchanged. Each real
 step is one block in step_plan: its arguments, the files behind them and what
 to do when an input is missing. Every other task is a placeholder until the
 issue in PLANNED builds it.
+
+The dvc.yaml stages (#18, ADR-024) run the same steps: each stage is
+`python scripts/pipeline_steps.py <step>` (main below), which calls run_step
+for the full build just as the DAG task does, and dvc_stages.py writes the
+stages' deps and outs from step_plan. So a step's script, arguments and files
+are defined once, here.
 
 A slice keeps only its days, in Boston local time (new-system times are
 already local, ADR-020): legacy rows right after parsing, and the combined
@@ -39,6 +44,7 @@ parse of all the years.
 
 from __future__ import annotations
 
+import argparse
 import csv
 import importlib
 import logging
@@ -226,6 +232,11 @@ class StepPlan:
     refetch: Path | None = None
     env: tuple[str, ...] = ()  # credentials the script needs (#4), checked before it runs
     keep_outputs: bool = False
+    # For the dvc.yaml stages (#18): folders the step adds to and keeps between runs
+    # (downloads, the statistics history), and what else it writes beyond data_out
+    # (folders, manifests, change points, check results), not counted as rows.
+    keeps: tuple[Path, ...] = ()
+    writes_too: tuple[Path, ...] = ()
 
 
 def configured_layers(config: Path) -> list[str]:
@@ -267,6 +278,8 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
             hint="Restore Data-Pipeline/config/ingest_311_sources.csv from git.",
             refetch=raw_dir,
             keep_outputs=True,
+            # ingest_311.py writes new_system_as_published.parquet next to the run's outputs
+            writes_too=(interim / "new_system_as_published.parquet",) if system == "new_system" else (),
         )
     if step == "schema_and_statistics":
         # #35. No data_out: the step compares with the previous run's files, so
@@ -278,6 +291,7 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
                   "--thresholds", thresholds, "--out-dir", paths.processed / "stats"],
             files=StepFiles(data_in=[located], config_in=[thresholds]),
             hint="Run spatial_join and daily_counts for the same range first.",
+            keeps=(paths.processed / "stats",),
         )
     if step == "ingest_static_layers":
         layers, raw_dir, out_dir = config / "static_layers.csv", raw / "static", interim / "static"
@@ -287,6 +301,8 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
             files=StepFiles(config_in=[layers], data_out=[out_dir / f"{name}.parquet" for name in configured_layers(layers)]),
             hint="Restore Data-Pipeline/config/static_layers.csv from git.",
             refetch=raw_dir,
+            keeps=(raw_dir,),
+            writes_too=(out_dir, interim / "static-layers.csv"),
         )
     if step == "parse_legacy_311":
         raw_dir = raw / "311"
@@ -321,6 +337,7 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
                   "--out", out, "--change-points", interim / "change-points.csv"],
             files=StepFiles(data_in=[legacy, new], config_in=[category_map], data_out=[out]),
             hint="Run parse_legacy_311 and parse_new_311 for the same range first.",
+            writes_too=(interim / "change-points.csv",),
         )
     if step == "daily_counts":
         located, out = interim / "311_located.parquet", paths.processed / "daily_counts.parquet"
@@ -344,6 +361,7 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
             files=StepFiles(config_in=[alert_map], data_out=[out]),
             hint="Restore docs/data/alert-map.csv from git.",
             refetch=raw_dir,
+            keeps=(raw_dir,),
         )
     if step in ("surge_labels", "feature_table"):
         # #16. A label needs the same weeks of the 3 years before its day (ADR-005) and a feature the
@@ -376,14 +394,16 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
         # data_out to clear; a missing key fails before the script runs. Their
         # manifests live in data/state/, shared by every date range like raw/.
         weather, state = raw / "weather", raw.parent / "state"
+        folder = {"ingest_noaa_logan": weather / "noaa_logan", "ingest_nws_forecasts": weather / "nws_forecasts",
+                  "ingest_nws_alerts": weather / "nws_alerts", "ingest_tides": raw / "tides"}[step]
         args, env = {
-            "ingest_noaa_logan": (["--raw-dir", weather / "noaa_logan", "--state-dir", state / "weather" / "noaa_logan"],
-                                  ("NOAA_CDO_TOKEN",)),
-            "ingest_nws_forecasts": (["forecasts", "--raw-dir", weather / "nws_forecasts"], ("NWS_USER_AGENT",)),
-            "ingest_nws_alerts": (["alerts", "--raw-dir", weather / "nws_alerts"], ("NWS_USER_AGENT",)),
-            "ingest_tides": (["--raw-dir", raw / "tides", "--state-dir", state / "tides"], ()),
+            "ingest_noaa_logan": (["--raw-dir", folder, "--state-dir", state / "weather" / "noaa_logan"], ("NOAA_CDO_TOKEN",)),
+            "ingest_nws_forecasts": (["forecasts", "--raw-dir", folder], ("NWS_USER_AGENT",)),
+            "ingest_nws_alerts": (["alerts", "--raw-dir", folder], ("NWS_USER_AGENT",)),
+            "ingest_tides": (["--raw-dir", folder, "--state-dir", state / "tides"], ()),
         }[step]
-        return StepPlan(args=args, files=StepFiles(), hint='Team members: fill .env with the runbook command ("API keys in .env").', env=env)
+        return StepPlan(args=args, files=StepFiles(), hint='Team members: fill .env with the runbook command ("API keys in .env").',
+                        env=env, keeps=(folder,))
     if step == "ingest_open_meteo":
         # #8: every set in config/open_meteo.csv. The year files add to the shared raw folder and keep
         # their history, so there is no data_out to clear; no key is needed. Manifests, run logs and the
@@ -395,28 +415,33 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
                   "--attribution", state / "open-meteo.csv"],
             files=StepFiles(config_in=[sets]),
             hint="Restore Data-Pipeline/config/open_meteo.csv from git.",
+            keeps=(raw / "open_meteo",),
         )
     if step == "validate_raw":
         # #17. Only rows in are counted: the step writes a JSON of check results, not data.
         raw_dir, bounds, published = raw / "311", config / "validation_bounds.csv", config / "published_311_counts.csv"
+        report = interim / "validation" / "raw.json"
         return StepPlan(
             args=["--stage", "raw", "--config", bounds, "--raw-dir", raw_dir, "--years", *days.legacy_years,
-                  "--published", published, "--out", interim / "validation" / "raw.json"],
+                  "--published", published, "--out", report],
             files=StepFiles(
                 data_in=[*(raw_dir / f"{year}.csv" for year in days.legacy_years), raw_dir / "new_system.csv"],
                 config_in=[bounds, published],
             ),
             hint="Put the legacy 311 files and the new-system export in Data-Pipeline/data/raw/311/ (ingest_legacy_311 and ingest_new_311 download them).",
+            writes_too=(report,),
         )
     if step == "validate_processed":
         combined, located = interim / "311_combined.parquet", interim / "311_located.parquet"
         bounds, hoods = config / "validation_bounds.csv", interim / "static" / "neighborhoods_by_tract20.parquet"
+        report = interim / "validation" / "processed.json"
         return StepPlan(
             args=["--stage", "processed", "--config", bounds, "--combined", combined, "--located", located,
                   "--neighborhoods", hoods, *(["--latest", days.end.isoformat()] if days.end else []),
-                  "--out", interim / "validation" / "processed.json"],
+                  "--out", report],
             files=StepFiles(data_in=[combined, located], config_in=[bounds, hoods]),
             hint="Run spatial_join and ingest_static_layers for the same range first.",
+            writes_too=(report,),
         )
     # spatial_join (#14)
     combined, out = interim / "311_combined.parquet", interim / "311_located.parquet"
@@ -609,3 +634,24 @@ def run_step(
         raise
     log_task(run_id, task, rows_in, rows_out, time.monotonic() - started)
     return rows_in, rows_out
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Run one real step of the full build, as `python scripts/pipeline_steps.py <step>` in a dvc.yaml
+    stage (#18): the run_step the DAG task calls, with run id dvc. A missing input or key exits with
+    its message, as InputError fails the DAG task."""
+    parser = argparse.ArgumentParser(description="Run one daily_pipeline step for the full build (the dvc.yaml stages).")
+    parser.add_argument("step", choices=sorted([*SCRIPTS, *LOCAL]))
+    parser.add_argument("--year", type=int, help="parse_legacy_311 only: parse this legacy year into its own file")
+    args = parser.parse_args(argv)
+    if args.year is not None and (args.step != "parse_legacy_311" or args.year not in LEGACY_YEARS):
+        parser.error(f"--year is for parse_legacy_311 only, one of {LEGACY_YEARS[0]} to {LEGACY_YEARS[-1]}")
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    try:
+        run_step(args.step, DateRange(), year=args.year, run_id="dvc")
+    except InputError as e:
+        sys.exit(str(e))
+
+
+if __name__ == "__main__":
+    main()

@@ -64,6 +64,11 @@ x-airflow-common:
     - ./.git:/opt/airflow/repo/.git:ro
     - ./.dvc:/opt/airflow/repo/.dvc
     - ./.dvcignore:/opt/airflow/repo/.dvcignore:ro
+    # The stages and their lock (#18), read-only: push_data pushes the outputs the
+    # committed dvc.lock names. Both files are in git, so the mounts never point at a
+    # missing file (Docker would create a folder in its place).
+    - ./Data-Pipeline/dvc.yaml:/opt/airflow/repo/Data-Pipeline/dvc.yaml:ro
+    - ./Data-Pipeline/dvc.lock:/opt/airflow/repo/Data-Pipeline/dvc.lock:ro
   # Linux: set AIRFLOW_UID to `id -u` in .env. The image requires group 0.
   user: "${AIRFLOW_UID:-50000}:0"
   # Cap container stdout logs (the VM disk is 30 GB).

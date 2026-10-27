@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-10-27 by Prit. Edit this file in the PR that changes the state.
+Updated: 2026-10-27 by Kirtan. Edit this file in the PR that changes the state.
 
 ## Current milestone
 Week 2: Processing (due 2026-10-18)
@@ -42,6 +42,7 @@ Week 2: Processing (due 2026-10-18)
 | #69 Airflow image with every pipeline dependency | Prit | 2026-10-22 | done | PR #74 merged; ADR-022: every Airflow service runs `brt-airflow:local` from `airflow.Dockerfile`, the ADR-013 base image plus `Data-Pipeline/requirements.txt` under Airflow's constraints. Cold `docker compose up -d --build --wait` 1m37s (image build plus stack start, base image already pulled), cached `docker compose build` 1.0s, image 3.44 GB on disk against the base image's 3.22 GB. Great Expectations 1.24.1, Fairlearn 0.15.0 and dvc[gs] 3.67.1 all dry-run clean against the constraints with pandas 3.0.5. Unblocks #22 and #37 |
 | #24 Write ADRs 002, 003 | Srikar | 2026-10-18 | in review | ADR-002 supporting sources, ADR-003 time-based split and feature-history rule; both record scoping decisions (dated 2026-10-04) |
 | #19 DVC remote on GCS | Kirtan | 2026-10-15 | done | PR #79 merged. Remote `gs://boston-resilience-twin-data/dvc` set in `.dvc/config` (repo root); dvc 3.67.1 and dvc-gs 3.1.0 pinned. `dvc_push.py` skips with a log line and exits 0 without bucket access (checked with no credentials, 2026-10-23). Round trip with team credentials checked in a scratch repo (push, `dvc pull` in a fresh clone, files match; test objects removed, 2026-10-23). `push_data`, the last task of `daily_pipeline`, runs it; the containers mount `.git` (read-only, since DVC needs a git repo), `.dvc` and `.dvcignore`. `airflow tasks test daily_pipeline push_data` without credentials: skip line, task success; with team credentials: `dvc push to gs://boston-resilience-twin-data/dvc: Everything is up to date.`, task success (2026-10-25). No data tracked yet: stages come with #18 |
+| #18 DVC stages | Kirtan | 2026-10-18 | in review | `Data-Pipeline/dvc.yaml` is generated from `pipeline_steps.step_plan` by `dvc_stages.py` (ADR-024, proposed): 29 stages for 18 DAG steps (one legacy parse per year), each `python scripts/pipeline_steps.py <step>`, the `run_step` the DAG task calls; a test fails when the file is stale. Left out: the two live NWS snapshot tasks and `data/state/`. Clean clone, no remote access, `dvc repro` in the Airflow image: exit 0 in 630 s, every stage from the public sources (2026-10-27); a second `dvc repro` 12 s, `Data and pipelines are up to date.` The containers mount `dvc.yaml` and `dvc.lock` read-only for `push_data`. Data pushed to the remote (`177 files pushed`); a fresh clone then ran `dvc pull` (`177 files fetched`) and `dvc repro` (`Data and pipelines are up to date.`), 2026-10-27 |
 | #28 Write ADR-008 | Kirtan | 2026-10-18 | done | PR #86 merged. ADR-008 monitoring tools: Cloud Monitoring for the services (VM, Cloud Run uptime, errors, latency), Evidently for data drift and rolling accuracy and fairness; no Grafana, Prometheus or W&B. Records the scoping decision (dated 2026-10-04); alert thresholds stay open until week 1 of the live run |
 | #26 Write ADR-006 | Piyush | 2026-10-18 | in review | ADR-006 model registry, proposed until Kirtan approves: the Vertex AI Model Registry in project 2 is the only registry; MLflow on the VM tracks experiments and agent traces, not models; Cloud Run serves, with no Vertex AI endpoint. A version is registered as `candidate`, served by a Cloud Run revision set to its version ID, and promoted by moving `production` to it while the version it replaces keeps `previous`; a rollback sends traffic back to that version's revision. Records the scoping choice of 2026-10-04 and adds the version flow; Google's docs checked 2026-10-26 (no charge for models kept in the registry). Open: where model files live, how CI runs and agent traces reach MLflow (ADR-016), and how CI/CD authenticates to project 2 |
 | #43 Data card for all sources | Kirtan | 2026-10-23 | done | PR #87 merged. `docs/data/data-card.md`, linked from the README: each source's URL, license and attribution, vintage, update frequency, known issues, and coverage of the 2015 to 2023 training years (ADR-003). Facts checked against the sources on 2026-10-25 (Analyze Boston page, NCEI and CO-OPS metadata, the NWS points API) |
@@ -49,7 +50,6 @@ Week 2: Processing (due 2026-10-18)
 
 ## Blocked
 - #16 alert history follows ADR-014 Option A+, which is still proposed (PR #88). Merge #88 before or with #16. One sentence needs its owner: ADR-014 says re-fetching the previous year in January is not needed, but under A+ a cancellation in early January of an alert that started in late December is only in the previous year's file, so `alert_history.py` re-pulls a year until 14 days after it ends.
-- #6: raw 311 reaches Cloud Storage only through DVC, and nothing is tracked yet. The DVC remote, `dvc_push.py` and the `push_data` task are in place (#19), but the stages that track `raw/311/` (`Data-Pipeline/dvc.yaml`, #18) are not, so until #18 lands the raw 311 files exist only on the machine that ran the DAG. Since the #6 review, `raw/311/` holds only the downloaded CSVs and changes only when a source changed.
 
 ## Risks raised
 - **No surge rule reaches the spec's 1.3 to 2.9%.** With the ADR-004 unit the training rate runs 3.44% (sd, k 2, m 5) to 14.86% (top 10%) across the #16 grid. Small neighborhoods stay thin: under the recommended rule Harbor Islands, Chinatown, Longwood and South Boston Waterfront have fewer than 5 surges in 2024, so their recall is noisy or undefined in 30-day fairness windows (#32). The floor of 5 requests is what thins them most: from m 3 to m 5 the five smallest neighborhoods lose 45% of their training surges, Mission Hill 55% and Longwood 58%, against 29% citywide (`docs/feature-table.md`, "Surge rule recommendation"; the freeze ADR decides).
@@ -61,7 +61,7 @@ Week 2: Processing (due 2026-10-18)
 - **Live weather and tides need tomorrow's data (#16, #39).** #8's day-before forecasts end yesterday and #7's tide predictions end today, so the evening run needs both for tomorrow, or those features are blank live.
 - **The forecast cutoff rests on a measured GFS delay, not a guaranteed one (#16).** A GFS value counts as available 7 hours after its run starts (`forecast_issue_margin_hours`). Open-Meteo's metadata showed 5.6 to 6.0 hours for one run (2026-10-26 12 UTC), and the run behind each value matched single runs on 48 of 48 hours of 2026. So day D uses 1-day values only from runs up to 12 UTC on D-1; a 12 UTC run more than 10 hours late would miss the cutoff unseen, and runs before 2026-04-02 cannot be checked this way.
 - **The alert freshness check sees only what #7's NWS snapshot lists (#16).** The snapshot holds the active alerts for zone MAZ015, so a county-only alert, or a cancellation that ended an alert before the snapshot, is not checked (ADR-014).
-- **DVC stage files in the Airflow containers (#18).** The containers now mount `.git`, `.dvc`, `.dvcignore` and `Data-Pipeline/data`, enough for `push_data`. `Data-Pipeline/dvc.yaml` and its `dvc.lock` are not mounted, so #18 must add them before a task runs `dvc repro` or pushes stage outputs.
+- **The DAG's runs are not versions yet (#18, #40).** The containers mount `dvc.yaml` and `dvc.lock` read-only, so `push_data` pushes what the committed `dvc.lock` names. A DAG run writes newer files but does not update `dvc.lock`, so its data is not a new version until someone runs `dvc repro` (or `dvc commit`), pushes and commits the lock. #40 settles who does that and when.
 - Legacy storm groups cover only 6.9% of legacy requests (210,049 of 3,037,969), against about 15% in the pre-scoping check. The groups now live in `docs/data/category-map.csv` (`storm_group` column) and may be narrower than the first run's. Worth a look before #10 locks the unit.
 - **New-system times are Boston local, not UTC.** `open_date` ends in `+00`, but 1,283 cases resubmitted from the legacy system open a median 2.6 minutes before the legacy close time, in both EST and EDT. Real UTC would be 4 to 5 hours later. Converting from UTC would shift every new-system time 4 to 5 hours early and move 1,124 requests (1.6%) to the previous day. The pipeline treats them as local and re-checks this on every run (`map_311.check_clock`). Recorded in ADR-020, accepted by the team on 2026-10-16; CLAUDE.md is updated to match.
 - **Flooding has no new-system category.** Legacy flooding requests (mostly Catchbasin) stop after Jul 2026 and nothing in the new system replaces them, so live flooding counts are zero. Affects the target; ADR-005 escalates it, since no baseline can fix a missing source. Needs a team decision (#10, #16) before the target freeze.
@@ -84,6 +84,35 @@ Week 2: Processing (due 2026-10-18)
 - **Notes for #16 on alerts (ADR-014).** #16 downloads and prepares the alert history: the Iowa Environmental Mesonet bulk download for office BOX, one request per year, rows for zone MAZ015 and county MAC025, raw pulls versioned by DVC (#18, #19); #7 lands only live alerts (ADR-002). Count an alert for day D only if its first bulletin (`utc_prodissue`) is before the 18:00 Boston cutoff on day D-1, and end it at its first-announced end (`utc_init_expire`, written `YYYYMMDDHHMM`), or earlier if IEM shows it cancelled or upgraded (`CAN`, `UPG`) with `utc_expire` = `utc_updated` before that cutoff; all times are UTC and are converted to `America/New_York` first, daylight saving included. In 2015 to 2023, 429 of 684 zone alerts (62.7%) and 97 of 235 county alerts (41.3%) ended at another time than first announced, and 138 zone alerts end before they start. Evening features use the same rule on a fresh IEM pull, checked against the NWS API's active Boston alerts, failing clearly instead of writing zeros, and including the next year's file around New Year. Extensions before the cutoff are not used, and the bulk download has no first-announced start; ADR-014 lists these limits, and the latest-bulletin option as later work. The committed #16 code still needs the A+ check, the next-year pull and the freshness check. County severe thunderstorm, flash flood and tornado warnings start when first sent, so they are never known the evening before. NWS alert types were renamed during 2015 to 2026 (freezing rain advisory, blizzard watch, flash flood watch, excessive heat, wind chill), so #16 needs a reviewed map from alert type to storm group. Once Punith confirms ADR-014, spec risk 4 (alert history needs a source) can close; the spec's owner updates it.
 - The Analyze Boston catalog `size` for the new-system file is stale (488,098 bytes listed; the file is 24,763,502 bytes with 70,208 records on 2026-10-15). #6 treats the new-system file as having no reliable change detection and downloads it whenever it is due.
 - The 2026 file is refreshed daily by #6. In January 2027 someone must add a `legacy_2027` row to `Data-Pipeline/config/ingest_311_sources.csv` and slow 2026 down; see the runbook.
+
+## W2-6 results (2026-10-27)
+
+`dvc repro` from `Data-Pipeline/` in a clean clone of `71d7c04` plus this branch, in the `brt-airflow:local` image, with no Google credentials (so no remote access) and `NOAA_CDO_TOKEN` set: exit 0 in 630 s. Rows in and out from each stage's log line:
+
+| stage | rows in | rows out | seconds |
+|---|---|---|---|
+| ingest_legacy_311 | | 3,039,721 | 162.1 |
+| ingest_new_311 | | 77,628 | 4.7 |
+| ingest_noaa_logan, ingest_tides, ingest_open_meteo | | | 21.8, 32.3, 104.6 |
+| ingest_static_layers | | 670 | 24.8 |
+| ingest_alert_history | | 1,144 | 39.0 |
+| validate_raw | 3,117,349 | | 38.0 |
+| parse_legacy_311, 12 years | 3,039,721 | 3,039,721 | 3.1 to 7.4 each |
+| merge_legacy_311 | 3,039,721 | 3,039,721 | 14.1 |
+| parse_new_311 | 77,628 | 77,628 | 2.2 |
+| combine_311 | 3,117,349 | 3,116,040 | 15.7 |
+| spatial_join | 3,116,040 | 3,116,040 | 11.9 |
+| daily_counts | 3,116,040 | 310,752 | 3.8 |
+| surge_labels | 310,752 | 103,584 | 6.6 |
+| feature_table | 311,896 | 103,584 | 5.6 |
+| validate_processed | 6,232,080 | | 19.3 |
+| schema_and_statistics | 3,116,040 | | 21.9 |
+
+- A second `dvc repro`: 12 s, `Data and pipelines are up to date.` From the repo root: `ERROR: '/opt/airflow/repo/dvc.yaml' does not exist`, so the README and runbook run it from `Data-Pipeline/`.
+- The only new file in git status is `Data-Pipeline/dvc.lock`; DVC wrote no `.gitignore`, since the root one already ignores `Data-Pipeline/data/*`.
+- Data and cache: 2.1 GB each.
+- Push with team credentials (`dvc_push.py` in a one-off Airflow container): `dvc push to gs://boston-resilience-twin-data/dvc: 177 files pushed`. A fresh clone of the branch, team credentials: `dvc pull` gave `177 files fetched and 170 files added`, exit 0, then `dvc repro` gave `Data and pipelines are up to date.`, exit 0.
+- `dvc push` with outputs missing from the cache (checked in a scratch repo): a warning listing them, then `Everything is up to date.`, exit 0, so `push_data` does not fail on a machine that has not run `dvc repro`.
 
 ## W1-8 results (2026-10-22)
 
