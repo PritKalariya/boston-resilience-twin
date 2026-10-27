@@ -65,17 +65,22 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Sixteen tasks run scripts: `ingest_static_layers`, `ingest_alert_history`,
-  the five weather and tide downloads (`ingest_noaa_logan`,
-  `ingest_nws_forecasts`, `ingest_nws_alerts`, `ingest_tides`,
-  `ingest_open_meteo`), `validate_raw`, `parse_legacy_311`, `parse_new_311`,
-  `combine_311`, `spatial_join`, `daily_counts`, `surge_labels`,
-  `feature_table` and `validate_processed`. `check_range` starts the run and
-  `push_data` ends it.
-- The other 4 are placeholders. Each logs the issue that builds it
+- Nineteen tasks run scripts: the 311 downloads (`ingest_legacy_311` and
+  `ingest_new_311`, #6), `ingest_static_layers`, `ingest_alert_history`, the
+  five weather and tide downloads (`ingest_noaa_logan`, `ingest_nws_forecasts`,
+  `ingest_nws_alerts`, `ingest_tides` and `ingest_open_meteo`, #7 and #8),
+  `validate_raw`, `parse_legacy_311`, `parse_new_311`, `combine_311`,
+  `spatial_join`, `daily_counts`, `surge_labels`, `feature_table`,
+  `validate_processed` and `schema_and_statistics`. `parse_legacy_311` runs
+  once per legacy year, at most 4 at a time by default (`LEGACY_PARALLEL`),
+  and `merge_legacy_311` joins the years with `legacy_311.read_years`' rule
+  for repeated case ids (#37). `check_range` starts the run and `push_data`
+  ends it.
+- The other one, `bias_slicing`, is a placeholder. It logs the issue that builds it
   (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
-- Until #6 lands, the raw 311 files go in `Data-Pipeline/data/raw/311/` by
-  hand.
+- `ingest_legacy_311` and then `ingest_new_311` refresh the raw 311 files in
+  `Data-Pipeline/data/raw/311/` on their schedule, for any range (see "311
+  ingestion" below).
 
 The DAG runs only when triggered. It takes two params, both inclusive:
 `start` (2015-01-01 or later) and `end` (empty: through the latest data).
@@ -102,9 +107,16 @@ those days. A run fails at `check_range`
 on a start before 2015, an end before the start, or an unknown conf key.
 Each task's log, with everything its script printed, is in
 `Data-Pipeline/logs/dag_id=daily_pipeline/run_id=<run>/task_id=<task>/`.
-On a laptop (2026-10-21), a one-year slice took 40 seconds and the full
-build about 2.5 minutes. The full build peaked at 3.4 GiB in the scheduler
-container, with `map_311.py` before #68.
+On a laptop (2026-10-24, the `brt-airflow:local` image, #68 in), the full
+build took 73 s with the legacy years side by side, against 124 s one after
+another, and peaked at 2.5 GiB in the scheduler container (`docker stats`).
+The README's "Pipeline performance" section has the Gantt charts and numbers.
+To parse fewer years at once, for example 2 on the VM if #61 shows memory is
+tight, put `LEGACY_PARALLEL=2` in `.env` next to `docker-compose.yaml` and run
+`docker compose up -d --build --wait`. Without it the DAG runs 4, and
+Airflow's parallelism (4) caps any higher value. A value that is not a whole
+number of 1 or more stops the DAG from importing; `list-import-errors` shows
+why.
 
 Logging and failures (#36):
 
@@ -113,7 +125,8 @@ Logging and failures (#36):
   Placeholders log 0 and 0, and `check_range` logs n/a. CSV inputs are
   counted as records, the way the parsers report `file_rows`
   (`legacy_311.count_records`), and parquet files from their metadata;
-  `ingest_static_layers` counts only the layers in its config. Counting reads
+  `ingest_static_layers` counts only the layers in its config, and the 311
+  ingest tasks count the records in the files they keep. Counting reads
   each raw CSV once more: about 1 s per yearly file in the container on a
   Windows laptop, 12 s for all 13 files.
 - The `ingest_*` tasks retry twice. Airflow's exponential backoff adds a
@@ -125,9 +138,11 @@ Logging and failures (#36):
   of retrying. A script error is logged as `run <id> task <task> failed:
   <error>` and keeps its own type.
 - Before a step runs, its outputs are deleted, so a file left by an earlier
-  run cannot pass for new output. `ingest_static_layers` also deletes empty
-  (0-byte) files in `Data-Pipeline/data/raw/static/`, so `--download` fetches
-  them again.
+  run cannot pass for new output. The 311 ingest tasks are the exception:
+  their outputs are the downloads, which stay until a changed source replaces
+  them. `ingest_static_layers` also deletes empty (0-byte) files in
+  `Data-Pipeline/data/raw/static/`, so `--download` fetches them again; the
+  311 ingest tasks do the same in `Data-Pipeline/data/raw/311/`.
 - A task that fails for good writes `ALERT <dag>.<task> failed in run <id>
   (try <n>): <error>` to its own log (`Data-Pipeline/scripts/alerts.py`), and
   posts the same line to Slack when a webhook is set (below). The callback
@@ -649,6 +664,23 @@ docker compose run --rm \
   `pip install -r Data-Pipeline/requirements.txt` in the Python 3.12 venv. In
   Airflow, rebuild the image (above).
 
+## Schema and statistics (every run)
+
+`schema_stats.py` describes the processed tables on every run (#35): for each table, the schema (columns, types, share missing) and summary statistics (numeric spread, category shares, rows per year). In `daily_counts`, where every unit and group has the same number of rows, the category shares are shares of requests, so a storm group's share of the counts is tracked.
+
+```bash
+python Data-Pipeline/scripts/schema_stats.py            # located and daily_counts, into Data-Pipeline/data/processed/stats/
+python Data-Pipeline/scripts/schema_stats.py --no-docs  # skip the Great Expectations data docs
+```
+
+Outputs in `Data-Pipeline/data/processed/stats/` (versioned with the rest of `Data-Pipeline/data/` by DVC):
+
+- `<table>.json`: the schema and statistics. Replaced each run, so the previous run's numbers are the version before it.
+- `drift.json`: shifts from the previous run beyond the thresholds in `Data-Pipeline/config/stats_thresholds.csv`, plus every schema change (a column added, removed or retyped).
+- `data_docs/index.html`: Great Expectations data docs showing the same numbers. Open it in a browser.
+
+The run compares with the previous run's files before replacing them, and builds the data docs before it writes any JSON, so a failed run leaves the previous files as they were. If the statistics, the thresholds and the data docs are all unchanged it writes nothing, so a rerun on the same data leaves the folder as it was. `drift.json` keeps the statistics it compared against (`baselines`), so after a threshold change a rerun on the same data checks that same comparison again with the new values. Shifts are printed and saved but do not fail the run; the validation steps (#17) are what stop a run. To change a threshold, edit the config in a reviewed PR. A table that does not exist yet (`daily_counts` before #15 merges) is skipped and reported.
+
 ## Project 1 infrastructure (Terraform)
 
 Config lives in `Deployment/terraform/`. It covers project 1 only (ADR-009):
@@ -927,3 +959,71 @@ New DAGs start paused (`DAGS_ARE_PAUSED_AT_CREATION`), and a run triggered on a 
 - **SSH stalls after "Server accepts key".** Your laptop's ssh-agent has the key but it is locked. Run `ssh-add ~/.ssh/google_compute_engine` on the laptop, then retry.
 - **A task is OOM-killed or the scheduler restarts.** With the stack idle, the VM has about 2.5 GB free and no swap. Check `sudo docker inspect -f '{{.Name}} restarts={{.RestartCount}} oom={{.State.OOMKilled}}' $(sudo docker compose ps -aq)` and `free -m`.
 - **`gcloud compute ssh` offers to create an SSH key.** You ran it on the VM itself. The prompt shows where you are: `@airflow-vm` is the VM.
+
+## 311 ingestion (issue #6)
+
+Code: `Data-Pipeline/scripts/ingest_311.py`. Schedule: `Data-Pipeline/config/ingest_311_sources.csv`. In Airflow it is two tasks of `daily_pipeline` (Run the data pipeline DAG above): `ingest_legacy_311` runs the script with `--system legacy`, then `ingest_new_311` with `--system new_system`. They run one after the other because both write the same schedule state.
+
+### What a run does
+For each source, in order:
+1. Not due: skip, no request.
+2. Due: read the Analyze Boston catalog entry. If change detection is `catalog` and the hash, size, and last-modified time are unchanged, skip.
+3. Otherwise download to a temporary file, check it (not empty, the columns its parser reads, at least one record), and only then replace the current file. A download identical to the current file leaves the file untouched. A failed check keeps the current file, logs the source as `failed`, and leaves it due for the next run.
+
+| Files | Every | Change detection |
+|---|---|---|
+| 2015.csv to 2024.csv | 30 days | catalog |
+| 2025.csv | 7 days | catalog |
+| 2026.csv | 1 day | catalog |
+| new_system.csv | 1 day | none (catalog size is stale), always downloaded when due |
+
+The script writes these local folders only (all gitignored) and never uploads anything; raw data reaches Cloud Storage only through DVC (see Versioning to Cloud Storage below).
+- `Data-Pipeline/data/raw/311/`: the downloads only, byte for byte: `<year>.csv` and `new_system.csv`. `legacy_311.py` and `new_311.py` read these. A run with nothing new leaves the folder exactly as it was.
+- `Data-Pipeline/data/state/311/_manifest.json`: schedule state, catalog fingerprints, sha256, row counts. A manifest written before the direct upload was removed may still hold an `uploaded` section; it is ignored.
+- `Data-Pipeline/data/state/311/_runs.jsonl`: one line per run: every file's action (`downloaded`, `updated`, `skipped`, `failed`), reason, rows, previous rows, malformed rows.
+- `Data-Pipeline/data/interim/new_system_as_published.parquet`: new-system records as text, timestamps untouched (they end in `+00` but are Boston local time; see ADR-020), plus `source_system = new`, the label `map_311.py` uses. Written when `new_system.csv` changed or the parquet is missing or is not the one last written. In the DAG it goes to the run's folder, so a slice writes its own.
+
+The first run downloads everything: about 1.7 GB of legacy files plus about 25 MB for the new system.
+
+### Run by hand
+From the repo root:
+```
+python Data-Pipeline/scripts/ingest_311.py --dry-run
+python Data-Pipeline/scripts/ingest_311.py
+python Data-Pipeline/scripts/ingest_311.py --system legacy
+python Data-Pipeline/scripts/ingest_311.py --only legacy_2024 --force
+```
+`--dry-run` asks the catalog about the due sources and writes nothing. `--system` limits a run to one system, as the DAG tasks do. `--force` ignores the schedule for the selected sources. Exit code 1 means at least one file failed; the current files were kept.
+
+### Move files from the old layout (once)
+Before the #6 review the script kept its state and the parquet inside `raw/311/`. If your `Data-Pipeline/data/raw/311/` has `_manifest.json`, `_runs.jsonl` or a `prepared/` folder, run these from the repo root before the first run of this version:
+```
+mkdir -p Data-Pipeline/data/state/311
+mv -n Data-Pipeline/data/raw/311/_manifest.json Data-Pipeline/data/state/311/
+mv -n Data-Pipeline/data/raw/311/_runs.jsonl Data-Pipeline/data/state/311/
+rm Data-Pipeline/data/raw/311/prepared/new_system.parquet
+rmdir Data-Pipeline/data/raw/311/prepared
+ls -a Data-Pipeline/data/raw/311 Data-Pipeline/data/state/311
+```
+- The downloads stay where they are, and the moved manifest keeps their schedule, so nothing is downloaded again.
+- `mv -n` never overwrites a file that is already there. `rmdir` removes only an empty folder.
+- The old `prepared/new_system.parquet` is derived data with the old label (`new_system`). The next run writes `Data-Pipeline/data/interim/new_system_as_published.parquet` from `new_system.csv`, with `new`.
+- `ls -a` should show only the CSV files in `raw/311/`, and `_manifest.json` and `_runs.jsonl` in `state/311/`.
+- Until you move them, the script reads the old `raw/311/_manifest.json` without changing it and logs a warning, so a run still downloads only what is due. That run writes `state/311/_manifest.json`, so `mv -n` then leaves the old files in place: delete the old `raw/311/_manifest.json` (it is out of date) and keep the old log next to the new one with `mv -n Data-Pipeline/data/raw/311/_runs.jsonl Data-Pipeline/data/state/311/_runs_before_move.jsonl`.
+
+### Versioning to Cloud Storage
+There is no direct upload: issue #6 requires raw data to reach GCS only through DVC. DVC is not set up in the repo yet (no `.dvc/`, no remote, empty `dvc.yaml`; see Blocked in `docs/status.md`), so for now the files stay on the machine that ran the DAG. `raw/311/` holds only the downloads and changes only when a source changed, so DVC sees a new version only then. The `dvc add` and `dvc push` steps for this folder, and who runs them, come with the DVC setup.
+
+`gs://boston-resilience-twin-data/raw/311/` still holds 1,739,455,041 bytes from an earlier direct upload by this script, outside DVC. The team decides whether to keep or delete them; do not delete them before that.
+
+### Airflow environment
+The tasks run like every `daily_pipeline` task: `docker-compose.yaml` mounts `Data-Pipeline/data` writable at `/opt/airflow/repo/Data-Pipeline/data`, so a task writes the same folders as a run by hand, and `pipeline_steps.py` passes every path. Like every `ingest_*` task they retry twice (about 5 to 10, then 10 to 15 minutes). A failed source makes the script exit with code 1, which fails the task; a missing `ingest_311_sources.csv` fails at once without retrying. `max_active_runs` is 1 and the two tasks run one after the other, so two runs never write the same files. Unlike other steps, the 311 ingest tasks do not delete their outputs before they run (`keep_outputs` in `pipeline_steps.py`): their outputs are the downloads.
+
+### When something goes wrong
+- A source shows `failed`: read its `reason` in the task log or `Data-Pipeline/data/state/311/_runs.jsonl`. The old file is still in place. Fix the cause, then clear the task or wait for the next run.
+- `_manifest.json is not valid JSON`: fix it by hand, or delete it. Deleting makes the next run download every file again; files whose content did not change are kept as they are.
+- The log says `no schedule state in ... yet; reading .../raw/311/_manifest.json`: the state is still in the old place. See Move files from the old layout.
+- 403 `SignatureDoesNotMatch` from S3: the redirect handler in `ingest_311.py` strips the `:443` that Analyze Boston writes into its S3 links. If this comes back, check that `CkanClient` still uses `StripDefaultPortRedirect`.
+
+### Each January
+Add a row for the new year (for example `legacy_2027`) with its resource id from `https://data.boston.gov/api/3/action/package_show?id=311-service-requests`, `refresh_days` 1. Change the previous year to 7 and the one before it to 30. Change it by PR, like any config.

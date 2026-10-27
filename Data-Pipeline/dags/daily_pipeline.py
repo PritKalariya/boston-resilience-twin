@@ -4,13 +4,16 @@ Triggered by hand until the evening run starts on the VM (#39). Params, both
 inclusive: start (2015-01-01 or later) and end (empty: through the latest
 data). The defaults are the full build, written to Data-Pipeline/data/interim/
 and processed/. Any other range is a slice, written to
-Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/.
+Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/,
+which the ingest tasks refresh first, for any range.
 
-Sixteen tasks run pipeline scripts: five of them the weather and tide
-downloads (#7, and Open-Meteo from #8) and three the alert history, labels and
-features (#16). The others are placeholders: they log the issue that builds
-them and do nothing else; an ingest task becomes real once its script is in
-pipeline_steps.SCRIPTS. The last task, push_data, pushes
+Nineteen tasks run pipeline scripts: the two 311 downloads (#6), the five
+weather, tide and Open-Meteo downloads (#7, #8), and the alert history, labels
+and features (#16). parse_legacy_311 runs once per legacy year, at most
+LEGACY_PARALLEL at a time (4 unless .env sets it), and merge_legacy_311 joins
+the years (#37). bias_slicing is still a placeholder until #32: it logs the
+issue that builds it and does nothing else; a task becomes real once its
+script is in pipeline_steps.SCRIPTS. The last task, push_data, pushes
 the DVC-tracked data to the team remote (dvc_push.py, #19); without bucket
 access it logs `dvc push skipped: ...` and succeeds.
 
@@ -86,7 +89,8 @@ def retries(step: str) -> dict:
 )
 def daily_pipeline():
     @task
-    def check_range() -> None:
+    def check_range() -> list[int]:
+        """Checks the params and returns the legacy years the run parses."""
         days = run_range()
         kind = "full build" if days.is_full else "slice"
         log.info(
@@ -94,11 +98,12 @@ def daily_pipeline():
             kind, days.label, days.legacy_years, steps.run_paths(days).interim.parent,
         )
         steps.log_task(run_id(), "check_range", None, None)
+        return days.legacy_years
 
     @task
-    def run(step: str) -> None:
+    def run(step: str, year: int | None = None) -> None:
         try:
-            steps.run_step(step, run_range(), run_id=run_id())
+            steps.run_step(step, run_range(), run_id=run_id(), year=year)
         except steps.InputError as e:
             # A missing or empty input stays missing: fail now instead of retrying.
             raise AirflowFailException(str(e)) from e
@@ -116,7 +121,11 @@ def daily_pipeline():
         steps.log_task(run_id(), get_current_context()["ti"].task_id, 0, 0)
 
     def real(step: str):
-        return run.override(task_id=step, doc_md=f"Runs {steps.SCRIPTS[step]}.py.", **retries(step))(step)
+        if step in steps.SCRIPTS:
+            doc = f"Runs {steps.SCRIPTS[step]}.py."
+        else:
+            doc = "Joins the per-year legacy files with legacy_311.read_years' rule (#37)."
+        return run.override(task_id=step, doc_md=doc, **retries(step))(step)
 
     def todo(step: str):
         issue = steps.PLANNED[step]
@@ -136,18 +145,29 @@ def daily_pipeline():
     }
     # One after the other, legacy first: both write the 311 schedule state (#6).
     ingest["ingest_legacy_311"] >> ingest["ingest_new_311"]
+    years = check_range()
     static = real("ingest_static_layers")
     alert_history = real("ingest_alert_history")
     raw_checked = real("validate_raw")
+    # One task per legacy year, side by side (#37); merge_legacy_311 joins them.
+    parse_legacy = run.override(
+        task_id="parse_legacy_311",
+        doc_md="Runs legacy_311.py for one year; the years run side by side (#37).",
+        max_active_tis_per_dagrun=steps.LEGACY_PARALLEL,
+    ).partial(step="parse_legacy_311").expand(year=years)
+    merged = real("merge_legacy_311")
+    parse_new = real("parse_new_311")
     combined = real("combine_311")
     counts = real("daily_counts")
     validated = real("validate_processed")
 
-    check_range() >> [*ingest.values(), static, alert_history] >> raw_checked
-    raw_checked >> [real("parse_legacy_311"), real("parse_new_311")] >> combined
+    years >> [*ingest.values(), static, alert_history] >> raw_checked
+    raw_checked >> [parse_legacy, parse_new]
+    parse_legacy >> merged
+    [merged, parse_new] >> combined
     [combined, static] >> real("spatial_join") >> counts
     counts >> [real("surge_labels"), real("feature_table")] >> validated
-    validated >> [todo("schema_and_statistics"), todo("bias_slicing")] >> push_data()
+    validated >> [real("schema_and_statistics"), todo("bias_slicing")] >> push_data()
 
 
 daily_pipeline()

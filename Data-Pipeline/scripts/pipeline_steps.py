@@ -23,11 +23,18 @@ Logging and failures (#36): every task logs one line with its run id, rows
 in and rows out (log_task). A real step fails before its script runs when an
 input file is missing or empty (InputError), and the DAG fails such a task
 without retrying, since a retry cannot fix it. A step's outputs are deleted
-before its script runs, so a file left by an earlier run cannot pass for new
-output, and empty files in a download folder are deleted so the download runs
-again. A script error is logged with the run and the task before it is raised
-again unchanged. Tasks in NETWORK retry; the others fail at once, and their
-failure alert comes from alerts.py.
+before it runs, so a file left by an earlier run cannot pass for new output,
+and empty files in a download folder are deleted so the download runs again.
+The 311 ingest steps keep their outputs instead (keep_outputs): they are the
+current downloads, which ingest_311.py replaces only when a source changed.
+A script error is logged with the run and the task before it is raised again
+unchanged. Tasks in NETWORK retry; the others fail at once, and their failure
+alert comes from alerts.py.
+
+Speed (#37): the DAG parses the legacy years side by side, one parse_legacy_311
+task per year and at most LEGACY_PARALLEL at once, then merge_legacy_311 joins
+them with legacy_311.read_years' rule, so the joined table is the same as one
+parse of all the years.
 """
 
 from __future__ import annotations
@@ -52,6 +59,7 @@ log = logging.getLogger(__name__)
 
 # Task id -> pipeline script in Data-Pipeline/scripts.
 SCRIPTS = {
+    "schema_and_statistics": "schema_stats",
     "ingest_static_layers": "static_layers",
     "parse_legacy_311": "legacy_311",
     "parse_new_311": "new_311",
@@ -68,29 +76,51 @@ SCRIPTS = {
     "ingest_nws_alerts": "nws",
     "ingest_tides": "tides",
     "ingest_open_meteo": "open_meteo",
+    "ingest_legacy_311": "ingest_311",
+    "ingest_new_311": "ingest_311",
 }
 # Task id -> the issue that builds it; a placeholder in the DAG until then.
 PLANNED = {
-    "ingest_legacy_311": "#6",
-    "ingest_new_311": "#6",
-    "schema_and_statistics": "#35",
     "bias_slicing": "#32",
 }
 # Task id -> the outputs a slice cuts to its days afterwards, with their time column.
+# parse_legacy_311 is only cut when it parses the whole range in one go; per year,
+# the cut waits for merge_legacy_311, so cross-year repeats are judged as before.
 TRIM = {
     "parse_legacy_311": [("legacy_311.parquet", "open_dt")],
+    "merge_legacy_311": [("legacy_311.parquet", "open_dt")],
     "combine_311": [("311_combined.parquet", "open_dt")],
 }
 
 # Tasks that fetch from the network retry twice. Airflow's exponential backoff
 # adds a random spread, so the waits are about 5 to 10 minutes and then 10 to 15
-# (capped). The placeholders are listed too, so #6, #7 and #8 get the same
-# retries when they fill them.
+# (capped). The placeholders are listed too, so #8 gets the same retries when
+# it fills its placeholder.
 NETWORK = {task for task in (*SCRIPTS, *PLANNED) if task.startswith("ingest_")}
 RETRIES = 2
 RETRY_DELAY = timedelta(minutes=5)
 RETRY_BACKOFF = 2.0  # each retry's base wait is twice the one before
 MAX_RETRY_DELAY = timedelta(minutes=15)
+
+
+def legacy_parallel(value: str | None) -> int:
+    """How many legacy years the DAG parses at once (#37): LEGACY_PARALLEL from the
+    environment, 4 when it is unset. Anything other than a whole number of 1 or
+    more stops the DAG from importing, with this error in list-import-errors."""
+    if value is None or not value.strip():
+        return 4
+    try:
+        parallel = int(value)
+    except ValueError:
+        parallel = 0
+    if parallel < 1:
+        raise ValueError(f"LEGACY_PARALLEL must be a whole number of 1 or more, got {value!r}")
+    return parallel
+
+
+# docker-compose.yaml passes LEGACY_PARALLEL from .env, so the VM can parse 2 years
+# at once if memory is tight. Airflow's parallelism there (4) caps it anyway.
+LEGACY_PARALLEL = legacy_parallel(os.environ.get("LEGACY_PARALLEL"))
 
 
 class InputError(Exception):
@@ -168,6 +198,11 @@ def run_paths(days: DateRange, root: Path = REPO) -> RunPaths:
     return RunPaths(raw=data / "raw", interim=base / "interim", processed=base / "processed")
 
 
+def legacy_year_path(interim: Path, year: int) -> Path:
+    """Where parse_legacy_311 writes one year when the DAG parses the years side by side."""
+    return interim / "legacy_311_by_year" / f"{year}.parquet"
+
+
 @dataclass(frozen=True)
 class StepFiles:
     """A real step's files. data_in and data_out are counted as rows in and out;
@@ -182,13 +217,15 @@ class StepFiles:
 class StepPlan:
     """One real step in one place: the script's arguments, the files behind them,
     what to do when an input is missing, and a download folder whose empty files
-    are fetched again."""
+    are fetched again. keep_outputs: the outputs are downloads the script replaces
+    only when their source changed, so they are not deleted before it runs."""
 
     args: list
     files: StepFiles
     hint: str
     refetch: Path | None = None
     env: tuple[str, ...] = ()  # credentials the script needs (#4), checked before it runs
+    keep_outputs: bool = False
 
 
 def configured_layers(config: Path) -> list[str]:
@@ -199,17 +236,49 @@ def configured_layers(config: Path) -> list[str]:
         return [row["name"] for row in csv.DictReader(f) if row.get("kind") in ("vector", "table")]
 
 
-def step_plan(step: str, days: DateRange, root: Path = REPO) -> StepPlan:
+def configured_311_files(config: Path, system: str) -> list[str]:
+    """Files that ingest_311.py keeps in raw/311 for one system (legacy or new_system)."""
+    if not config.is_file():
+        return []
+    with config.open(newline="", encoding="utf-8-sig") as f:
+        return [row["filename"].strip() for row in csv.DictReader(f) if (row.get("system") or "").strip() == system]
+
+
+def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = None) -> StepPlan:
     """The table of real steps. Each path is named once and used for the arguments
-    and the checks, so a step that #6, #7 or #8 adds is one more block. Every
+    and the checks, so a step that #8, #16 or #32 adds is one more block. Every
     path is explicit, because the scripts' defaults are relative to the working
-    directory."""
-    if step not in SCRIPTS:
-        raise ValueError(f"no script step {step!r}; real steps: {sorted(SCRIPTS)}")
+    directory. With a year, parse_legacy_311 parses only that year into its own
+    file (#37)."""
+    if step not in SCRIPTS and step not in LOCAL:
+        raise ValueError(f"no real step {step!r}; real steps: {sorted([*SCRIPTS, *LOCAL])}")
     paths = run_paths(days, root)
     raw, interim = paths.raw, paths.interim
     config = root / "Data-Pipeline" / "config"
-    hint_311 = "(by hand until #6 lands)"
+    if step in ("ingest_legacy_311", "ingest_new_311"):
+        # The downloads and their schedule state are the same for every range;
+        # only the new-system parquet goes to the run's folder.
+        system = "legacy" if step == "ingest_legacy_311" else "new_system"
+        sources, raw_dir = config / "ingest_311_sources.csv", raw / "311"
+        return StepPlan(
+            args=["--raw-dir", raw_dir, "--sources", sources, "--state-dir", root / "Data-Pipeline" / "data" / "state" / "311",
+                  "--prepared-dir", interim, "--system", system],
+            files=StepFiles(config_in=[sources], data_out=[raw_dir / name for name in configured_311_files(sources, system)]),
+            hint="Restore Data-Pipeline/config/ingest_311_sources.csv from git.",
+            refetch=raw_dir,
+            keep_outputs=True,
+        )
+    if step == "schema_and_statistics":
+        # #35. No data_out: the step compares with the previous run's files, so
+        # they must not be cleared first, and it writes nothing when they are unchanged.
+        located, counts = interim / "311_located.parquet", paths.processed / "daily_counts.parquet"
+        thresholds = config / "stats_thresholds.csv"
+        return StepPlan(
+            args=["--located", located, "--daily-counts", counts,
+                  "--thresholds", thresholds, "--out-dir", paths.processed / "stats"],
+            files=StepFiles(data_in=[located], config_in=[thresholds]),
+            hint="Run spatial_join and daily_counts for the same range first.",
+        )
     if step == "ingest_static_layers":
         layers, raw_dir, out_dir = config / "static_layers.csv", raw / "static", interim / "static"
         return StepPlan(
@@ -220,18 +289,29 @@ def step_plan(step: str, days: DateRange, root: Path = REPO) -> StepPlan:
             refetch=raw_dir,
         )
     if step == "parse_legacy_311":
-        raw_dir, out = raw / "311", interim / "legacy_311.parquet"
+        raw_dir = raw / "311"
+        years = days.legacy_years if year is None else [year]
+        out = interim / "legacy_311.parquet" if year is None else legacy_year_path(interim, year)
         return StepPlan(
-            args=["--raw-dir", raw_dir, "--years", *days.legacy_years, "--out", out],
-            files=StepFiles(data_in=[raw_dir / f"{year}.csv" for year in days.legacy_years], data_out=[out]),
-            hint=f"Put the yearly legacy 311 files in Data-Pipeline/data/raw/311/ {hint_311}.",
+            args=["--raw-dir", raw_dir, "--years", *years, "--out", out],
+            files=StepFiles(data_in=[raw_dir / f"{y}.csv" for y in years], data_out=[out]),
+            hint="Put the yearly legacy 311 files in Data-Pipeline/data/raw/311/ (ingest_legacy_311 downloads them).",
+        )
+    if step == "merge_legacy_311":
+        return StepPlan(
+            args=[],  # merge_legacy_years does it here, not a script
+            files=StepFiles(
+                data_in=[legacy_year_path(interim, y) for y in days.legacy_years],
+                data_out=[interim / "legacy_311.parquet"],
+            ),
+            hint="Run parse_legacy_311 for every year in the range first.",
         )
     if step == "parse_new_311":
         export, out = raw / "311" / "new_system.csv", interim / "new_311.parquet"
         return StepPlan(
             args=["--raw", export, "--out", out],
             files=StepFiles(data_in=[export], data_out=[out]),
-            hint=f"Put the new-system export in Data-Pipeline/data/raw/311/ {hint_311}.",
+            hint="Put the new-system export in Data-Pipeline/data/raw/311/ (ingest_new_311 downloads it).",
         )
     if step == "combine_311":
         legacy, new, out = interim / "legacy_311.parquet", interim / "new_311.parquet", interim / "311_combined.parquet"
@@ -326,7 +406,7 @@ def step_plan(step: str, days: DateRange, root: Path = REPO) -> StepPlan:
                 data_in=[*(raw_dir / f"{year}.csv" for year in days.legacy_years), raw_dir / "new_system.csv"],
                 config_in=[bounds, published],
             ),
-            hint=f"Put the legacy 311 files and the new-system export in Data-Pipeline/data/raw/311/ {hint_311}.",
+            hint="Put the legacy 311 files and the new-system export in Data-Pipeline/data/raw/311/ (ingest_legacy_311 and ingest_new_311 download them).",
         )
     if step == "validate_processed":
         combined, located = interim / "311_combined.parquet", interim / "311_located.parquet"
@@ -350,14 +430,14 @@ def step_plan(step: str, days: DateRange, root: Path = REPO) -> StepPlan:
     )
 
 
-def script_args(step: str, days: DateRange, root: Path = REPO) -> list[str]:
+def script_args(step: str, days: DateRange, root: Path = REPO, year: int | None = None) -> list[str]:
     """Command-line arguments of a real step, from step_plan."""
-    return [str(arg) for arg in step_plan(step, days, root).args]
+    return [str(arg) for arg in step_plan(step, days, root, year).args]
 
 
-def step_files(step: str, days: DateRange, root: Path = REPO) -> StepFiles:
+def step_files(step: str, days: DateRange, root: Path = REPO, year: int | None = None) -> StepFiles:
     """The files behind script_args, from step_plan."""
-    return step_plan(step, days, root).files
+    return step_plan(step, days, root, year).files
 
 
 def check_inputs(step: str, plan: StepPlan) -> None:
@@ -378,7 +458,10 @@ def check_inputs(step: str, plan: StepPlan) -> None:
 
 
 def clear_outputs(plan: StepPlan) -> None:
-    """Delete the step's outputs, so a file left by an earlier run cannot pass for new output."""
+    """Delete the step's outputs, so a file left by an earlier run cannot pass for new output.
+    Downloads (keep_outputs) stay: deleting them would force every file to be fetched again."""
+    if plan.keep_outputs:
+        return
     for path in plan.files.data_out:
         path.unlink(missing_ok=True)
 
@@ -476,26 +559,53 @@ def trim_to_range(path: Path, column: str, days: DateRange) -> tuple[int, int]:
     return len(df), int(keep.sum())
 
 
-def run_step(step: str, days: DateRange, root: Path = REPO, run_id: str = "manual") -> tuple[int | None, int]:
-    """Run one real step and log its run id, rows in and rows out. Returns (rows in, rows out)."""
-    plan = step_plan(step, days, root)
+def merge_legacy_years(files: StepFiles) -> None:
+    """Join the per-year legacy files (data_in, in year order) into legacy_311.parquet
+    the way legacy_311.read_years joins the years: dropping a case id already seen
+    in an earlier year. So the result is the same table as one parse of all the
+    years."""
+    import pandas as pd  # here, so importing this module stays light for the DAG
+
+    years = pd.concat([pd.read_parquet(path) for path in files.data_in], ignore_index=True)
+    repeated = years["case_enquiry_id"].duplicated(keep="first")
+    years[~repeated].reset_index(drop=True).to_parquet(files.data_out[0], index=False)
+    log.info("merged %s years: dropped %s case ids repeated across years", len(files.data_in), f"{int(repeated.sum()):,}")
+
+
+# Steps done here rather than by a pipeline script.
+LOCAL = {"merge_legacy_311": merge_legacy_years}
+
+
+def run_step(
+    step: str, days: DateRange, root: Path = REPO, run_id: str = "manual", year: int | None = None
+) -> tuple[int | None, int]:
+    """Run one real step and log its run id, rows in and rows out. Returns (rows in, rows out).
+
+    With a year, parse_legacy_311 parses only that year (the DAG maps it over the
+    range's years) and its file is not cut: merge_legacy_311 cuts the merged table.
+    """
+    task = step if year is None else f"{step}[{year}]"
+    plan = step_plan(step, days, root, year)
     check_inputs(step, plan)
     started = time.monotonic()
     try:
         for path in drop_empty_downloads(plan):
-            log.warning("run %s task %s: deleted the empty download %s so it is fetched again", run_id, step, path)
+            log.warning("run %s task %s: deleted the empty download %s so it is fetched again", run_id, task, path)
         clear_outputs(plan)
-        run_script(SCRIPTS[step], [str(arg) for arg in plan.args])
+        if step in LOCAL:
+            LOCAL[step](plan.files)
+        else:
+            run_script(SCRIPTS[step], [str(arg) for arg in plan.args])
         check_outputs(step, plan)
-        if not days.is_full:
+        if not days.is_full and year is None:
             interim = run_paths(days, root).interim
             for name, column in TRIM.get(step, []):
                 before, kept = trim_to_range(interim / name, column, days)
-                log.info("run %s task %s: kept %s of %s rows of %s in %s", run_id, step, f"{kept:,}", f"{before:,}", name, days.label)
+                log.info("run %s task %s: kept %s of %s rows of %s in %s", run_id, task, f"{kept:,}", f"{before:,}", name, days.label)
         rows_in = sum(count_rows(path) for path in plan.files.data_in) if plan.files.data_in else None
-        rows_out = sum(count_rows(path) for path in plan.files.data_out)
+        rows_out = sum(count_rows(path) for path in plan.files.data_out) if plan.files.data_out else None
     except Exception as e:
-        log.error("run %s task %s failed: %s: %s", run_id, step, type(e).__name__, e)
+        log.error("run %s task %s failed: %s: %s", run_id, task, type(e).__name__, e)
         raise
-    log_task(run_id, step, rows_in, rows_out, time.monotonic() - started)
+    log_task(run_id, task, rows_in, rows_out, time.monotonic() - started)
     return rows_in, rows_out
