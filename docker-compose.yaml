@@ -45,6 +45,11 @@ x-airflow-common:
     NOAA_CDO_TOKEN: ${NOAA_CDO_TOKEN:-}
     CENSUS_API_KEY: ${CENSUS_API_KEY:-}
     NWS_USER_AGENT: ${NWS_USER_AGENT:-}
+    # Slack incoming webhook for failure alerts (#34), from .env. Empty: alerts go
+    # to the task log only. On the VM it comes from Secret Manager with #64.
+    SLACK_ALERT_WEBHOOK: ${SLACK_ALERT_WEBHOOK:-}
+    # Legacy 311 years parsed at once (#37). Put LEGACY_PARALLEL=2 in .env if memory is tight.
+    LEGACY_PARALLEL: ${LEGACY_PARALLEL:-4}
   volumes:
     - ./Data-Pipeline/dags:/opt/airflow/dags/data_pipeline
     - ./Data-Pipeline/logs:/opt/airflow/logs

@@ -129,6 +129,46 @@ dvc pull
 
 The runbook ("Versioned data (DVC)") has the checks and fixes.
 
+### Pipeline alerts
+
+When a pipeline task fails for good, its failure callback sends one alert naming the DAG, the task, the run and the error. For a failed validation (`validate_raw`, `validate_processed`) the error lists each failing check. The alert always goes to the task log; with `SLACK_ALERT_WEBHOOK` set in `.env` it is also posted to the team's Slack channel. Setup and a test alert: runbook, "Pipeline alerts (Slack)".
+
+A slice run with an injected bad file (`2025.csv` without its `open_dt` column) fails `validate_raw` and sends exactly one alert, here after the test alert:
+
+![Slack: the test alert, then one pipeline alert naming daily_pipeline.validate_raw, run alert-demo-slack, and the failing check expect_column_to_exist(open_dt)](docs/images/slack-alert.png)
+
+## Pipeline performance (#37)
+
+Full builds of `daily_pipeline` (2015 to 2026) on a laptop, 2026-10-24: Docker Desktop with 16 GB, the `brt-airflow:local` image, `map_311.py` after #68, and the raw 311 files of 2026-10-19.
+
+**Before.** One `parse_legacy_311` task parsed the 12 yearly legacy files one after another, 95 of the run's 124 seconds:
+
+![Gantt chart before: one long parse_legacy_311 bar](docs/images/gantt-before.jpeg)
+
+**After.** `parse_legacy_311` runs once per year, at most 4 at a time (`LEGACY_PARALLEL`, 4 unless `.env` sets it, the same as Airflow's parallelism; see the runbook), and a new `merge_legacy_311` task joins the years with the rule `legacy_311.read_years` uses for case ids repeated across years. `legacy_311.py` itself is unchanged.
+
+![Gantt chart after: the years side by side, then merge_legacy_311](docs/images/gantt-after.jpeg)
+
+| | before | after |
+|---|---|---|
+| whole run | 124 s | 73 s |
+| legacy 311 | 95.1 s (`parse_legacy_311`) | 45.1 s: 12 years in 40.1 s (8.1 to 16.8 s each), then `merge_legacy_311` 5.0 s |
+| `ingest_static_layers` | 12.1 s | 10.4 s |
+| `combine_311` | 9.4 s | 8.4 s |
+| `parse_new_311` | 2.4 s | 2.8 s, after waiting about 10 s for a free slot while 4 years ran |
+| peak memory, `docker stats`, scheduler | 1.93 GiB | 2.49 GiB |
+| peak memory, `docker stats`, whole stack | 2.52 GiB | 3.11 GiB |
+
+The slowest tasks were `parse_legacy_311` (95.1 s), `ingest_static_layers` (12.1 s) and `combine_311` (9.4 s) before, and the year tasks (up to 16.8 s each), `ingest_static_layers` (10.4 s) and `combine_311` (8.4 s) after.
+
+The outputs did not change: `legacy_311.parquet` (3,039,046 rows), `new_311.parquet` (72,373) and `311_combined.parquet` (3,110,129) are identical in the two runs (pandas `assert_frame_equal`).
+
+**Memory.** Both runs stay under the 4 GB this README asks Docker to have (Setup). `docker stats` was sampled about every 2.5 s. The scheduler cgroup's `memory.peak`, which records the true peak, was 2.52 GiB after the first run and 2.59 GiB after both, so the whole stack stayed under 3.3 GiB. At the peak, 1.95 GiB of the scheduler's memory was the tasks' own and 0.1 GiB was file cache. More years at once would raise the peak, which is why `LEGACY_PARALLEL` caps it. On the 2-vCPU VM the gain will be smaller; #61 measures memory there.
+
+## Data quality
+
+Every pipeline run checks the raw and processed data (#17) and writes a schema and summary statistics of the processed tables (#35): `Data-Pipeline/data/processed/stats/`, with Great Expectations data docs at `Data-Pipeline/data/processed/stats/data_docs/index.html` and the shifts from the previous run in `drift.json`. How to read them and change the thresholds: [Schema and statistics](docs/runbook.md#schema-and-statistics-every-run) in the runbook.
+
 ## Data and licenses
 
 Boston 311 data is published on Analyze Boston under the PDDL. NWS, NOAA, and Census data are U.S. government works. Weather data by [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0).

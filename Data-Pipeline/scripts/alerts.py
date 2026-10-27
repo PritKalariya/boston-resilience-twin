@@ -1,22 +1,57 @@
-"""Failure alerts for pipeline tasks (#36, the W3-3 alert from #34).
+"""Failure alerts for pipeline tasks (#36, #34).
 
 on_task_failure is the on_failure_callback of every daily_pipeline task.
 Airflow calls it once a task has failed for good, after any retries, with the
 task's context, so a retried network blip sends nothing. It sends one alert
-naming the DAG, the task, the run and the error.
+naming the DAG, the task, the run and the error; for a failed validation the
+error is ValidationFailed, which names each failing check (#17).
 
-Delivery by Slack or email, with the credential read from Secret Manager, comes
-with #34 in send_alert. Until a credential is configured, the alert is written
-to the task log at ERROR level instead, which is the fallback #34's acceptance
-criteria name, and the run is not changed by it. Standard library only.
+send_alert always writes the alert to the task log at ERROR level. When
+SLACK_ALERT_WEBHOOK is set (from the gitignored .env, like #4's API keys), it
+also posts the alert to that Slack incoming webhook. Without it, the task log
+is the only channel, which is the fallback #34's acceptance criteria name, and
+the run is not changed by it. On airflow-vm the webhook comes from Secret
+Manager with #64. The webhook URL is the credential, so it is never logged.
+
+Before an alert is logged or posted, the value of every credential in the
+environment (the API keys in credentials.KEYS and the webhook) is replaced by
+its name, so an error that quotes a request URL, such as a Census call with
+`key=...`, cannot leak a key into the log or Slack. Standard library only.
+
+    python Data-Pipeline/scripts/alerts.py --test   # post one test alert
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import logging
+import os
+import re
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections.abc import Mapping
 
+from credentials import KEYS
+
+SLACK_WEBHOOK_ENV = "SLACK_ALERT_WEBHOOK"
+SECRET_ENV = (*KEYS, SLACK_WEBHOOK_ENV)
+# Shorter values are not masked: replacing a 3-character string everywhere
+# would mangle the message and hides nothing worth hiding.
+MIN_SECRET_CHARS = 8
+# Incoming webhooks live here; anything else is a typo, and sending pipeline
+# errors to an unknown address is worse than not sending them.
+SLACK_WEBHOOK_PREFIX = "https://hooks.slack.com/"
+SLACK_TIMEOUT_SECONDS = 10
+# Slack shows up to 40,000 characters; a long ValidationFailed list is cut well before that.
+SLACK_MAX_CHARS = 3000
+
 log = logging.getLogger(__name__)
+
+
+class AlertNotSent(RuntimeError):
+    """Slack did not take the alert. The message never includes the webhook URL."""
 
 
 def alert_message(context: Mapping) -> str:
@@ -35,9 +70,71 @@ def alert_message(context: Mapping) -> str:
     return f"{dag_id}.{task_id} failed in run {run_id} (try {try_number}): {reason}"
 
 
-def send_alert(message: str) -> None:
-    """Deliver an alert. No channel is configured yet (#34), so it goes to the task log."""
+def slack_webhook() -> str | None:
+    """The configured webhook URL, or None when alerts go to the task log only."""
+    url = os.environ.get(SLACK_WEBHOOK_ENV, "").strip()
+    if not url:
+        return None
+    if not url.startswith(SLACK_WEBHOOK_PREFIX):
+        log.warning("%s is set but is not a Slack incoming webhook (%s...); the alert stays in the task log",
+                    SLACK_WEBHOOK_ENV, SLACK_WEBHOOK_PREFIX)
+        return None
+    return url
+
+
+def slack_escape(text: str) -> str:
+    """Escape Slack's control characters, & first (docs.slack.dev, "Escaping text"),
+    so <CENSUS_API_KEY> or <NA> shows as written instead of as a link or mention."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def slack_text(message: str) -> str:
+    """The Slack message: escaped, then cut to SLACK_MAX_CHARS without splitting an
+    entity such as &amp;. The task log keeps the raw text."""
+    text = f":rotating_light: *Pipeline alert*\n{slack_escape(message)}"
+    if len(text) > SLACK_MAX_CHARS:
+        cut = "\n... (cut; the full alert is in the task log)"
+        text = re.sub(r"&[a-z]*$", "", text[: SLACK_MAX_CHARS - len(cut)]) + cut
+    return text
+
+
+def post_to_slack(url: str, message: str, timeout: float = SLACK_TIMEOUT_SECONDS) -> None:
+    """POST one message to a Slack incoming webhook, which answers 200 "ok"."""
+    body = json.dumps({"text": slack_text(message)}).encode()
+    request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            status = response.status
+    except urllib.error.HTTPError as e:
+        # Slack answers 403/404 for a revoked or mistyped webhook; e.reason is its short text.
+        raise AlertNotSent(f"Slack refused the alert: HTTP {e.code} {e.reason}") from None
+    except (urllib.error.URLError, OSError) as e:
+        raise AlertNotSent(f"Slack could not be reached: {getattr(e, 'reason', e)}") from None
+    if status != 200:
+        raise AlertNotSent(f"Slack answered HTTP {status}")
+
+
+def mask_secrets(message: str) -> str:
+    """Replace each credential's value, as typed and as URL-encoded, with <NAME>."""
+    for name in SECRET_ENV:
+        value = os.environ.get(name, "").strip()
+        if len(value) < MIN_SECRET_CHARS:
+            continue
+        # Longest form first, so a URL-encoded value is not left half replaced.
+        for form in sorted({value, urllib.parse.quote(value, safe=""), urllib.parse.quote_plus(value)}, key=len, reverse=True):
+            message = message.replace(form, f"<{name}>")
+    return message
+
+
+def send_alert(message: str, post=None) -> None:
+    """Write the alert to the task log, and post it to Slack when a webhook is set."""
+    message = mask_secrets(message)
     log.error("ALERT %s", message)
+    url = slack_webhook()
+    if url is None:
+        return
+    (post or post_to_slack)(url, message)
+    log.info("alert sent to Slack")
 
 
 def on_task_failure(context: Mapping) -> None:
@@ -45,5 +142,21 @@ def on_task_failure(context: Mapping) -> None:
     a broken alert cannot hide the task's own error."""
     try:
         send_alert(alert_message(context))
-    except Exception:
-        log.exception("could not send the failure alert")
+    except Exception as e:
+        log.error("could not send the failure alert: %s", mask_secrets(str(e)))
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Send a test alert through the configured channel.")
+    parser.add_argument("--test", action="store_true", help="post one test alert")
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    if not args.test:
+        parser.error("nothing to do; pass --test")
+    if slack_webhook() is None:
+        print(f"{SLACK_WEBHOOK_ENV} is not set (or not a Slack webhook): the alert goes to the log only")
+    send_alert("test alert from alerts.py --test: if you can read this in Slack, pipeline alerts work")
+
+
+if __name__ == "__main__":
+    main()
