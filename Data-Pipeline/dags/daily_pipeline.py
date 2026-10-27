@@ -7,12 +7,13 @@ and processed/. Any other range is a slice, written to
 Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/,
 which the ingest tasks refresh first, for any range.
 
-Fifteen tasks run pipeline scripts, two of them the 311 downloads (#6) and
-four the weather and tide downloads (#7). parse_legacy_311 runs once per
-legacy year, at most LEGACY_PARALLEL at a time (4 unless .env sets it), and
-merge_legacy_311 joins the years (#37). The others are placeholders: they log
-the issue that builds them and do nothing else; an ingest task becomes real
-once its script is in pipeline_steps.SCRIPTS. The last task, push_data, pushes
+Nineteen tasks run pipeline scripts: the two 311 downloads (#6), the five
+weather, tide and Open-Meteo downloads (#7, #8), and the alert history, labels
+and features (#16). parse_legacy_311 runs once per legacy year, at most
+LEGACY_PARALLEL at a time (4 unless .env sets it), and merge_legacy_311 joins
+the years (#37). bias_slicing is still a placeholder until #32: it logs the
+issue that builds it and does nothing else; a task becomes real once its
+script is in pipeline_steps.SCRIPTS. The last task, push_data, pushes
 the DVC-tracked data to the team remote (dvc_push.py, #19); without bucket
 access it logs `dvc push skipped: ...` and succeeds.
 
@@ -146,6 +147,7 @@ def daily_pipeline():
     ingest["ingest_legacy_311"] >> ingest["ingest_new_311"]
     years = check_range()
     static = real("ingest_static_layers")
+    alert_history = real("ingest_alert_history")
     raw_checked = real("validate_raw")
     # One task per legacy year, side by side (#37); merge_legacy_311 joins them.
     parse_legacy = run.override(
@@ -156,13 +158,15 @@ def daily_pipeline():
     merged = real("merge_legacy_311")
     parse_new = real("parse_new_311")
     combined = real("combine_311")
+    counts = real("daily_counts")
     validated = real("validate_processed")
 
-    years >> [*ingest.values(), static] >> raw_checked
+    years >> [*ingest.values(), static, alert_history] >> raw_checked
     raw_checked >> [parse_legacy, parse_new]
     parse_legacy >> merged
     [merged, parse_new] >> combined
-    [combined, static] >> real("spatial_join") >> real("daily_counts") >> todo("labels_and_features") >> validated
+    [combined, static] >> real("spatial_join") >> counts
+    counts >> [real("surge_labels"), real("feature_table")] >> validated
     validated >> [real("schema_and_statistics"), todo("bias_slicing")] >> push_data()
 
 
