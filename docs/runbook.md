@@ -65,19 +65,20 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Nineteen tasks run scripts: the 311 downloads (`ingest_legacy_311` and
+- Twenty tasks run scripts: the 311 downloads (`ingest_legacy_311` and
   `ingest_new_311`, #6), `ingest_static_layers`, `ingest_alert_history`, the
   five weather and tide downloads (`ingest_noaa_logan`, `ingest_nws_forecasts`,
   `ingest_nws_alerts`, `ingest_tides` and `ingest_open_meteo`, #7 and #8),
   `validate_raw`, `parse_legacy_311`, `parse_new_311`, `combine_311`,
   `spatial_join`, `daily_counts`, `surge_labels`, `feature_table`,
-  `validate_processed` and `schema_and_statistics`. `parse_legacy_311` runs
+  `validate_processed`, `schema_and_statistics` and `bias_slicing`. `parse_legacy_311` runs
   once per legacy year, at most 4 at a time by default (`LEGACY_PARALLEL`),
   and `merge_legacy_311` joins the years with `legacy_311.read_years`' rule
   for repeated case ids (#37). `check_range` starts the run and `push_data`
   ends it.
-- The other one, `bias_slicing`, is a placeholder. It logs the issue that builds it
-  (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
+- No task is a placeholder now. A task listed in `PLANNED`
+  (`Data-Pipeline/scripts/pipeline_steps.py`) logs the issue that builds it and
+  succeeds.
 - `ingest_legacy_311` and then `ingest_new_311` refresh the raw 311 files in
   `Data-Pipeline/data/raw/311/` on their schedule, for any range (see "311
   ingestion" below).
@@ -587,6 +588,21 @@ python Data-Pipeline/scripts/feature_table.py --noaa-dir Data-Pipeline/data/raw/
 **Features.** `feature_table.py` writes `Data-Pipeline/data/processed/features.parquet`, one row per unit and day: 311 lags up to day D minus `feature_min_lag_days`; NWS alerts first sent before `forecast_cutoff_local` (18:00 Boston time) the evening before D whose first-announced end is after D begins and that were not cancelled or upgraded before that cutoff, one count per alert even when it covers both zone and county; calendar fields; static attributes from `Data-Pipeline/data/interim/static/`. With `--noaa-dir` and `--forecast-dir` it adds weather: Logan's observed values of day D up to 2023-12-31, and after that the GFS day-before forecasts known at the cutoff (ADR-003), with `wx_source` saying which. With `--tides-dir` it adds the highest predicted water level of the Boston day. Missing weather and tide values stay blank, and the run prints how many forecast days are missing. If this year's NOAA or GFS file or this half-year's tide file is not stored yet, its days stay blank and the task log has a warning naming the file and the features left blank; a missing earlier file stops the task. It stops if a row uses a later 311 day, a 311 feature differs from the counts read by date, a cutoff is not before D, a row after 2023 has observed weather of its own day or a forecast available only after the cutoff, or a day has no weather or tide row at all. `Data-Pipeline/config/feature_catalog.csv` lists every column and whether the model may use it. The `feature_table` task passes the three folders the ingest tasks fill and stops before it runs, naming the folder, if one is missing (for example when `ingest_noaa_logan` has never run because `NOAA_CDO_TOKEN` is not set). A GFS value counts as available 7 hours after its run started (`forecast_issue_margin_hours`), so day D takes 1-day values only from runs up to 12 UTC on D-1 and 2-day values for its later hours; the evidence is in `docs/feature-table.md`.
 
 **Slices.** A label needs the 3 years before its day and a feature the 28 days before, so in a slice both tasks read the full build's `Data-Pipeline/data/processed/daily_counts.parquet` and write only the slice's days. Run the full build once before a slice. If its counts end before the slice does, both tasks stop before writing and name the missing days (`daily counts cover ... have no counts`); run the full build again, then the slice.
+
+## Bias slicing (#32)
+
+`bias_slicing.py` slices the labels and the located requests by neighborhood, ACS group, flood zone and 311 system, and tests each gap. It is the `bias_slicing` task, after `validate_processed`.
+
+```bash
+python Data-Pipeline/scripts/bias_slicing.py   # about 40 s on the full build
+```
+
+- **Reads** `Data-Pipeline/data/processed/labels.parquet` (`surge_labels`), `Data-Pipeline/data/interim/311_located.parquet` (`spatial_join`) and the static layers in `Data-Pipeline/data/interim/static/`; thresholds in `Data-Pipeline/config/bias_slicing.csv`.
+- **Writes** `slices.csv` (every rate, with numerator and denominator), `gaps.csv` (every test) and `report.md` to `Data-Pipeline/data/interim/reports/bias/` (a slice's own `interim/reports/bias/` for a slice run). It prints how many gaps are significant; a gap never fails the task.
+- **Reviewed copy.** After a full build whose results go to review, copy the three files to `Data-Pipeline/reports/bias/` in the PR, so the committed report matches the data it was run on, and note the data date in `docs/status.md`.
+- **A significant gap** fails the four-fifths rule (`ratio_min`) and its test gives p under `alpha`. Change either only in a reviewed PR; #33 decides what to do about each gap.
+- **Run only this task in Airflow** with `docker compose exec airflow-scheduler airflow tasks test daily_pipeline bias_slicing`, after `docker compose exec airflow-scheduler airflow dags pause daily_pipeline`. The test creates a temporary run, and while the DAG is unpaused the scheduler starts that run's other tasks too, downloads and `ingest_static_layers` included, which clears `interim/static/` while the test reads it.
+- **Missing locations** count under the neighborhoods their recorded 311 neighborhood name covers, learned from the placed requests with the same name (`name_unit_min_share`, `name_min_placed`); the report lists the names. Most requests without coordinates have no usable name, so these shares are lower bounds.
 
 ## Versioned data (DVC)
 

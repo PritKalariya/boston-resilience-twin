@@ -1,0 +1,7 @@
+name,value,note
+ratio_min,0.8,four-fifths rule: a gap needs the lower rate under 0.8 times the higher one (or the overall rate for one neighborhood)
+alpha,0.01,and a test p value under this (two-proportion or rate test)
+name_unit_min_share,0.05,a recorded neighborhood name covers every unit holding at least this share of its placed storm requests
+name_min_placed,20,a recorded name with fewer placed storm requests covers no unit
+per_capita_scale,1000,requests per capita are per this many residents per year
+system_era_days,365,the migration era starts on the first new-system day; the legacy era is the same days one year earlier

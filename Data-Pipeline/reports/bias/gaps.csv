@@ -1,0 +1,311 @@
+slice,metric,period,group,compared_with,value,other_value,numerator,denominator,ratio,p_value,significant
+neighborhood,requests_per_capita,train 2015 to 2023,Allston,rest of the city,9.906792756313708,24.770219376225093,2836.0,286.2682272416152,0.39994771971306914,0.0,True
+neighborhood,requests_per_capita,train 2015 to 2023,Back Bay,rest of the city,26.34721319914744,24.049267065956045,4501.0,170.83400684462697,0.9127821938577643,2.6100842241814947e-09,False
+neighborhood,requests_per_capita,train 2015 to 2023,Beacon Hill,rest of the city,33.91845103027286,23.980767877303357,2847.0,83.93661601642711,0.7070124710559472,1.4493915689855681e-67,True
+neighborhood,requests_per_capita,train 2015 to 2023,Brighton,rest of the city,19.143456718199868,24.53031410365366,9625.0,502.7827597535935,0.7803999833556372,8.26937592148709e-132,True
+neighborhood,requests_per_capita,train 2015 to 2023,Charlestown,rest of the city,35.68976361904686,23.790691494017246,6177.0,173.07483641341543,0.6665970598169125,5.660159557092809e-190,True
+neighborhood,requests_per_capita,train 2015 to 2023,Chinatown,rest of the city,7.883541356705645,24.255782175556558,452.0,57.334639288158776,0.3250169918103148,9.540437476084683e-188,True
+neighborhood,requests_per_capita,train 2015 to 2023,Dorchester,rest of the city,24.176017675134375,24.096505427211493,26773.0,1107.4197727583846,0.9967111106141909,0.6234944469369808,False
+neighborhood,requests_per_capita,train 2015 to 2023,Downtown,rest of the city,19.413473487674718,24.215769243341683,2752.0,141.75721834360027,0.8016872515009039,1.1998911168768642e-32,False
+neighborhood,requests_per_capita,train 2015 to 2023,East Boston,rest of the city,20.512047425952808,24.362207972807497,8656.0,421.9959041752225,0.841961756867352,2.915056243376278e-57,False
+neighborhood,requests_per_capita,train 2015 to 2023,Fenway,rest of the city,10.001836320347628,24.996716107524612,3812.0,381.13001232032843,0.40012601164585915,0.0,True
+neighborhood,requests_per_capita,train 2015 to 2023,Hyde Park,rest of the city,30.40191904194831,23.80178008864042,9157.0,301.19809171800136,0.7829038705023497,1.4137069697242006e-106,True
+neighborhood,requests_per_capita,train 2015 to 2023,Jamaica Plain,rest of the city,31.22286603032896,23.656497344862434,12068.0,386.51160301163594,0.7576657864106139,1.515808382247969e-174,True
+neighborhood,requests_per_capita,train 2015 to 2023,Longwood,rest of the city,6.563518153549901,24.247252708306437,328.0,49.97319917864478,0.27069120912413397,1.4771142013101903e-198,True
+neighborhood,requests_per_capita,train 2015 to 2023,Mattapan,rest of the city,26.47870333767771,24.026554405320947,5820.0,219.7992826830937,0.907391653545682,7.426618057232057e-13,False
+neighborhood,requests_per_capita,train 2015 to 2023,Mission Hill,rest of the city,10.591448769474638,24.478515422260198,1811.0,170.98699520876121,0.43268346085412596,0.0,True
+neighborhood,requests_per_capita,train 2015 to 2023,North End,rest of the city,23.373244945361115,24.121270737175635,2237.0,95.7077207392197,0.968988955848762,0.14204356109267888,False
+neighborhood,requests_per_capita,train 2015 to 2023,Roslindale,rest of the city,33.03176302555968,23.728616851809345,8733.0,264.38189185489387,0.7183575649125467,3.90536230272015e-180,True
+neighborhood,requests_per_capita,train 2015 to 2023,Roxbury,rest of the city,23.859404525724468,24.13176142729771,12196.0,511.1611225188228,0.9887137579080674,0.23132842873941828,False
+neighborhood,requests_per_capita,train 2015 to 2023,South Boston,rest of the city,31.205515540449955,23.680457535502164,11487.0,368.1080027378509,0.7588548731010875,5.0291249192571195e-165,True
+neighborhood,requests_per_capita,train 2015 to 2023,South Boston Waterfront,rest of the city,13.298420245538944,24.2367404859825,992.0,74.59532648870635,0.5486884778598914,8.916467837893042e-97,True
+neighborhood,requests_per_capita,train 2015 to 2023,South End,rest of the city,32.42781270028739,23.688237636928946,10092.0,311.2143299110199,0.73049137960264,4.726514619258617e-187,True
+neighborhood,requests_per_capita,train 2015 to 2023,West End,rest of the city,9.54056844686598,24.30193763469953,799.0,83.74763039014377,0.39258468152940507,2.1120056871229648e-212,True
+neighborhood,requests_per_capita,train 2015 to 2023,West Roxbury,rest of the city,39.910410193871606,23.386257276589006,11271.0,282.4075208761123,0.5859688528127445,0.0,True
+neighborhood,missing_location,train 2015 to 2023,Beacon Hill,rest of the city,0.0,0.00021236168548116686,0.0,2475.0,0.0,1.0,False
+neighborhood,missing_location,train 2015 to 2023,Brighton,rest of the city,0.0,0.00020875679832994563,0.0,930.0,0.0,1.0,False
+neighborhood,missing_location,train 2015 to 2023,Charlestown,rest of the city,0.0004878048780487805,0.0001864910542572411,3.0,6150.0,0.38230666122734425,0.13027454597378665,False
+neighborhood,missing_location,train 2015 to 2023,Dorchester,rest of the city,0.00012714019325309374,0.00023409267143630484,3.0,23596.0,0.5431190667909815,0.43558434830501724,False
+neighborhood,missing_location,train 2015 to 2023,East Boston,rest of the city,0.001388567461235825,8.403058713371668e-05,12.0,8642.0,0.06051602783413163,1.2626956460971985e-08,True
+neighborhood,missing_location,train 2015 to 2023,Hyde Park,rest of the city,0.0,0.000228678718436319,0.0,8859.0,0.0,0.24946650023091663,False
+neighborhood,missing_location,train 2015 to 2023,Jamaica Plain,rest of the city,0.0,0.00023868147329279935,0.0,12341.0,0.0,0.09801012171479986,False
+neighborhood,missing_location,train 2015 to 2023,Roslindale,rest of the city,0.0,0.00022773309681053806,0.0,8514.0,0.0,0.25034470749484217,False
+neighborhood,missing_location,train 2015 to 2023,South Boston,rest of the city,0.0008361204013377926,0.00019834929310515818,1.0,1196.0,0.23722575455376918,0.220259232232646,False
+neighborhood,missing_location,train 2015 to 2023,South End,rest of the city,0.0,0.00022645737237935186,0.0,8044.0,0.0,0.40404303628601745,False
+neighborhood,missing_location,train 2015 to 2023,West Roxbury,rest of the city,0.0,0.00023530285954896158,0.0,11198.0,0.0,0.15695713367948969,False
+neighborhood,surge_rate,train 2015 to 2023,Allston,rest of the city,0.022625985601645526,0.036478947860504256,66.0,2917.0,0.6202477573686459,8.338099911133549e-05,True
+neighborhood,surge_rate,train 2015 to 2023,Back Bay,rest of the city,0.02982516283853274,0.03615171253155484,87.0,2917.0,0.825,0.07236040694943772,False
+neighborhood,surge_rate,train 2015 to 2023,Beacon Hill,rest of the city,0.02228316763798423,0.03649453049521613,65.0,2917.0,0.6105892399658412,5.4309991012433436e-05,True
+neighborhood,surge_rate,train 2015 to 2023,Brighton,rest of the city,0.057593417895097705,0.03488951911989279,168.0,2917.0,0.6057900432900433,1.1312687619018567e-10,True
+neighborhood,surge_rate,train 2015 to 2023,Charlestown,rest of the city,0.04010970174837161,0.03568423349019852,117.0,2917.0,0.8896658896658898,0.2087878292423896,False
+neighborhood,surge_rate,train 2015 to 2023,Chinatown,rest of the city,0.00411381556393555,0.037320410134945615,12.0,2917.0,0.11022964509394571,4.053559678049565e-21,True
+neighborhood,surge_rate,train 2015 to 2023,Dorchester,rest of the city,0.06822077476859788,0.034406457443824603,199.0,2917.0,0.5043398812243033,7.703464468802739e-22,True
+neighborhood,surge_rate,train 2015 to 2023,Downtown,rest of the city,0.01748371614672609,0.03671268738118241,51.0,2917.0,0.4762308998302207,4.72545398879821e-08,True
+neighborhood,surge_rate,train 2015 to 2023,East Boston,rest of the city,0.046623243057936234,0.03538816343067286,136.0,2917.0,0.759024064171123,0.0014180733917552762,True
+neighborhood,surge_rate,train 2015 to 2023,Fenway,rest of the city,0.03702434007541995,0.03582447720260542,108.0,2917.0,0.9675925925925927,0.7332686529404212,False
+neighborhood,surge_rate,train 2015 to 2023,Hyde Park,rest of the city,0.052793966403839564,0.03510767600585907,154.0,2917.0,0.6649940968122785,5.081848223968934e-07,True
+neighborhood,surge_rate,train 2015 to 2023,Jamaica Plain,rest of the city,0.054850874185807336,0.035014180197587806,160.0,2917.0,0.6383522727272727,1.761317099773272e-08,True
+neighborhood,surge_rate,train 2015 to 2023,Longwood,rest of the city,0.002742543709290367,0.03738274067379312,8.0,2917.0,0.07336390162567737,7.693655253930146e-23,True
+neighborhood,surge_rate,train 2015 to 2023,Mattapan,rest of the city,0.03599588618443606,0.035871225106741046,105.0,2917.0,0.9965367965367966,0.9717561671626406,False
+neighborhood,surge_rate,train 2015 to 2023,Mission Hill,rest of the city,0.013369900582790539,0.036899678997724936,39.0,2917.0,0.3623310810810811,2.3435056626707188e-11,True
+neighborhood,surge_rate,train 2015 to 2023,North End,rest of the city,0.019540623928693865,0.036619191572911144,57.0,2917.0,0.5336170212765958,1.2309268400512293e-06,True
+neighborhood,surge_rate,train 2015 to 2023,Roslindale,rest of the city,0.04696606102159753,0.03537258079596098,137.0,2917.0,0.7531519575315195,0.0009921668978150773,True
+neighborhood,surge_rate,train 2015 to 2023,Roxbury,rest of the city,0.055193692149468634,0.03499859756287593,161.0,2917.0,0.6341050254093732,9.708857925972262e-09,True
+neighborhood,surge_rate,train 2015 to 2023,South Boston,rest of the city,0.055879328076791225,0.03496743229345218,163.0,2917.0,0.6257668711656442,2.862042505105874e-09,True
+neighborhood,surge_rate,train 2015 to 2023,South Boston Waterfront,rest of the city,0.009598902982516283,0.037071087979555585,28.0,2917.0,0.258932324506095,6.066802005295569e-15,True
+neighborhood,surge_rate,train 2015 to 2023,South End,rest of the city,0.05965032567706548,0.03479602331162153,174.0,2917.0,0.5833333333333334,1.6766941250602694e-12,True
+neighborhood,surge_rate,train 2015 to 2023,West End,rest of the city,0.009256085018854988,0.03708667061426746,27.0,2917.0,0.2495798319327731,2.693508258040132e-15,True
+neighborhood,surge_rate,train 2015 to 2023,West Roxbury,rest of the city,0.06342132327733974,0.03462461432979088,185.0,2917.0,0.5459459459459459,2.868327415853273e-16,True
+neighborhood,label_coverage,train 2015 to 2023,Allston,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Back Bay,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Beacon Hill,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Brighton,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Charlestown,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Chinatown,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Dorchester,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Downtown,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,East Boston,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Fenway,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Harbor Islands,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Hyde Park,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Jamaica Plain,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Longwood,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Mattapan,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Mission Hill,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,North End,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Roslindale,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,Roxbury,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,South Boston,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,South Boston Waterfront,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,South End,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,West End,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,label_coverage,train 2015 to 2023,West Roxbury,rest of the city,0.8874353513842409,0.8874353513842409,2917.0,3287.0,1.0,1.0,False
+neighborhood,requests_per_capita,validate 2024,Allston,rest of the city,9.537159672440366,21.005715694213265,304.0,31.875318275153987,0.45402688540946495,2.426118522171453e-54,True
+neighborhood,requests_per_capita,validate 2024,Back Bay,rest of the city,19.45118280981344,20.5248743862127,370.0,19.0219794661191,0.9476882753971688,0.316873123672763,False
+neighborhood,requests_per_capita,validate 2024,Beacon Hill,rest of the city,31.34980059654063,20.353235946472005,293.0,9.346151950718685,0.6492301564660649,6.752298858492059e-12,True
+neighborhood,requests_per_capita,validate 2024,Brighton,rest of the city,19.11269893946876,20.6134737872813,1070.0,55.98372073921972,0.9271944717663972,0.01717345356286589,False
+neighborhood,requests_per_capita,validate 2024,Charlestown,rest of the city,29.006578005237177,20.261630930723502,559.0,19.27149075975359,0.6985184852575591,2.808858768929948e-15,True
+neighborhood,requests_per_capita,validate 2024,Chinatown,rest of the city,4.072629306462944,20.64380715284476,26.0,6.384082135523613,0.19728092189147034,7.292027632410105e-29,True
+neighborhood,requests_per_capita,validate 2024,Dorchester,rest of the city,17.06286995018661,21.208622796572527,2104.0,123.30868172484602,0.8045251270603058,3.0639038380578655e-21,False
+neighborhood,requests_per_capita,validate 2024,Downtown,rest of the city,11.657119782863898,20.695170739160073,184.0,15.784344969199179,0.5632772944852259,2.0813308909419805e-17,True
+neighborhood,requests_per_capita,validate 2024,East Boston,rest of the city,23.98470045573854,20.252071394900817,1127.0,46.98828747433266,0.8443745808822615,9.504968014031817e-08,False
+neighborhood,requests_per_capita,validate 2024,Fenway,rest of the city,8.883555500847525,21.226159635112953,377.0,42.43796303901436,0.41851920712742025,8.216825893365025e-83,True
+neighborhood,requests_per_capita,validate 2024,Hyde Park,rest of the city,23.37666027138399,20.355248074806894,784.0,33.537724845995896,0.8707509044704863,0.00022149524098073398,False
+neighborhood,requests_per_capita,validate 2024,Jamaica Plain,rest of the city,25.83811756910311,20.155712434197525,1112.0,43.037190965092414,0.7800766592338548,1.3559910284845608e-14,True
+neighborhood,requests_per_capita,validate 2024,Longwood,rest of the city,8.446549347125908,20.59056329913304,47.0,5.564402464065709,0.41021458346802714,1.7511176754224619e-12,True
+neighborhood,requests_per_capita,validate 2024,Mattapan,rest of the city,22.350110479882733,20.430984392952823,547.0,24.474151950718678,0.9141334854403825,0.040886070256245965,False
+neighborhood,requests_per_capita,validate 2024,Mission Hill,rest of the city,13.130931837791195,20.697111274418173,250.0,19.03901437371664,0.6344330696052812,1.834125149241697e-14,True
+neighborhood,requests_per_capita,validate 2024,North End,rest of the city,14.638488751185,20.584703124013416,156.0,10.656837782340862,0.7111343147868009,9.116791214762123e-06,True
+neighborhood,requests_per_capita,validate 2024,Roslindale,rest of the city,28.22850878710399,20.165743961028117,831.0,29.438324435318272,0.7143751061423658,2.7563133284283623e-19,True
+neighborhood,requests_per_capita,validate 2024,Roxbury,rest of the city,17.429000230893553,20.760599481589654,992.0,56.91663244353184,0.8395229745821868,5.515840024845729e-08,False
+neighborhood,requests_per_capita,validate 2024,South Boston,rest of the city,29.398854334659635,19.95727288400284,1205.0,40.98799178644765,0.67884525896216,2.339868104819154e-34,True
+neighborhood,requests_per_capita,validate 2024,South Boston Waterfront,rest of the city,10.2335407976995,20.61657039781739,85.0,8.306020533880902,0.4963745472808073,5.843636279815802e-13,True
+neighborhood,requests_per_capita,validate 2024,South End,rest of the city,27.674363427955985,20.132306764619504,959.0,34.65301026694045,0.7274713587190347,7.975476084304449e-20,True
+neighborhood,requests_per_capita,validate 2024,West End,rest of the city,16.621789925766205,20.547420438506563,155.0,9.32510882956879,0.8089477691621283,0.007821337344441018,False
+neighborhood,requests_per_capita,validate 2024,West Roxbury,rest of the city,37.36631124294172,19.723505758092244,1175.0,31.445437371663246,0.5278419277155141,1.2077765147941919e-82,True
+neighborhood,missing_location,validate 2024,Beacon Hill,rest of the city,0.0,0.00023596035865974517,0.0,237.0,0.0,1.0,False
+neighborhood,missing_location,validate 2024,Brighton,rest of the city,0.0,0.0002330187580100198,0.0,130.0,0.0,1.0,False
+neighborhood,missing_location,validate 2024,Charlestown,rest of the city,0.0,0.0002452783909737552,0.0,559.0,0.0,1.0,False
+neighborhood,missing_location,validate 2024,Dorchester,rest of the city,0.0,0.0002938583602703497,0.0,1907.0,0.0,1.0,False
+neighborhood,missing_location,validate 2024,East Boston,rest of the city,0.0008873114463176575,0.0001318217769575534,1.0,1127.0,0.1485631426311627,0.24197619802671813,False
+neighborhood,missing_location,validate 2024,Hyde Park,rest of the city,0.0,0.0002519526329050139,0.0,775.0,0.0,1.0,False
+neighborhood,missing_location,validate 2024,Jamaica Plain,rest of the city,0.0008865248226950354,0.00013183915622940013,1.0,1128.0,0.14871456822676335,0.24217604611582255,False
+neighborhood,missing_location,validate 2024,Roslindale,rest of the city,0.0,0.0002525571410531633,0.0,794.0,0.0,1.0,False
+neighborhood,missing_location,validate 2024,South Boston,rest of the city,0.0,0.00023383608090728398,0.0,160.0,0.0,1.0,False
+neighborhood,missing_location,validate 2024,South End,rest of the city,0.0,0.00025034422330704717,0.0,724.0,0.0,1.0,False
+neighborhood,missing_location,validate 2024,West Roxbury,rest of the city,0.0,0.0002652168147460549,0.0,1172.0,0.0,1.0,False
+neighborhood,surge_rate,validate 2024,Allston,rest of the city,0.03278688524590164,0.053473848555815766,12.0,366.0,0.6131386861313869,0.08306956625985516,False
+neighborhood,surge_rate,validate 2024,Back Bay,rest of the city,0.03551912568306011,0.05334374186833203,13.0,366.0,0.6658536585365853,0.13534810781197848,False
+neighborhood,surge_rate,validate 2024,Beacon Hill,rest of the city,0.03278688524590164,0.053473848555815766,12.0,366.0,0.6131386861313869,0.08306956625985516,False
+neighborhood,surge_rate,validate 2024,Brighton,rest of the city,0.09016393442622951,0.0507416081186573,33.0,366.0,0.5627705627705628,0.0009572827570209707,True
+neighborhood,surge_rate,validate 2024,Charlestown,rest of the city,0.05737704918032787,0.05230288836846214,21.0,366.0,0.9115646258503401,0.6707553963414811,False
+neighborhood,surge_rate,validate 2024,Dorchester,rest of the city,0.10382513661202186,0.05009107468123861,38.0,366.0,0.48245614035087714,6.737347189783268e-06,True
+neighborhood,surge_rate,validate 2024,Downtown,rest of the city,0.0273224043715847,0.05373406193078324,10.0,366.0,0.5084745762711864,0.02691420675142114,False
+neighborhood,surge_rate,validate 2024,East Boston,rest of the city,0.09289617486338798,0.050611501431173565,34.0,366.0,0.5448179271708683,0.0003962094551193773,True
+neighborhood,surge_rate,validate 2024,Fenway,rest of the city,0.04918032786885246,0.05269320843091335,18.0,366.0,0.9333333333333332,0.7685225904849871,False
+neighborhood,surge_rate,validate 2024,Hyde Park,rest of the city,0.05737704918032787,0.05230288836846214,21.0,366.0,0.9115646258503401,0.6707553963414811,False
+neighborhood,surge_rate,validate 2024,Jamaica Plain,rest of the city,0.06830601092896176,0.05178246161852719,25.0,366.0,0.7580952380952379,0.16625515419436648,False
+neighborhood,surge_rate,validate 2024,Longwood,rest of the city,0.00546448087431694,0.05477491543065314,2.0,366.0,0.0997624703087886,3.60856001402909e-05,True
+neighborhood,surge_rate,validate 2024,Mattapan,rest of the city,0.040983606557377046,0.05308352849336456,15.0,366.0,0.7720588235294117,0.3107128370283012,False
+neighborhood,surge_rate,validate 2024,Mission Hill,rest of the city,0.0273224043715847,0.05373406193078324,10.0,366.0,0.5084745762711864,0.02691420675142114,False
+neighborhood,surge_rate,validate 2024,North End,rest of the city,0.01912568306010929,0.05412438199323445,7.0,366.0,0.35336538461538464,0.003365923490822159,True
+neighborhood,surge_rate,validate 2024,Roslindale,rest of the city,0.06557377049180328,0.05191256830601093,24.0,366.0,0.7916666666666666,0.25240350727682587,False
+neighborhood,surge_rate,validate 2024,Roxbury,rest of the city,0.09562841530054644,0.050481394743689824,35.0,366.0,0.527891156462585,0.00015532206183180392,True
+neighborhood,surge_rate,validate 2024,South Boston,rest of the city,0.07103825136612021,0.051652354931043455,26.0,366.0,0.7271062271062272,0.10434509443769648,False
+neighborhood,surge_rate,validate 2024,South Boston Waterfront,rest of the city,0.01092896174863388,0.05451470205568566,4.0,366.0,0.20047732696897375,0.0002606128346218902,True
+neighborhood,surge_rate,validate 2024,South End,rest of the city,0.07377049180327869,0.05152224824355972,27.0,366.0,0.6984126984126985,0.06232866794426342,False
+neighborhood,surge_rate,validate 2024,West End,rest of the city,0.02459016393442623,0.053864168618266976,9.0,366.0,0.4565217391304348,0.014184122396727396,False
+neighborhood,surge_rate,validate 2024,West Roxbury,rest of the city,0.07377049180327869,0.05152224824355972,27.0,366.0,0.6984126984126985,0.06232866794426342,False
+neighborhood,label_coverage,validate 2024,Allston,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Back Bay,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Beacon Hill,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Brighton,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Charlestown,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Chinatown,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Dorchester,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Downtown,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,East Boston,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Fenway,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Harbor Islands,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Hyde Park,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Jamaica Plain,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Longwood,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Mattapan,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Mission Hill,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,North End,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Roslindale,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,Roxbury,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,South Boston,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,South Boston Waterfront,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,South End,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,West End,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,label_coverage,validate 2024,West Roxbury,rest of the city,1.0,1.0,366.0,366.0,1.0,1.0,False
+neighborhood,requests_per_capita,2025 onward,Allston,rest of the city,26.71592542553473,35.955599947019,1524.0,57.04462696783023,0.7430254387327971,8.348362418933399e-33,True
+neighborhood,requests_per_capita,2025 onward,Back Bay,rest of the city,37.600536920740254,35.48933593270646,1280.0,34.042067077344285,0.943851839337186,0.042851142459015945,False
+neighborhood,requests_per_capita,2025 onward,Beacon Hill,rest of the city,46.93281509726748,35.39505344081551,785.0,16.726036960985624,0.7541642956524097,6.202586570190871e-14,True
+neighborhood,requests_per_capita,2025 onward,Brighton,rest of the city,38.7465962839188,35.27447600483062,3882.0,100.18944558521562,0.910389024789534,3.308511639554548e-08,False
+neighborhood,requests_per_capita,2025 onward,Charlestown,rest of the city,56.07650576011992,34.97884214250852,1934.0,34.488596851471584,0.623770002577167,4.638411059439692e-80,True
+neighborhood,requests_per_capita,2025 onward,Chinatown,rest of the city,17.4178439757441,35.707959994409606,199.0,11.425065023956193,0.48778602805847815,3.366092813423978e-30,True
+neighborhood,requests_per_capita,2025 onward,Dorchester,rest of the city,38.47280230387257,34.938046172258005,8490.0,220.67537303216977,0.9081232475946062,2.2023279512799903e-15,False
+neighborhood,requests_per_capita,2025 onward,Downtown,rest of the city,28.14364539677986,35.71170949571919,795.0,28.24793976728268,0.7880789184890036,5.278101599740081e-12,True
+neighborhood,requests_per_capita,2025 onward,East Boston,rest of the city,30.455080148439194,35.901846521098086,2561.0,84.09106091718002,0.8482872915893603,1.2233163407814667e-16,False
+neighborhood,requests_per_capita,2025 onward,Fenway,rest of the city,11.415747458399732,37.06155732476003,867.0,75.9477207392197,0.30802125659120955,0.0,True
+neighborhood,requests_per_capita,2025 onward,Hyde Park,rest of the city,33.155781161512344,35.66240426601969,1990.0,60.01969883641341,0.9297124477135789,0.0013535870343147599,False
+neighborhood,requests_per_capita,2025 onward,Jamaica Plain,rest of the city,50.72701174604567,34.57695271924203,3907.0,77.0201095140315,0.6816280228045842,7.584137239832113e-105,True
+neighborhood,requests_per_capita,2025 onward,Longwood,rest of the city,9.841183432928764,35.74610491124649,98.0,9.958151950718687,0.27530785402670593,2.0686548035182848e-58,True
+neighborhood,requests_per_capita,2025 onward,Mattapan,rest of the city,32.44338880790514,35.65478319510259,1421.0,43.79937029431895,0.9099308956774541,0.0004101802705199762,False
+neighborhood,requests_per_capita,2025 onward,Mission Hill,rest of the city,15.760486139011647,36.084370120275096,537.0,34.07255304585901,0.4367676666235097,3.222364271222779e-107,True
+neighborhood,requests_per_capita,2025 onward,North End,rest of the city,37.75234444815297,35.51202309709882,720.0,19.071663244353186,0.9406574244910568,0.10408778883094735,False
+neighborhood,requests_per_capita,2025 onward,Roslindale,rest of the city,43.01169956850923,35.225970300533454,2266.0,52.683340177960304,0.8189857795418052,2.3183254493203045e-19,False
+neighborhood,requests_per_capita,2025 onward,Roxbury,rest of the city,31.08218202343834,35.92966579792864,3166.0,101.8590006844627,0.8650840839502113,1.0430996922274937e-15,False
+neighborhood,requests_per_capita,2025 onward,South Boston,rest of the city,50.795588404351726,34.62169865996605,3726.0,73.35282683093772,0.6815886920014488,2.2205378989933207e-100,True
+neighborhood,requests_per_capita,2025 onward,South Boston Waterfront,rest of the city,21.8640265448829,35.70545447935391,325.0,14.864599589322381,0.6123441604006304,1.3958103426896026e-21,True
+neighborhood,requests_per_capita,2025 onward,South End,rest of the city,37.506671829010465,35.445790044944076,2326.0,62.01563312799452,0.9450529283573397,0.008246408255007234,False
+neighborhood,requests_per_capita,2025 onward,West End,rest of the city,17.796816631476364,35.778899562165705,297.0,16.68837782340863,0.497410955877904,1.2979521150245488e-41,True
+neighborhood,requests_per_capita,2025 onward,West Roxbury,rest of the city,45.5617258558991,35.086369302699595,2564.0,56.27530458590006,0.7700842899074858,3.6119649893448113e-35,True
+neighborhood,missing_location,2025 onward,Beacon Hill,rest of the city,0.0,0.00026314800195481375,0.0,678.0,0.0,1.0,False
+neighborhood,missing_location,2025 onward,Brighton,rest of the city,0.0,0.000263862188548381,0.0,750.0,0.0,1.0,False
+neighborhood,missing_location,2025 onward,Charlestown,rest of the city,0.0,0.00027617770062337253,0.0,1933.0,0.0,1.0,False
+neighborhood,missing_location,2025 onward,Dorchester,rest of the city,0.0,0.00035811121911290733,0.0,7732.0,0.0,0.20252868765263082,False
+neighborhood,missing_location,2025 onward,Downtown,rest of the city,0.03571428571428571,0.00018366822172427726,2.0,56.0,0.005142710208279763,8.634994070596519e-05,True
+neighborhood,missing_location,2025 onward,East Boston,rest of the city,0.00039108330074305825,0.00024269881077582719,1.0,2557.0,0.6205808591537901,0.4979447551410793,False
+neighborhood,missing_location,2025 onward,Hyde Park,rest of the city,0.0005268703898840885,0.0002363973050707222,1.0,1898.0,0.44868208502423074,0.39641703010276397,False
+neighborhood,missing_location,2025 onward,Jamaica Plain,rest of the city,0.0005016302984700275,0.0002146659797355315,2.0,3987.0,0.4279366306027821,0.2726829560544509,False
+neighborhood,missing_location,2025 onward,North End,rest of the city,0.0,0.00025715440285074023,0.0,58.0,0.0,1.0,False
+neighborhood,missing_location,2025 onward,Roslindale,rest of the city,0.0,0.0002791959157626037,0.0,2207.0,0.0,1.0,False
+neighborhood,missing_location,2025 onward,South Boston,rest of the city,0.0,0.0002657050673752135,0.0,934.0,0.0,1.0,False
+neighborhood,missing_location,2025 onward,South Boston Waterfront,rest of the city,0.0,0.0002567959206133754,0.0,20.0,0.0,1.0,False
+neighborhood,missing_location,2025 onward,South End,rest of the city,0.0,0.0002760143527463428,0.0,1918.0,0.0,1.0,False
+neighborhood,missing_location,2025 onward,West End,rest of the city,0.0,0.00025680534155110427,0.0,21.0,0.0,1.0,False
+neighborhood,missing_location,2025 onward,West Roxbury,rest of the city,0.0003952569169960474,0.00024243403773889854,1.0,2530.0,0.6133581154794133,0.49409346900466317,False
+neighborhood,surge_rate,2025 onward,Allston,rest of the city,0.051908396946564885,0.04802220680083275,34.0,655.0,0.9251336898395721,0.6496951328120871,False
+neighborhood,surge_rate,2025 onward,Back Bay,rest of the city,0.0549618320610687,0.047883414295628035,36.0,655.0,0.8712121212121212,0.40808579101180287,False
+neighborhood,surge_rate,2025 onward,Beacon Hill,rest of the city,0.03816793893129771,0.04864677307425399,25.0,655.0,0.7845934379457917,0.2206960180529754,False
+neighborhood,surge_rate,2025 onward,Brighton,rest of the city,0.05801526717557252,0.04774462179042332,38.0,655.0,0.8229665071770336,0.23000418611595982,False
+neighborhood,surge_rate,2025 onward,Charlestown,rest of the city,0.050381679389312976,0.048091603053435114,33.0,655.0,0.9545454545454546,0.7889724515095806,False
+neighborhood,surge_rate,2025 onward,Chinatown,rest of the city,0.021374045801526718,0.04941013185287994,14.0,655.0,0.43258426966292135,0.0010505549104886614,True
+neighborhood,surge_rate,2025 onward,Dorchester,rest of the city,0.09923664122137404,0.045870922970159614,65.0,655.0,0.46223776223776225,4.462024463703336e-10,True
+neighborhood,surge_rate,2025 onward,Downtown,rest of the city,0.04122137404580153,0.04850798056904927,27.0,655.0,0.8497854077253219,0.39443708550762047,False
+neighborhood,surge_rate,2025 onward,East Boston,rest of the city,0.050381679389312976,0.048091603053435114,33.0,655.0,0.9545454545454546,0.7889724515095806,False
+neighborhood,surge_rate,2025 onward,Fenway,rest of the city,0.044274809160305344,0.048369188063844555,29.0,655.0,0.915351506456241,0.6322821793803479,False
+neighborhood,surge_rate,2025 onward,Hyde Park,rest of the city,0.05801526717557252,0.04774462179042332,38.0,655.0,0.8229665071770336,0.23000418611595982,False
+neighborhood,surge_rate,2025 onward,Jamaica Plain,rest of the city,0.06259541984732825,0.04753643303261624,41.0,655.0,0.7594235033259423,0.07841292509590916,False
+neighborhood,surge_rate,2025 onward,Longwood,rest of the city,0.007633587786259542,0.05003469812630118,5.0,655.0,0.15256588072122051,7.214784797557261e-07,True
+neighborhood,surge_rate,2025 onward,Mattapan,rest of the city,0.04732824427480916,0.04823039555863983,31.0,655.0,0.981294964028777,0.9160298676109747,False
+neighborhood,surge_rate,2025 onward,Mission Hill,rest of the city,0.0366412213740458,0.04871616932685635,24.0,655.0,0.7521367521367521,0.15817974470805835,False
+neighborhood,surge_rate,2025 onward,North End,rest of the city,0.044274809160305344,0.048369188063844555,29.0,655.0,0.915351506456241,0.6322821793803479,False
+neighborhood,surge_rate,2025 onward,Roslindale,rest of the city,0.06870229007633588,0.0472588480222068,45.0,655.0,0.6878787878787878,0.012205999780079227,False
+neighborhood,surge_rate,2025 onward,Roxbury,rest of the city,0.0549618320610687,0.047883414295628035,36.0,655.0,0.8712121212121212,0.40808579101180287,False
+neighborhood,surge_rate,2025 onward,South Boston,rest of the city,0.0549618320610687,0.047883414295628035,36.0,655.0,0.8712121212121212,0.40808579101180287,False
+neighborhood,surge_rate,2025 onward,South Boston Waterfront,rest of the city,0.02900763358778626,0.04906315058986815,19.0,655.0,0.5912305516265912,0.01908211402047309,False
+neighborhood,surge_rate,2025 onward,South End,rest of the city,0.04885496183206107,0.048160999306037476,32.0,655.0,0.9857954545454546,0.9353587677488563,False
+neighborhood,surge_rate,2025 onward,West End,rest of the city,0.0183206106870229,0.04954892435808466,12.0,655.0,0.3697478991596639,0.00026253961736978025,True
+neighborhood,surge_rate,2025 onward,West Roxbury,rest of the city,0.06717557251908397,0.04732824427480916,44.0,655.0,0.7045454545454545,0.02036298340046694,False
+neighborhood,label_coverage,2025 onward,Allston,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Back Bay,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Beacon Hill,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Brighton,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Charlestown,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Chinatown,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Dorchester,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Downtown,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,East Boston,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Fenway,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Harbor Islands,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Hyde Park,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Jamaica Plain,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Longwood,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Mattapan,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Mission Hill,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,North End,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Roslindale,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,Roxbury,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,South Boston,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,South Boston Waterfront,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,South End,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,West End,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+neighborhood,label_coverage,2025 onward,West Roxbury,rest of the city,1.0,1.0,655.0,655.0,1.0,1.0,False
+poverty_share,requests_per_capita,train 2015 to 2023,higher,lower,20.454686423092873,29.161287548556714,76497.0,3739.827559206023,0.7014328976055532,0.0,True
+poverty_share,missing_location,train 2015 to 2023,lower,higher,0.0002974672785993541,0.0009676822586842368,21.0,70596.0,0.3074018108008119,5.576052766425393e-07,True
+poverty_share,surge_rate,train 2015 to 2023,higher,lower,0.0340013089413158,0.03759570334818878,1091.0,32087.0,0.904393478861564,0.012398201430125282,False
+poverty_share,label_coverage,train 2015 to 2023,higher,lower,0.8874353513842409,0.8874353513842409,32087.0,36157.0,1.0,1.0,False
+poverty_share,requests_per_capita,validate 2024,higher,lower,16.47370014763124,26.054996212956404,6860.0,416.42132238193017,0.6322664571887116,1.2658306059604607e-169,True
+poverty_share,missing_location,validate 2024,lower,higher,0.00042589437819420784,0.0007980845969672786,3.0,7044.0,0.5336456558773424,0.4875646659764075,False
+poverty_share,surge_rate,validate 2024,higher,lower,0.04967709885742673,0.05077413479052823,200.0,4026.0,0.9783938035059112,0.8179739910910386,False
+poverty_share,label_coverage,validate 2024,higher,lower,1.0,1.0,4026.0,4026.0,1.0,1.0,False
+poverty_share,requests_per_capita,2025 onward,higher,lower,31.272019894117875,41.450061862913195,23305.0,745.2348802190281,0.7544504999182651,5.5626914777661724e-198,True
+poverty_share,missing_location,2025 onward,lower,higher,0.0002504759042180142,0.0021166509877704608,5.0,19962.0,0.11833594941499961,5.322183228656769e-08,True
+poverty_share,surge_rate,2025 onward,higher,lower,0.046495489243580844,0.04974554707379135,335.0,7205.0,0.9346663566612415,0.35215683591383684,False
+poverty_share,label_coverage,2025 onward,higher,lower,1.0,1.0,7205.0,7205.0,1.0,1.0,False
+poc_share,requests_per_capita,train 2015 to 2023,higher,lower,22.47073655686996,26.99069451125007,92314.0,4108.187542778918,0.8325364338996118,2.6648736783012834e-272,False
+poc_share,missing_location,train 2015 to 2023,lower,higher,0.00021837239772892707,0.0002772579191793166,9.0,41214.0,0.7876146455088077,0.5509787910571078,False
+poc_share,surge_rate,train 2015 to 2023,lower,higher,0.032282024911438695,0.039798049054134074,1130.0,35004.0,0.8111459149047247,1.7055622934166582e-07,False
+poc_share,label_coverage,train 2015 to 2023,higher,lower,0.8874353513842409,0.8874353513842409,32087.0,36157.0,1.0,1.0,False
+poc_share,requests_per_capita,validate 2024,higher,lower,18.48121846551631,24.03719686662406,8454.0,457.4373716632444,0.7688591381126352,4.13690414447482e-55,True
+poc_share,missing_location,validate 2024,lower,higher,0.0002454590083456063,0.0002984183825723665,1.0,4074.0,0.8225331369661266,1.0,False
+poc_share,surge_rate,validate 2024,lower,higher,0.04348816029143898,0.057625434674615006,191.0,4392.0,0.7546695402298851,0.003017833435116802,True
+poc_share,label_coverage,validate 2024,higher,lower,1.0,1.0,4026.0,4026.0,1.0,1.0,False
+poc_share,requests_per_capita,2025 onward,higher,lower,32.89366320242803,40.204271404480195,26928.0,818.6379192334018,0.8181633954138141,1.866722258613008e-97,False
+poc_share,missing_location,2025 onward,lower,higher,0.00024923153609703416,0.00028323262839879157,3.0,12037.0,0.8799534767799285,1.0,False
+poc_share,surge_rate,2025 onward,lower,higher,0.042748091603053436,0.05412907702984039,336.0,7860.0,0.7897435897435897,0.0011215924893554568,True
+poc_share,label_coverage,2025 onward,higher,lower,1.0,1.0,7205.0,7205.0,1.0,1.0,False
+limited_english_share,requests_per_capita,train 2015 to 2023,higher,lower,23.956666630897374,24.362816183514685,96067.0,4010.0320082135527,0.9833291213315423,0.0012939415620968893,False
+limited_english_share,missing_location,train 2015 to 2023,higher,lower,0.0002803647179287142,0.00029396942717957333,23.0,82036.0,0.9537206661883633,0.8888031641304777,False
+limited_english_share,surge_rate,train 2015 to 2023,lower,higher,0.030596503256770654,0.04163679995013557,1071.0,35004.0,0.7348428143712574,1.582436764720188e-14,True
+limited_english_share,label_coverage,train 2015 to 2023,higher,lower,0.8874353513842409,0.8874353513842409,32087.0,36157.0,1.0,1.0,False
+limited_english_share,requests_per_capita,validate 2024,higher,lower,19.874225074833962,21.520526319614003,8874.0,446.50797535934305,0.9235008837455994,2.4721720311072772e-06,False
+limited_english_share,missing_location,validate 2024,higher,lower,0.00013313806417254693,0.00043393360815795185,1.0,7511.0,0.30681666888563436,0.5618071283356066,False
+limited_english_share,surge_rate,validate 2024,lower,higher,0.04007285974499089,0.06135121708892201,176.0,4392.0,0.6531713900134952,8.041651608370256e-06,True
+limited_english_share,label_coverage,validate 2024,higher,lower,1.0,1.0,4026.0,4026.0,1.0,1.0,False
+limited_english_share,requests_per_capita,2025 onward,higher,lower,34.581083929275614,37.13231636754913,27633.0,799.0784804928132,0.9312934745836889,1.2320138509335437e-13,False
+limited_english_share,missing_location,2025 onward,higher,lower,0.00025998786723286244,0.000427807486631016,6.0,23078.0,0.607721639656816,0.38779532190659066,False
+limited_english_share,surge_rate,2025 onward,lower,higher,0.043638676844783716,0.05315752949340736,343.0,7860.0,0.8209312445604874,0.0064297591110568314,False
+limited_english_share,label_coverage,2025 onward,higher,lower,1.0,1.0,7205.0,7205.0,1.0,1.0,False
+flood_zone,requests_per_capita,train 2015 to 2023,in flood zone,not in flood zone,22.364946574532357,25.491065804581048,63685.0,2847.5364243668723,0.8773641222374119,5.986262978056089e-143,False
+flood_zone,missing_location,train 2015 to 2023,in flood zone,not in flood zone,0.00047239444936521995,0.0009331306533419622,24.0,50805.0,0.5062468451479566,0.0038816645033344036,True
+flood_zone,surge_rate,train 2015 to 2023,in flood zone,not in flood zone,0.030373671580390813,0.03724472305205936,886.0,29170.0,0.8155161078238001,8.695699347674454e-07,False
+flood_zone,label_coverage,train 2015 to 2023,in flood zone,not in flood zone,0.8874353513842409,0.8874353513842409,29170.0,32870.0,1.0,1.0,False
+flood_zone,requests_per_capita,validate 2024,in flood zone,not in flood zone,18.772073809841206,21.860806760577425,5952.0,317.066726899384,0.8587091050863562,8.854617121697271e-20,False
+flood_zone,missing_location,validate 2024,in flood zone,not in flood zone,0.000412796697626419,0.0009128251939753537,2.0,4845.0,0.452218782249742,0.48010655965513777,False
+flood_zone,surge_rate,validate 2024,in flood zone,not in flood zone,0.04562841530054645,0.04996096799375488,167.0,3660.0,0.9132812499999999,0.3497614337446774,False
+flood_zone,label_coverage,validate 2024,in flood zone,not in flood zone,1.0,1.0,3660.0,3660.0,1.0,1.0,False
+flood_zone,requests_per_capita,2025 onward,in flood zone,not in flood zone,34.744486494739874,36.17891510571375,19715.0,567.4281587953457,0.9603518069355448,1.8415014348033902e-05,False
+flood_zone,missing_location,2025 onward,in flood zone,not in flood zone,0.000182370820668693,0.002245127053780998,3.0,16450.0,0.0812296214423874,6.446986606944452e-08,True
+flood_zone,surge_rate,2025 onward,in flood zone,not in flood zone,0.04320610687022901,0.04830970556161396,283.0,6550.0,0.8943566591422122,0.13281935579025228,False
+flood_zone,label_coverage,2025 onward,in flood zone,not in flood zone,1.0,1.0,6550.0,6550.0,1.0,1.0,False
+system,requests_per_capita,2025-10-27 to 2026-10-17 and a year earlier,legacy era,migration era,24.41231241311135,46.68618417656445,17044.0,698.1722874743327,0.5229022856266299,0.0,True
+system,missing_location,2025-10-27 to 2026-10-17,legacy system,new system,0.00362752286497125,0.004700352526439483,94.0,25913.0,0.7717554895226334,0.2034097500585298,False
+system,surge_rate,2025-10-27 to 2026-10-17 and a year earlier,legacy era,migration era,0.04225187265917603,0.05910580524344569,361.0,8544.0,0.7148514851485148,5.107383854824204e-07,True
+system,label_coverage,2025-10-27 to 2026-10-17 and a year earlier,legacy era,migration era,1.0,1.0,8544.0,8544.0,1.0,1.0,False
+tract poverty_share,requests_per_capita,train 2015 to 2023,higher,lower,17.766244523132535,31.046375933241055,61108.0,3439.556396988364,0.5722485793941053,0.0,True
+tract poc_share,requests_per_capita,train 2015 to 2023,higher,lower,21.199049281306817,27.255500844741487,71863.0,3389.9161724845994,0.7777897534176788,0.0,True
+tract limited_english_share,requests_per_capita,train 2015 to 2023,higher,lower,21.178199535926073,27.727204539016004,76226.0,3599.267249828885,0.7638057960774741,0.0,True
+tract flood_zone,requests_per_capita,train 2015 to 2023,in flood zone,not in flood zone,23.910411791106757,24.15712624790931,29339.0,1227.038674880219,0.9897870941158033,0.11341660886991012,False
+tract poverty_share,requests_per_capita,validate 2024,higher,lower,14.614080349409258,26.961145232518138,5597.0,382.98680903490765,0.5420422694724055,4.368310755895362e-293,True
+tract poc_share,requests_per_capita,validate 2024,higher,lower,17.191249127529183,24.106412401223004,6489.0,377.4594825462013,0.7131400907526584,9.41225256380753e-93,True
+tract limited_english_share,requests_per_capita,validate 2024,higher,lower,18.067708345928857,23.50687659846481,7241.0,400.7702505133471,0.7686137403345549,3.914834965266812e-57,True
+tract flood_zone,requests_per_capita,validate 2024,not in flood zone,in flood zone,20.287155542031723,21.386542487472994,11790.0,581.1558932238192,0.9485944515769564,0.0110456469209661,False
+tract poverty_share,requests_per_capita,2025 onward,higher,lower,27.589733033940607,44.082274095630666,18910.0,685.3998904859685,0.6258690959111667,0.0,True
+tract poc_share,requests_per_capita,2025 onward,higher,lower,30.591787567371906,40.85211510777979,20665.0,675.5080903490759,0.7488421954814788,1.9458638684681354e-208,True
+tract limited_english_share,requests_per_capita,2025 onward,higher,lower,31.70132913320494,40.20389331218722,22737.0,717.2254483230664,0.7885139105071485,1.7910405208724717e-141,True
+tract flood_zone,requests_per_capita,2025 onward,not in flood zone,in flood zone,35.03688660338347,37.707789475381475,36440.0,1040.0467488021905,0.9291684050123975,3.87379866657818e-10,False
