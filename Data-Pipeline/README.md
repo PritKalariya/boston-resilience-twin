@@ -52,7 +52,7 @@ ingest_legacy_311 -> ingest_new_311     ingest_static_layers     ingest_noaa_log
 - **Downloads.** `ingest_311.py` keeps the 13 Analyze Boston files current on the schedule in `config/ingest_311_sources.csv` (2026 and the new system daily, 2025 weekly, older years monthly) and replaces a file only when its source changed. The weather, tide and alert tasks add to their history in `data/raw/weather/`, `data/raw/tides/`, `data/raw/open_meteo/` and `data/raw/nws_alerts/` (#7, #8, ADR-014).
 - **Checks.** Great Expectations runs on the raw files before parsing and on the processed tables after. A failed check fails the run and names the check.
 - **Labels and features.** `surge_labels` marks a neighborhood-day as a surge when its storm requests are well above the same weeks of the 3 years before (ADR-005; rules in `config/surge_rules.csv`). `feature_table` builds one row per neighborhood and day from 311 lags, NWS alerts from the Iowa Environmental Mesonet archive (ADR-014), observed weather at Logan to 2023, day-before forecasts from 2024 (ADR-003), predicted tides, the calendar and the static layers, each cut at 6 PM the evening before. Details: [docs/feature-table.md](../docs/feature-table.md).
-- **Bias slicing.** `bias_slicing` compares requests per capita, missing locations, surge rates and label coverage across slices: each neighborhood against the rest, ACS poverty, race and ethnicity and limited-English shares above or below the median neighborhood, the flood zone, and the legacy against the new 311 system (#32). It uses Fairlearn's `MetricFrame` and writes `slices.csv`, `gaps.csv` and `report.md` to `data/interim/reports/bias/`; runbook, "Bias slicing (#32)". Mitigation is [#33](https://github.com/PritKalariya/boston-resilience-twin/issues/33).
+- **Bias slicing.** `bias_slicing` compares requests per capita, missing locations, surge rates and label coverage across slices: each neighborhood against the rest, ACS poverty, race and ethnicity and limited-English shares above or below the median neighborhood, the flood zone, and the legacy against the new 311 system (#32). It uses Fairlearn's `MetricFrame` and writes `slices.csv`, `gaps.csv` and `report.md` to `data/interim/reports/bias/`; runbook, "Bias slicing (#32)". The reviewed results are in [reports/bias/report.md](reports/bias/report.md): 105 of 314 gaps significant (four-fifths ratio under 0.8 and p under 0.01). Mitigation is in progress in [#33](https://github.com/PritKalariya/boston-resilience-twin/issues/33).
 - **Schema and statistics.** `schema_and_statistics` writes each processed table's schema and summary statistics, Great Expectations data docs, and `drift.json` with the shifts from the previous run (#35).
 - **Alerts.** A failed task logs one `ALERT` line naming the task, the run and the error, and posts it to Slack when `SLACK_ALERT_WEBHOOK` is set (#34).
 
@@ -61,7 +61,7 @@ ingest_legacy_311 -> ingest_new_311     ingest_static_layers     ingest_noaa_log
 You need:
 
 - Python 3.12 (ADR-013). [uv](https://docs.astral.sh/uv/) creates a 3.12 venv if you do not have one.
-- Docker Desktop, or Docker Engine 25+ with the Compose plugin, for the Airflow run. Give Docker at least 4 GB of memory; 8 GB is better.
+- Docker Desktop, or Docker Engine 25+ with the Compose plugin, for the Airflow run. Give Docker at least 4 GB of memory; 8 GB is better. A task killed for memory shows `SIGKILL` or exit code `-9` or `137` in its log; raise Docker's memory or put `LEGACY_PARALLEL=2` in `.env`.
 - About 2.5 GB of free disk for the raw and processed data.
 - A bash shell. On Windows, use WSL or Git Bash.
 
@@ -91,7 +91,7 @@ To get your own:
 
 1. **NOAA CDO token:** request one at https://www.ncdc.noaa.gov/cdo-web/token. It comes by email within a few minutes.
 2. **NWS user agent:** no sign-up. Any string with an app name and your email, for example `(boston-resilience-twin, you@example.org)`.
-3. **Census key (optional):** request one at https://api.census.gov/data/key_signup.html, then activate it from the link in the email. No step needs it to run yet; `docs/data-access.md` has a request to check it.
+3. **Census key (optional):** request one at https://api.census.gov/data/key_signup.html, then activate it from the link in the email. No step calls the Census API: the ACS figures the bias slices use come from Analyze Boston's population tables (`config/static_layers.csv`). `docs/data-access.md` has a request to check the key.
 
 `ingest_tides`, `ingest_open_meteo` and `ingest_alert_history` need no key. `SLACK_ALERT_WEBHOOK` is optional too (Run it in Airflow).
 
@@ -100,6 +100,14 @@ Copy the template and put each value in `.env`, in single quotes:
 ```bash
 cp .env.example .env
 ```
+
+On Linux, also set your user id, so the files Airflow writes stay yours. This edits the one line and keeps the rest of `.env` (macOS and Windows skip it):
+
+```bash
+sed -i "s/^AIRFLOW_UID=.*/AIRFLOW_UID=$(id -u)/" .env
+```
+
+The root README's `echo "AIRFLOW_UID=$(id -u)" > .env` replaces the whole file, keys included; use the line above instead.
 
 ```
 NOAA_CDO_TOKEN='your-token'
@@ -155,6 +163,8 @@ python Data-Pipeline/scripts/pipeline_steps.py surge_labels
 
 `pipeline_steps.py <step>` runs any DAG step for the full build with the DAG's own paths and checks; it is what the DVC stages call. The feature table runs the same way (`pipeline_steps.py feature_table`) once the weather, tide and alert downloads are there, which needs `NOAA_CDO_TOKEN`; without it the step stops with `feature_table cannot start: missing .../raw/weather/noaa_logan`.
 
+If `static_layers.py --download` stops with `... could not be read as a vector layer`, the open data portal sent a short reply instead of the file. Delete that file in `Data-Pipeline/data/raw/static/` and run `python Data-Pipeline/scripts/static_layers.py --download` again; the other layers are kept.
+
 Each script prints a table you can check against the source: rows read and dropped per file, unmapped categories, placement by year, and how the daily total reconciles with the combined table, line by line. On a first run `schema_stats.py` prints `first run, nothing to compare with`; after that it lists the shifts from the previous run beyond the thresholds in `config/stats_thresholds.csv`. Open `data/processed/stats/data_docs/index.html` in a browser to see the statistics. Paths are under `Data-Pipeline/`. All of `Data-Pipeline/data/` is gitignored.
 
 Two of these write tracked files in `docs/data/`. On fresh data, `git diff docs/data` shows the new retrieval dates in `static-layers.csv` (the file hashes match) and any switch date the city's newest records moved in `change-points.csv`. Keep the committed version with `git checkout docs/data` unless you mean to update it.
@@ -176,7 +186,7 @@ docker compose run --rm --build test
 
 ## Run it in Airflow
 
-Start the stack from the repo root. On Linux, first set `AIRFLOW_UID` in `.env` to the output of `id -u`, so the files Airflow writes stay yours; macOS and Windows skip that.
+Start the stack from the repo root. On Linux, set `AIRFLOW_UID` first ([API keys](#api-keys) has the `sed` line).
 
 ```bash
 docker compose up -d --build --wait
@@ -250,6 +260,8 @@ Data-Pipeline/
 │   ├── tides.py                 Boston tide gauge, observed and predicted (#7)
 │   ├── raw_fetch.py             shared download helpers for the weather scripts
 │   ├── open_meteo.py            Open-Meteo history and archived forecasts (#8)
+│   ├── open_meteo_forecast.py   reads the archived day-before forecasts for the features
+│   ├── period_files.py          which stored year and half-year files the feature readers use
 │   ├── alert_history.py         NWS alert history from the Iowa Environmental Mesonet (ADR-014)
 │   ├── legacy_311.py            parse the legacy yearly files
 │   ├── new_311.py               parse the new-system export
@@ -305,7 +317,7 @@ dvc repro daily_counts
 dvc repro daily_counts
 ```
 
-`dvc remote list` prints `gcs  gs://boston-resilience-twin-data/dvc  (default)` (#19). On the fresh clone's data, the first `dvc repro daily_counts` ran the 20 stages it needs in 63 seconds, and the second printed `Data and pipelines are up to date.` A grader without bucket access rebuilds everything with `dvc repro`, which needs `NOAA_CDO_TOKEN` (about 2 GB of downloads; 630 seconds in Kirtan's clean-clone run). It updates `dvc.lock` in your working copy; keep the committed one with `git checkout dvc.lock`.
+`dvc remote list` prints `gcs  gs://boston-resilience-twin-data/dvc  (default)` (#19). On the fresh clone's data, the first `dvc repro daily_counts` ran the 20 stages it needs in 63 seconds, and the second printed `Data and pipelines are up to date.` **Without bucket access** (a grader), skip `dvc pull` and rebuild everything with `dvc repro`, which needs `NOAA_CDO_TOKEN` (about 2 GB of downloads; 630 seconds in Kirtan's clean-clone run). Your download is newer than the one `dvc.lock` pins (the 2026 and new-system 311 files change daily), so your row counts and hashes will differ a little from ours; that is new data, not a reproducibility failure. If `ingest_static_layers` stops with `... could not be read as a vector layer`, delete that file in `Data-Pipeline/data/raw/static/` and run `dvc repro` again; it resumes from that stage. `dvc repro` updates `dvc.lock` in your working copy; keep the committed one with `git checkout dvc.lock`.
 
 `push_data`, the last task of the DAG, runs `scripts/dvc_push.py`. Without access to the team bucket, a grader's own machine included, it logs `dvc push skipped: no Google credentials ...` and succeeds, so the run does not fail on it:
 
@@ -348,7 +360,7 @@ All four were run in a clean clone on 2026-10-27, with team credentials: the pre
 | Pipeline flow optimization (Gantt) | [Pipeline performance](../README.md#pipeline-performance-37) in the root README | done (#37): legacy years in parallel, full build 124 s to 73 s |
 | Schema and statistics generation | `schema_stats.py` in [Run it step by step](#run-it-step-by-step); runbook, "Schema and statistics (every run)" | done (#35): every run, with data docs and `drift.json` |
 | Anomaly detection and alerts | Great Expectations checks in [Run it step by step](#run-it-step-by-step); `ALERT` line and Slack in [Run it in Airflow](#run-it-in-airflow) | done (#17, #34) |
-| Bias detection and mitigation | Bias slicing in [What the pipeline does](#what-the-pipeline-does); runbook, "Bias slicing (#32)"; [data card](../docs/data/data-card.md), "Reported demand, not need" | slicing done ([#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32)): the `bias_slicing` task and DVC stage; mitigation and write-up [#33](https://github.com/PritKalariya/boston-resilience-twin/issues/33) open |
+| Bias detection and mitigation | [reports/bias/report.md](reports/bias/report.md) (105 of 314 gaps significant); Bias slicing in [What the pipeline does](#what-the-pipeline-does); runbook, "Bias slicing (#32)"; [data card](../docs/data/data-card.md), "Reported demand, not need" | slicing done ([#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32)): the `bias_slicing` task and DVC stage; mitigation in progress in [#33](https://github.com/PritKalariya/boston-resilience-twin/issues/33), which adds its section here when it merges |
 | Test modules | `tests/`, 986 tests with 97.7% coverage (`docker compose run --rm --build test`), run in CI on every PR (`.github/workflows/ci.yml`) | done (#38) |
 | Reproducibility | [Environment setup](#environment-setup) to [Small run](#small-run-one-year), [DVC and reproducibility](#dvc-and-reproducibility) | done here; second-machine test [#42](https://github.com/PritKalariya/boston-resilience-twin/issues/42) |
 | Error handling and logging | runbook, "Run the data pipeline DAG": retries, input checks, `check_range` (#36) | done |
