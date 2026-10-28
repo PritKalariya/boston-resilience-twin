@@ -49,7 +49,8 @@ cd boston-resilience-twin
 On Linux (the VM too), first save your user id in `.env` so the files Airflow writes to `Data-Pipeline/logs/` stay owned by you. macOS and Windows skip this step and need no `.env`:
 
 ```bash
-echo "AIRFLOW_UID=$(id -u)" > .env
+cp -n .env.example .env
+sed -i "s/^AIRFLOW_UID=.*/AIRFLOW_UID=$(id -u)/" .env
 ```
 
 Then, on every system:

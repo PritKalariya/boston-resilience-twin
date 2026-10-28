@@ -107,8 +107,6 @@ On Linux, also set your user id, so the files Airflow writes stay yours. This ed
 sed -i "s/^AIRFLOW_UID=.*/AIRFLOW_UID=$(id -u)/" .env
 ```
 
-The root README's `echo "AIRFLOW_UID=$(id -u)" > .env` replaces the whole file, keys included; use the line above instead.
-
 ```
 NOAA_CDO_TOKEN='your-token'
 NWS_USER_AGENT='(boston-resilience-twin, you@example.org)'
@@ -207,9 +205,10 @@ docker compose exec airflow-scheduler airflow tasks states-for-dag-run daily_pip
 
 It writes to `Data-Pipeline/data/interim/` and `processed/`, the same files as the step-by-step run. If the 311 files are not there yet, the first run downloads them (82 seconds above). The first run also downloads the Open-Meteo history (92 seconds) and the alert history (14 seconds); later runs fetch only what is new. The legacy years parse side by side, at most 4 at a time; that change took the full build from 124 to 73 seconds ([Pipeline performance](../README.md#pipeline-performance-37) in the root README has the Gantt charts).
 
-**Without the keys** a triggered run fails: `ingest_noaa_logan`, `ingest_nws_forecasts` and `ingest_nws_alerts` fail at once, and `validate_raw` and every task after it are `upstream_failed`. Marking only those three as successful is not enough: `feature_table` then stops with `feature_table cannot start: missing .../raw/weather/noaa_logan`. To run everything else, mark all four with `dags test`, which runs the tasks one at a time in the scheduler container:
+**Without the keys** a triggered run fails: `ingest_noaa_logan`, `ingest_nws_forecasts` and `ingest_nws_alerts` fail at once, and `validate_raw` and every task after it are `upstream_failed`. Marking only those three as successful is not enough: `feature_table` then stops with `feature_table cannot start: missing .../raw/weather/noaa_logan`. To run everything else, mark all four with `dags test`, which runs the tasks one at a time in the scheduler container. Pause the DAG first: while it is unpaused, the scheduler also picks up the run `dags test` creates, runs the keyed tasks itself, and they fail and leave `validate_raw` `upstream_failed`, so the test stops with `invalid_state`. It is a race, so it can pass on one machine and fail on another. The same goes for every `dags test` and `tasks test` command below; unpause only for a triggered run.
 
 ```bash
+docker compose exec airflow-scheduler airflow dags pause daily_pipeline
 docker compose exec airflow-scheduler airflow dags test daily_pipeline --mark-success-pattern '^(ingest_(noaa_logan|nws_forecasts|nws_alerts)|feature_table)$'
 ```
 
@@ -236,7 +235,7 @@ docker compose exec airflow-scheduler airflow dags trigger daily_pipeline -r sli
 docker compose exec airflow-scheduler airflow tasks states-for-dag-run daily_pipeline slice-2025
 ```
 
-Without the keys, add `--mark-success-pattern` as above (`airflow dags test daily_pipeline -c '{"start": "2025-01-01", "end": "2025-12-31"}' --mark-success-pattern ...`); that run took 45 seconds, state `success`: 26,280 cells in `daily_counts` and 8,760 in `surge_labels`. Labels and features read the full build's daily counts, since a label compares a day with the 3 years before it, so run the full build first. The downloads are the same for every range, so a slice refreshes `data/raw/` too. In the UI, Trigger opens a form with the two dates. `start` must be 2015-01-01 or later and `end` on or after it; an empty `end` means through the latest data. A bad range fails at `check_range`. Delete the slice's folder when you are done.
+Without the keys, pause the DAG and add `--mark-success-pattern` as above (`airflow dags test daily_pipeline -c '{"start": "2025-01-01", "end": "2025-12-31"}' --mark-success-pattern ...`); that run took 45 seconds, state `success`: 26,280 cells in `daily_counts` and 8,760 in `surge_labels`. Labels and features read the full build's daily counts, since a label compares a day with the 3 years before it, so run the full build first. The downloads are the same for every range, so a slice refreshes `data/raw/` too. In the UI, Trigger opens a form with the two dates. `start` must be 2015-01-01 or later and `end` on or after it; an empty `end` means through the latest data. A bad range fails at `check_range`. Delete the slice's folder when you are done.
 
 The counts step takes the same range on the host (2 seconds, 26,280 cells):
 
@@ -294,6 +293,7 @@ Data-Pipeline/
 │   ├── placeholder_locations.csv  the City Hall placeholder point
 │   ├── processing.csv             after_switch_policy (ADR-021)
 │   └── validation_bounds.csv      Great Expectations bounds
+├── reports/bias/                bias slicing results: report.md, slices.csv, gaps.csv (#32)
 ├── tests/                       pytest, with small fixture files
 ├── data/                        gitignored: raw/, state/, interim/, processed/, slices/
 ├── logs/                        gitignored: Airflow task logs
@@ -319,9 +319,10 @@ dvc repro daily_counts
 
 `dvc remote list` prints `gcs  gs://boston-resilience-twin-data/dvc  (default)` (#19). On the fresh clone's data, the first `dvc repro daily_counts` ran the 20 stages it needs in 63 seconds, and the second printed `Data and pipelines are up to date.` **Without bucket access** (a grader), skip `dvc pull` and rebuild everything with `dvc repro`, which needs `NOAA_CDO_TOKEN` (about 2 GB of downloads; 630 seconds in Kirtan's clean-clone run). Your download is newer than the one `dvc.lock` pins (the 2026 and new-system 311 files change daily), so your row counts and hashes will differ a little from ours; that is new data, not a reproducibility failure. If `ingest_static_layers` stops with `... could not be read as a vector layer`, delete that file in `Data-Pipeline/data/raw/static/` and run `dvc repro` again; it resumes from that stage. `dvc repro` updates `dvc.lock` in your working copy; keep the committed one with `git checkout dvc.lock`.
 
-`push_data`, the last task of the DAG, runs `scripts/dvc_push.py`. Without access to the team bucket, a grader's own machine included, it logs `dvc push skipped: no Google credentials ...` and succeeds, so the run does not fail on it:
+`push_data`, the last task of the DAG, runs `scripts/dvc_push.py`. Without access to the team bucket, a grader's own machine included, it logs `dvc push skipped: no Google credentials ...` and succeeds, so the run does not fail on it. To run it alone, pause the DAG first, as for `dags test`:
 
 ```bash
+docker compose exec airflow-scheduler airflow dags pause daily_pipeline
 docker compose exec airflow-scheduler airflow tasks test daily_pipeline push_data
 ```
 
