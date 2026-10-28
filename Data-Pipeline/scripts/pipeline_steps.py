@@ -75,6 +75,7 @@ SCRIPTS = {
     "ingest_alert_history": "alert_history",
     "surge_labels": "surge_labels",
     "feature_table": "feature_table",
+    "bias_slicing": "bias_slicing",
     "validate_raw": "validate_data",
     "validate_processed": "validate_data",
     "ingest_noaa_logan": "noaa_logan",
@@ -86,9 +87,7 @@ SCRIPTS = {
     "ingest_new_311": "ingest_311",
 }
 # Task id -> the issue that builds it; a placeholder in the DAG until then.
-PLANNED = {
-    "bias_slicing": "#32",
-}
+PLANNED: dict[str, str] = {}
 # Task id -> the outputs a slice cuts to its days afterwards, with their time column.
 # parse_legacy_311 is only cut when it parses the whole range in one go; per year,
 # the cut waits for merge_legacy_311, so cross-year repeats are judged as before.
@@ -392,6 +391,18 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
             files=StepFiles(data_in=[counts, alerts], config_in=[static, settings, noaa, forecasts, tides], data_out=[out]),
             hint="Run daily_counts for the full build, ingest_alert_history, ingest_static_layers, "
                  "ingest_noaa_logan, ingest_tides and ingest_open_meteo first.",
+        )
+    if step == "bias_slicing":
+        # #32. Reads the labels and the located requests of the same range; writes the rates, the
+        # tests and the report, nothing the later steps read.
+        labels, located, static = paths.processed / "labels.parquet", interim / "311_located.parquet", interim / "static"
+        settings, out = config / "bias_slicing.csv", interim / "reports" / "bias"
+        return StepPlan(
+            args=["--labels", labels, "--located", located, "--static-dir", static,
+                  "--config", settings, "--out-dir", out],
+            files=StepFiles(data_in=[labels, located], config_in=[static, settings],
+                            data_out=[out / name for name in ("slices.csv", "gaps.csv", "report.md")]),
+            hint="Run surge_labels, spatial_join and ingest_static_layers for the same range first.",
         )
     if step in ("ingest_noaa_logan", "ingest_nws_forecasts", "ingest_nws_alerts", "ingest_tides"):
         # #7. Raw downloads add to their folders and keep history, so they have no

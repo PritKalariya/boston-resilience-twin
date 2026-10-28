@@ -7,13 +7,13 @@ and processed/. Any other range is a slice, written to
 Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/,
 which the ingest tasks refresh first, for any range.
 
-Nineteen tasks run pipeline scripts: the two 311 downloads (#6), the five
-weather, tide and Open-Meteo downloads (#7, #8), and the alert history, labels
-and features (#16). parse_legacy_311 runs once per legacy year, at most
-LEGACY_PARALLEL at a time (4 unless .env sets it), and merge_legacy_311 joins
-the years (#37). bias_slicing is still a placeholder until #32: it logs the
-issue that builds it and does nothing else; a task becomes real once its
-script is in pipeline_steps.SCRIPTS. The last task, push_data, pushes
+Twenty tasks run pipeline scripts: the two 311 downloads (#6), the five
+weather, tide and Open-Meteo downloads (#7, #8), the alert history, labels
+and features (#16), and bias_slicing (#32). parse_legacy_311 runs once per
+legacy year, at most LEGACY_PARALLEL at a time (4 unless .env sets it), and
+merge_legacy_311 joins the years (#37). No task is a placeholder now; a new one
+listed in pipeline_steps.PLANNED logs the issue that builds it until its script
+is in pipeline_steps.SCRIPTS. The last task, push_data, pushes
 the DVC-tracked data to the team remote (dvc_push.py, #19); without bucket
 access it logs `dvc push skipped: ...` and succeeds.
 
@@ -167,7 +167,7 @@ def daily_pipeline():
     [merged, parse_new] >> combined
     [combined, static] >> real("spatial_join") >> counts
     counts >> [real("surge_labels"), real("feature_table")] >> validated
-    validated >> [real("schema_and_statistics"), todo("bias_slicing")] >> push_data()
+    validated >> [real("schema_and_statistics"), real("bias_slicing")] >> push_data()
 
 
 daily_pipeline()
