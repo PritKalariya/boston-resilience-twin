@@ -40,9 +40,9 @@ ingest_legacy_311 -> ingest_new_311     ingest_static_layers     ingest_noaa_log
   surge_labels     feature_table   ->  processed/labels.parquet, features.parquet
             \       /
         validate_processed
-                |
-      schema_and_statistics  ->  processed/stats/
-                |
+            /       \
+  schema_and_statistics   bias_slicing   ->  processed/stats/, interim/reports/bias/
+            \       /
              push_data   (DVC)
 ```
 
@@ -52,7 +52,7 @@ ingest_legacy_311 -> ingest_new_311     ingest_static_layers     ingest_noaa_log
 - **Downloads.** `ingest_311.py` keeps the 13 Analyze Boston files current on the schedule in `config/ingest_311_sources.csv` (2026 and the new system daily, 2025 weekly, older years monthly) and replaces a file only when its source changed. The weather, tide and alert tasks add to their history in `data/raw/weather/`, `data/raw/tides/`, `data/raw/open_meteo/` and `data/raw/nws_alerts/` (#7, #8, ADR-014).
 - **Checks.** Great Expectations runs on the raw files before parsing and on the processed tables after. A failed check fails the run and names the check.
 - **Labels and features.** `surge_labels` marks a neighborhood-day as a surge when its storm requests are well above the same weeks of the 3 years before (ADR-005; rules in `config/surge_rules.csv`). `feature_table` builds one row per neighborhood and day from 311 lags, NWS alerts from the Iowa Environmental Mesonet archive (ADR-014), observed weather at Logan to 2023, day-before forecasts from 2024 (ADR-003), predicted tides, the calendar and the static layers, each cut at 6 PM the evening before. Details: [docs/feature-table.md](../docs/feature-table.md).
-- **Bias slicing.** `bias_slicing` is the one placeholder left ([#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32)).
+- **Bias slicing.** `bias_slicing` compares requests per capita, missing locations, surge rates and label coverage across slices: each neighborhood against the rest, ACS poverty, race and ethnicity and limited-English shares above or below the median neighborhood, the flood zone, and the legacy against the new 311 system (#32). It uses Fairlearn's `MetricFrame` and writes `slices.csv`, `gaps.csv` and `report.md` to `data/interim/reports/bias/`; runbook, "Bias slicing (#32)". Mitigation is [#33](https://github.com/PritKalariya/boston-resilience-twin/issues/33).
 - **Schema and statistics.** `schema_and_statistics` writes each processed table's schema and summary statistics, Great Expectations data docs, and `drift.json` with the shifts from the previous run (#35).
 - **Alerts.** A failed task logs one `ALERT` line naming the task, the run and the error, and posts it to Slack when `SLACK_ALERT_WEBHOOK` is set (#34).
 
@@ -166,13 +166,13 @@ python -m pytest Data-Pipeline/tests
 pip install ruff==0.17.2 && ruff check .
 ```
 
-933 tests pass and 14 skip in 29 seconds; the skipped ones are the DAG tests, which need Airflow. To run all of them with coverage, in the Airflow image on Python 3.12 (#38):
+973 tests pass and 14 skip in 44 seconds; the skipped ones are the DAG tests, which need Airflow. To run all of them with coverage, in the Airflow image on Python 3.12 (#38):
 
 ```bash
 docker compose run --rm --build test
 ```
 
-946 passed and 1 skipped in 96 seconds, with 97.8% line coverage of `Data-Pipeline/scripts/`; the run fails below 70% (`.coveragerc`). They never reach the network (`tests/conftest.py` fails any test that tries).
+986 passed and 1 skipped in 100 seconds, with 97.7% line coverage of `Data-Pipeline/scripts/`; the run fails below 70% (`.coveragerc`). They never reach the network (`tests/conftest.py` fails any test that tries).
 
 ## Run it in Airflow
 
@@ -203,9 +203,9 @@ It writes to `Data-Pipeline/data/interim/` and `processed/`, the same files as t
 docker compose exec airflow-scheduler airflow dags test daily_pipeline --mark-success-pattern '^(ingest_(noaa_logan|nws_forecasts|nws_alerts)|feature_table)$'
 ```
 
-That is how the fresh-clone run was done on 2026-10-27: 134 seconds, run state `success`, with the 311 and weather downloads already on disk. Every other task ran, `surge_labels` included.
+That is how the fresh-clone run was done on 2026-10-27: 227 seconds, run state `success`, with the downloads from an earlier run on disk. Every other task ran, `surge_labels` and `bias_slicing` included. That run also picked up the city's daily update: `ingest_311` logged `legacy_2026 updated 190904 190800` and replaced only `2026.csv` and `new_system.csv`.
 
-The DAG has 23 tasks. 22 run code: `check_range`; the downloads `ingest_legacy_311`, `ingest_new_311`, `ingest_static_layers`, `ingest_noaa_logan`, `ingest_nws_forecasts`, `ingest_nws_alerts`, `ingest_tides`, `ingest_open_meteo` and `ingest_alert_history`; `validate_raw`; `parse_legacy_311` (one task instance per legacy year) and `merge_legacy_311`; `parse_new_311`, `combine_311`, `spatial_join`, `daily_counts`, `surge_labels`, `feature_table`, `validate_processed`, `schema_and_statistics`; and `push_data`. The last, `bias_slicing`, is a placeholder until [#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32) lands: it logs that issue and succeeds (`PLANNED` in `scripts/pipeline_steps.py`).
+The DAG has 23 tasks, and all of them run code: `check_range`; the downloads `ingest_legacy_311`, `ingest_new_311`, `ingest_static_layers`, `ingest_noaa_logan`, `ingest_nws_forecasts`, `ingest_nws_alerts`, `ingest_tides`, `ingest_open_meteo` and `ingest_alert_history`; `validate_raw`; `parse_legacy_311` (one task instance per legacy year) and `merge_legacy_311`; `parse_new_311`, `combine_311`, `spatial_join`, `daily_counts`, `surge_labels`, `feature_table`, `validate_processed`, `schema_and_statistics`, `bias_slicing`; and `push_data`. `PLANNED` in `scripts/pipeline_steps.py`, which held the placeholders, is now empty.
 
 The `ingest_*` tasks retry twice on a network error, about 5 to 10 and then 10 to 15 minutes apart. A missing input or key fails a task at once, since a retry cannot fix it.
 
@@ -257,6 +257,7 @@ Data-Pipeline/
 │   ├── spatial_join.py          place requests in tracts and neighborhoods
 │   ├── daily_counts.py          neighborhood x day x storm group counts
 │   ├── surge_labels.py          surge labels per neighborhood and day (#16)
+│   ├── bias_slicing.py          bias slices and their tests (#32)
 │   ├── feature_table.py         the cutoff-safe feature table (#16), with weather_features.py and tide_features.py
 │   ├── validate_data.py         Great Expectations checks, raw and processed
 │   ├── schema_stats.py          schema, statistics and drift of the processed tables
@@ -277,6 +278,7 @@ Data-Pipeline/
 │   ├── surge_rules.csv            surge label rules
 │   ├── labels_features.csv        label and feature settings (cutoff, windows)
 │   ├── feature_catalog.csv        every feature column and where it comes from
+│   ├── bias_slicing.csv           slice thresholds and test settings
 │   ├── placeholder_locations.csv  the City Hall placeholder point
 │   ├── processing.csv             after_switch_policy (ADR-021)
 │   └── validation_bounds.csv      Great Expectations bounds
@@ -311,11 +313,13 @@ dvc repro daily_counts
 docker compose exec airflow-scheduler airflow tasks test daily_pipeline push_data
 ```
 
-Team members log in once with `gcloud auth application-default login`; then, in `Data-Pipeline/`, `dvc pull` fetches the data the committed `dvc.lock` names and `dvc repro` prints `Data and pipelines are up to date.` A pull of two outputs in a clean clone (`dvc pull daily_counts surge_labels`) fetched both, 310,752 and 103,584 rows. **Data versions (#40).** Each commit that changes `dvc.lock` is a data version; there are two so far, `a86e6e5` (#18) and `0812b8b` (#94). From `Data-Pipeline/`:
+Team members log in once with `gcloud auth application-default login`; then, in `Data-Pipeline/`, `dvc pull` fetches the data the committed `dvc.lock` names and `dvc repro` prints `Data and pipelines are up to date.` A pull of two outputs in a clean clone (`dvc pull daily_counts surge_labels`) fetched both, 310,752 and 103,584 rows.
+
+**Data versions (#40).** Each commit that changes `dvc.lock` is a data version: the first was `a86e6e5` (#18), then `0812b8b` (#94), and #98 refreshed it again. From `Data-Pipeline/`:
 
 ```bash
 git log --oneline -- dvc.lock          # the data versions, newest first
-dvc diff a86e6e5 HEAD                  # 49 files changed between the two
+dvc diff a86e6e5 0812b8b               # 49 files changed between the first two
 git checkout a86e6e5 -- dvc.lock && dvc pull     # the previous version
 git checkout HEAD -- dvc.lock && dvc checkout    # back to the current one
 ```
@@ -338,14 +342,14 @@ All four were run in a clean clone on 2026-10-27, with team credentials: the pre
 |---|---|---|
 | Proper documentation | this README, the [root README](../README.md), [runbook](../docs/runbook.md), [data card](../docs/data/data-card.md), [ADRs](../docs/decisions/) | done |
 | Modular syntax and code | [Code structure](#code-structure): one module per step, `step_plan` for arguments | done |
-| Pipeline orchestration (Airflow DAGs) | [Run it in Airflow](#run-it-in-airflow), `dags/daily_pipeline.py` | done: every step from the downloads (#6, #7, #8) to labels and features (#16) runs in the DAG; `bias_slicing` is a placeholder until #32 |
+| Pipeline orchestration (Airflow DAGs) | [Run it in Airflow](#run-it-in-airflow), `dags/daily_pipeline.py` | done: every step from the downloads (#6, #7, #8) to labels, features (#16) and bias slicing (#32) runs in the DAG; no placeholders left |
 | Tracking and logging | the per-task log line in [Run it in Airflow](#run-it-in-airflow) (#36) | done |
 | Data version control (DVC) | [DVC and reproducibility](#dvc-and-reproducibility), `dvc.yaml` and `dvc.lock` | done: remote and push task (#19), stages from the downloads to labels and features (#18), two data versions with checkout steps (#40) |
 | Pipeline flow optimization (Gantt) | [Pipeline performance](../README.md#pipeline-performance-37) in the root README | done (#37): legacy years in parallel, full build 124 s to 73 s |
 | Schema and statistics generation | `schema_stats.py` in [Run it step by step](#run-it-step-by-step); runbook, "Schema and statistics (every run)" | done (#35): every run, with data docs and `drift.json` |
 | Anomaly detection and alerts | Great Expectations checks in [Run it step by step](#run-it-step-by-step); `ALERT` line and Slack in [Run it in Airflow](#run-it-in-airflow) | done (#17, #34) |
-| Bias detection and mitigation | [data card](../docs/data/data-card.md), "Reported demand, not need" | slicing [#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32), in review: [PR #98](https://github.com/PritKalariya/boston-resilience-twin/pull/98) (Fairlearn slices by neighborhood, poverty, race and ethnicity, limited English, flood zone and 311 system); mitigation and write-up [#33](https://github.com/PritKalariya/boston-resilience-twin/issues/33) |
-| Test modules | `tests/`, 946 tests with 97.8% coverage (`docker compose run --rm --build test`), run in CI on every PR (`.github/workflows/ci.yml`) | done (#38) |
+| Bias detection and mitigation | Bias slicing in [What the pipeline does](#what-the-pipeline-does); runbook, "Bias slicing (#32)"; [data card](../docs/data/data-card.md), "Reported demand, not need" | slicing done ([#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32)): the `bias_slicing` task and DVC stage; mitigation and write-up [#33](https://github.com/PritKalariya/boston-resilience-twin/issues/33) open |
+| Test modules | `tests/`, 986 tests with 97.7% coverage (`docker compose run --rm --build test`), run in CI on every PR (`.github/workflows/ci.yml`) | done (#38) |
 | Reproducibility | [Environment setup](#environment-setup) to [Small run](#small-run-one-year), [DVC and reproducibility](#dvc-and-reproducibility) | done here; second-machine test [#42](https://github.com/PritKalariya/boston-resilience-twin/issues/42) |
 | Error handling and logging | runbook, "Run the data pipeline DAG": retries, input checks, `check_range` (#36) | done |
 
