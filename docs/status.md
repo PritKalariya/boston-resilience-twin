@@ -37,7 +37,7 @@ Week 2: Processing (due 2026-10-18)
 | #10 Decision: lock the modeling unit | Alekhya | 2026-10-13 | done | PR #66 merged; ADR-004 proposed (team sign-off pending): neighborhood x day, 24 tract-built neighborhoods, surge in any storm group |
 | #17 Validation suites (Great Expectations) | Alekhya | 2026-10-18 | in review | `validate_raw` and `validate_processed` run `validate_data.py` (GE 1.24.1); all raw and processed checks pass on the 2026-10-20 data; review fixes from Kirtan in; injected UTC shift and missing column fail by name; results below |
 | #32 Bias slicing on processed data and labels | Alekhya | 2026-10-22 | done | PR #98 merged. `bias_slicing` is a real `daily_pipeline` task (`bias_slicing.py`, Fairlearn 0.15.0 `MetricFrame`). Slices: the 24 neighborhoods, ACS 2025 poverty, people of color and limited English shares (above or at or below the median neighborhood), the 1% flood zone, legacy against migration era and system; a tract check repeats requests per capita. Per slice: requests per capita, missing location, surge rate, label coverage. A gap is significant under the four-fifths rule with p < 0.01. On the DVC-tracked data (`dvc.lock`, through 2026-10-25), 105 of 314 tests are significant; the main one is reporting: high-poverty neighborhoods file 30% fewer storm requests per resident (tracts 43% fewer), while their surge rate is not lower. Reviewed copy in `Data-Pipeline/reports/bias/`; results below. Also the 30th `dvc.yaml` stage (ADR-024: `bias_slicing` added to `dvc_stages.STEPS`), recorded in `dvc.lock` and pushed. Review fixes for Piyush (2026-10-27): a neighborhood with no surges is tested like any other, and the report states two limits (the system slice spans different years; the tests assume independent days). The TA has not yet confirmed that data-level slicing is enough before a model exists |
-| #33 Bias mitigation and write-up | Alekhya | 2026-10-24 | in progress | ADR-025 (proposed): the reporting gap is mitigated by self-relative 311 lag features, (requests + 1) / (ADR-005 baseline mean + 1) of the neighborhood, which replace the raw lags in the model (`feature_table.py`, `feature_catalog.csv`; Piyush reviews); the label, small-neighborhood, migration and missing-location gaps are documented or deferred with reasons. Before and after: `bias_mitigation.py`, `Data-Pipeline/reports/bias/mitigation.md`. README section pending `Data-Pipeline/README.md` (#95, open); results below |
+| #33 Bias mitigation and write-up | Alekhya | 2026-10-24 | in progress | ADR-025 (proposed): the reporting gap is mitigated by self-relative 311 lag features, (requests + 1) / (ADR-005 baseline mean + 1) of the neighborhood, which replace the raw lags as the default model inputs until Model Development compares the two (`feature_table.py`, `feature_catalog.csv`; Piyush reviews); the label, small-neighborhood, migration and missing-location gaps are documented or deferred with reasons. Before and after: `bias_mitigation.py`, `Data-Pipeline/reports/bias/mitigation.md`. README section pending `Data-Pipeline/README.md` (#95, open); results below |
 | #31 Repo layout and pipeline pins | Prit | 2026-10-16 | done | PR #58 merged; ADR-017: one shared Airflow stack at the root, each component mounts its `dags/` at `/opt/airflow/dags/<component>` in snake_case; `Data-Pipeline/requirements.txt` pinned, 94 tests pass in a clean Python 3.12 venv. Amended 2026-10-27 by ADR-023: the `/opt/airflow/repo/` mounts for `Data-Pipeline/scripts`, `config`, `docs/data` and `data`, and the `PYTHONPATH` entry, that #72 and #73 added |
 | #8 Open-Meteo history and archived forecasts | Piyush | 2026-10-13 | in review | PR #76. Set a (ERA5 history) and set b (ECMWF IFS first-hours data) from 2021-01-01; set c (GFS day-before forecasts, for validation and test) from 2024-01-21. Kirtan's review fixes in (2026-10-26): a `yesterday` year whose last day has gaps stays marked incomplete and is fetched again daily for 7 days, then weekly until complete; manifests and run logs moved to `data/state/open_meteo/` (old ones read in place, move in the runbook); the attribution file is written only after a run with no failure, only when it changes, and keeps the other sets' rows with `--only`; HTTP 429 stops the run and 5xx is retried; manifest entries and a later start date are checked; results below |
 | #21 CI v1 | Kirtan | 2026-10-16 | in review | `.github/workflows/ci.yml`: Python 3.12 check, `ruff check .` (errors only), tests, on every PR and push to main; no secrets; `conftest.py` blocks network in tests (loopback and Unix sockets allowed, so `socketpair()` and asyncio work on Windows). On main as of 2026-10-25 (992b981, #78 in) plus this change, in plain `python:3.12-slim` as CI runs it: `ruff check .` clean, 234 tests pass and 1 skips (`test_spatial_join.py` needs the static layers on disk), install 24 s. Action pins checked against their tags (checkout v7.0.1, setup-python v7.0.0). Required-check setting needs a repo admin (runbook, "CI") |
@@ -95,7 +95,7 @@ Week 2: Processing (due 2026-10-18)
 Commands: `dvc repro` (the `feature_table` stage with the self-relative lags, then `bias_slicing`), then `python Data-Pipeline/scripts/bias_mitigation.py`, on the data `dvc.lock` names (2015-01-01 to 2026-10-25). The outputs are pushed (`dvc_push.py`). The #32 report is byte-identical after the rebuild.
 
 **Self-relative lags** (`feature_table.py`): `snow_ice_rel_last`, `snow_ice_rel3`, `rel7`, `rel28` and the same for tree, each (requests + 1) / (baseline + 1) over the days of the raw lag, with the neighborhood's own ADR-005 method A mean.
-- **Coverage:** they start on 2016-01-08 (`rel_last`) to 2016-02-04 (`rel28`), as the labels do.
+- **Coverage:** they start on 2016-01-08 (`rel_last`) to 2016-02-04 (`rel28`), just after the first labels (2016-01-06). So 696 of the 70,008 labeled training rows (0.99%), up to 2016-02-03, miss at least one window; the raw lags miss none.
 - **Leakage:** `check_no_leakage` recomputes them by date (`relative_by_date`) and stops on any difference.
 - **Model inputs:** the 8 raw lags now have `use_in_model = no`, and the model inputs are still 31.
 
@@ -108,7 +108,7 @@ Commands: `dvc repro` (the `feature_table` stage with the self-relative lags, th
 |---|---|---|
 | raw (the model before) | 52 of 96 | 53 of 96 |
 | per capita | 45 of 96 | 64 of 96 |
-| self-relative (the model now) | 0 of 96 | 7 of 96 |
+| self-relative (the default inputs now) | 0 of 96 | 7 of 96 |
 
 - **The examples** (7-day sums):
   - limited English, tree, 2024: raw 5.67 vs 10.15 (0.56), self-relative 1.27 vs 1.37 (0.93);
@@ -118,6 +118,12 @@ Commands: `dvc repro` (the `feature_table` stage with the self-relative lags, th
   - small-neighborhood surge rates, to the surge rule freeze (m 5 against m 4);
   - the migration era, to drift monitoring (ADR-008).
 - **Documented:** the higher surge rates in neighborhoods with more people of color or limited English (labels are self-relative), and missing location (under 0.25%, a lower bound).
+
+**Review fixes (PR #101, Punith and Piyush, 2026-10-28), documentation only.** ADR-025 now:
+- calls the self-relative lags the default inputs, not the final choice;
+- gives the real coverage (696 of 70,008 labeled training rows miss a window);
+- says the before and after numbers are an input-level result, partly by construction;
+- assigns Model Development the comparison of raw, self-relative and self-relative plus baseline level, on 2024 validation recall per #32 group and the worst-group gap, with grading watching the same groups.
 
 **Tests:**
 - `test_feature_table.py`: 5 new tests (the formula, missing until a baseline exists, half the reporting gives the same values, no change from D-1 or later, the by-date check catches a lag that reads D-1).

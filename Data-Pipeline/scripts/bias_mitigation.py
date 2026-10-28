@@ -8,7 +8,7 @@ This compares the two on the #32 slices (bias_slicing's ACS and flood zone group
 period, storm group and window it takes the mean of three versions of the lag in each group:
 - raw: the count the model used before (feature_table's `{group}_last` and `{group}_sum{w}`);
 - per capita: the same per 1,000 residents, where the reporting gap shows;
-- self-relative: `{group}_rel_last` and `{group}_rel{w}`, what the model uses now.
+- self-relative: `{group}_rel_last` and `{group}_rel{w}`, the default model inputs now.
 
 A gap is the lower group mean over the higher one, under the four-fifths rule (ratio_min in
 config/bias_slicing.csv). The means are over the neighborhood-days that have a label and every

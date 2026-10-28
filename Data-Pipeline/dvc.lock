@@ -895,8 +895,8 @@ stages:
       size: 6229
     - path: scripts/feature_table.py
       hash: md5
-      md5: bac129480e8b3d64e343da48c4b48d41
-      size: 24935
+      md5: 91f02abd493d72cfb0fdb7a494eae82a
+      size: 25123
     - path: scripts/legacy_311.py
       hash: md5
       md5: 1e00bde097749edc8469a9d48672d4c5
@@ -1061,8 +1061,8 @@ stages:
       size: 6229
     - path: scripts/feature_table.py
       hash: md5
-      md5: bac129480e8b3d64e343da48c4b48d41
-      size: 24935
+      md5: 91f02abd493d72cfb0fdb7a494eae82a
+      size: 25123
     - path: scripts/legacy_311.py
       hash: md5
       md5: 1e00bde097749edc8469a9d48672d4c5

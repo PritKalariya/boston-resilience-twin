@@ -18,9 +18,11 @@ out of the model:
   that gap; relative to its own history a neighborhood's storm shows the same
   way whatever it usually reports, as the labels already compare it. The
   baseline uses only the same weeks of the 3 previous years, so it is known
-  before D. Missing until a neighborhood has a baseline (from 2016, when the
-  labels start too). The model uses these, not the raw counts
-  (feature_catalog.csv).
+  before D. Missing until a neighborhood has a baseline: they start on
+  2016-01-08 (rel_last) to 2016-02-04 (rel28), just after the first labels
+  (2016-01-06), so 0.99% of labeled training rows miss at least one window.
+  They are the default model inputs in place of the raw counts
+  (feature_catalog.csv), until Model Development compares the two.
 - NWS alerts (ADR-014, Option A+): per storm group, the alerts whose first
   bulletin came before the cutoff, whose first-announced end is after D begins
   and that were not cancelled or upgraded before the cutoff, and whether one of

@@ -656,7 +656,7 @@ python Data-Pipeline/scripts/bias_slicing.py   # about 40 s on the full build
 
 ## Bias mitigation (#33, ADR-025)
 
-The model uses self-relative 311 lags (`{group}_rel_last`, `{group}_rel3`, `rel7`, `rel28` in `features.parquet`), not the raw counts, because the raw counts carry the reporting gap #32 found. `feature_table` builds both; `feature_catalog.csv` marks which ones the model uses.
+Self-relative 311 lags (`{group}_rel_last`, `{group}_rel3`, `rel7`, `rel28` in `features.parquet`) are the default model inputs in place of the raw counts, because the raw counts carry the reporting gap #32 found. `feature_table` builds both; `feature_catalog.csv` marks which ones the model uses, and Model Development compares the two before fixing the inputs (ADR-025).
 
 ```bash
 python Data-Pipeline/scripts/bias_mitigation.py   # before and after numbers, about 6 s
