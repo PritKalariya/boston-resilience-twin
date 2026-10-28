@@ -1,6 +1,6 @@
 # ADR-025: Self-relative 311 lags are the default model inputs; the other #32 gaps are documented or deferred
 
-- Status: proposed
+- Status: accepted (sign-off by Punith and Piyush on PR #101, 2026-10-28)
 - Date: 2026-10-28
 - Owner: alekhyabulusu
 - Phase: data
