@@ -181,7 +181,7 @@ pip install ruff==0.17.2 && ruff check .
 docker compose run --rm --build test
 ```
 
-986 passed and 1 skipped in 100 seconds, with 97.7% line coverage of `Data-Pipeline/scripts/`; the run fails below 70% (`.coveragerc`). They never reach the network (`tests/conftest.py` fails any test that tries).
+999 passed and 1 skipped in about 160 seconds (2026-10-28, with #33), with 97.8% line coverage of `Data-Pipeline/scripts/`; the run fails below 70% (`.coveragerc`). On a host Python 3.12, `python -m pytest Data-Pipeline/tests` gives 986 passed and 14 skipped: the DAG tests and the test-service checks need the Airflow image. They never reach the network (`tests/conftest.py` fails any test that tries).
 
 ## Run it in Airflow
 
@@ -413,7 +413,7 @@ The 7 left are surge days in 2024, the smallest sample. Both groups are above 1 
 | Schema and statistics generation | `schema_stats.py` in [Run it step by step](#run-it-step-by-step); runbook, "Schema and statistics (every run)" | done (#35): every run, with data docs and `drift.json` |
 | Anomaly detection and alerts | Great Expectations checks in [Run it step by step](#run-it-step-by-step); `ALERT` line and Slack in [Run it in Airflow](#run-it-in-airflow) | done (#17, #34) |
 | Bias detection and mitigation | [Bias detection and mitigation](#bias-detection-and-mitigation); [reports/bias/report.md](reports/bias/report.md) (105 of 314 gaps significant) and [mitigation.md](reports/bias/mitigation.md); Bias slicing in [What the pipeline does](#what-the-pipeline-does); runbook, "Bias slicing (#32)"; [data card](../docs/data/data-card.md), "Reported demand, not need" | done: slicing ([#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32)), the `bias_slicing` task and DVC stage; mitigation ([#33](https://github.com/PritKalariya/boston-resilience-twin/issues/33), [ADR-025](../docs/decisions/ADR-025-bias-mitigation.md)), self-relative 311 lags with before and after numbers in [Bias detection and mitigation](#bias-detection-and-mitigation) |
-| Test modules | `tests/`, 986 tests with 97.7% coverage (`docker compose run --rm --build test`), run in CI on every PR (`.github/workflows/ci.yml`) | done (#38) |
+| Test modules | `tests/`, 999 passed and 1 skipped with 97.8% coverage (`docker compose run --rm --build test`; 986 passed and 14 skipped on a host Python), run in CI on every PR (`.github/workflows/ci.yml`) | done (#38) |
 | Reproducibility | [Environment setup](#environment-setup) to [Small run](#small-run-one-year), [DVC and reproducibility](#dvc-and-reproducibility) | done here; second-machine test [#42](https://github.com/PritKalariya/boston-resilience-twin/issues/42) |
 | Error handling and logging | runbook, "Run the data pipeline DAG": retries, input checks, `check_range` (#36) | done |
 
