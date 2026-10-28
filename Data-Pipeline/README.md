@@ -14,7 +14,8 @@ Contents:
 6. [Small run: one year](#small-run-one-year)
 7. [Code structure](#code-structure)
 8. [DVC and reproducibility](#dvc-and-reproducibility)
-9. [Evaluation criteria](#evaluation-criteria)
+9. [Bias detection and mitigation](#bias-detection-and-mitigation)
+10. [Evaluation criteria](#evaluation-criteria)
 
 Every command below was run in a fresh clone on 2026-10-27 (macOS, Apple silicon, Docker Desktop with 8 GB). Times and row counts are from that run. The city adds new requests every day, so your counts will be a little higher. That run had no NOAA token or NWS user agent, so the three weather tasks that need them, and `feature_table`, which reads the NOAA download, were marked success instead of run ([Run it in Airflow](#run-it-in-airflow) shows how).
 
@@ -51,8 +52,8 @@ ingest_legacy_311 -> ingest_new_311     ingest_static_layers     ingest_noaa_log
 - **Counts.** `daily_counts` counts storm-related requests (snow and ice, flooding, trees) per neighborhood, day and storm group, fills days with no requests with 0, and adds the ADR-005 baseline counts. Legacy rows opened after their category's switch date are kept (ADR-021).
 - **Downloads.** `ingest_311.py` keeps the 13 Analyze Boston files current on the schedule in `config/ingest_311_sources.csv` (2026 and the new system daily, 2025 weekly, older years monthly) and replaces a file only when its source changed. The weather, tide and alert tasks add to their history in `data/raw/weather/`, `data/raw/tides/`, `data/raw/open_meteo/` and `data/raw/nws_alerts/` (#7, #8, ADR-014).
 - **Checks.** Great Expectations runs on the raw files before parsing and on the processed tables after. A failed check fails the run and names the check.
-- **Labels and features.** `surge_labels` marks a neighborhood-day as a surge when its storm requests are well above the same weeks of the 3 years before (ADR-005; rules in `config/surge_rules.csv`). `feature_table` builds one row per neighborhood and day from 311 lags, NWS alerts from the Iowa Environmental Mesonet archive (ADR-014), observed weather at Logan to 2023, day-before forecasts from 2024 (ADR-003), predicted tides, the calendar and the static layers, each cut at 6 PM the evening before. Details: [docs/feature-table.md](../docs/feature-table.md).
-- **Bias slicing.** `bias_slicing` compares requests per capita, missing locations, surge rates and label coverage across slices: each neighborhood against the rest, ACS poverty, race and ethnicity and limited-English shares above or below the median neighborhood, the flood zone, and the legacy against the new 311 system (#32). It uses Fairlearn's `MetricFrame` and writes `slices.csv`, `gaps.csv` and `report.md` to `data/interim/reports/bias/`; runbook, "Bias slicing (#32)". The reviewed results are in [reports/bias/report.md](reports/bias/report.md): 105 of 314 gaps significant (four-fifths ratio under 0.8 and p under 0.01). Mitigation is in progress in [#33](https://github.com/PritKalariya/boston-resilience-twin/issues/33).
+- **Labels and features.** `surge_labels` marks a neighborhood-day as a surge when its storm requests are well above the same weeks of the 3 years before (ADR-005; rules in `config/surge_rules.csv`). `feature_table` builds one row per neighborhood and day from 311 lags (raw and self-relative, #33), NWS alerts from the Iowa Environmental Mesonet archive (ADR-014), observed weather at Logan to 2023, day-before forecasts from 2024 (ADR-003), predicted tides, the calendar and the static layers, each cut at 6 PM the evening before. Details: [docs/feature-table.md](../docs/feature-table.md).
+- **Bias slicing.** `bias_slicing` compares requests per capita, missing locations, surge rates and label coverage across slices: each neighborhood against the rest, ACS poverty, race and ethnicity and limited-English shares above or below the median neighborhood, the flood zone, and the legacy against the new 311 system (#32). It uses Fairlearn's `MetricFrame` and writes `slices.csv`, `gaps.csv` and `report.md` to `data/interim/reports/bias/`; runbook, "Bias slicing (#32)". The reviewed results are in [reports/bias/report.md](reports/bias/report.md): 105 of 314 gaps significant (four-fifths ratio under 0.8 and p under 0.01). Mitigation, with before and after numbers, is in [Bias detection and mitigation](#bias-detection-and-mitigation) (#33).
 - **Schema and statistics.** `schema_and_statistics` writes each processed table's schema and summary statistics, Great Expectations data docs, and `drift.json` with the shifts from the previous run (#35).
 - **Alerts.** A failed task logs one `ALERT` line naming the task, the run and the error, and posts it to Slack when `SLACK_ALERT_WEBHOOK` is set (#34).
 
@@ -180,7 +181,7 @@ pip install ruff==0.17.2 && ruff check .
 docker compose run --rm --build test
 ```
 
-986 passed and 1 skipped in 100 seconds, with 97.7% line coverage of `Data-Pipeline/scripts/`; the run fails below 70% (`.coveragerc`). They never reach the network (`tests/conftest.py` fails any test that tries).
+999 passed and 1 skipped in about 160 seconds (2026-10-28, with #33), with 97.8% line coverage of `Data-Pipeline/scripts/`; the run fails below 70% (`.coveragerc`). On a host Python 3.12, `python -m pytest Data-Pipeline/tests` gives 986 passed and 14 skipped: the DAG tests and the test-service checks need the Airflow image. They never reach the network (`tests/conftest.py` fails any test that tries).
 
 ## Run it in Airflow
 
@@ -269,6 +270,7 @@ Data-Pipeline/
 │   ├── daily_counts.py          neighborhood x day x storm group counts
 │   ├── surge_labels.py          surge labels per neighborhood and day (#16)
 │   ├── bias_slicing.py          bias slices and their tests (#32)
+│   ├── bias_mitigation.py       before and after numbers for the self-relative lags (#33)
 │   ├── feature_table.py         the cutoff-safe feature table (#16), with weather_features.py and tide_features.py
 │   ├── validate_data.py         Great Expectations checks, raw and processed
 │   ├── schema_stats.py          schema, statistics and drift of the processed tables
@@ -293,7 +295,7 @@ Data-Pipeline/
 │   ├── placeholder_locations.csv  the City Hall placeholder point
 │   ├── processing.csv             after_switch_policy (ADR-021)
 │   └── validation_bounds.csv      Great Expectations bounds
-├── reports/bias/                bias slicing results: report.md, slices.csv, gaps.csv (#32)
+├── reports/bias/                bias results: report.md, slices.csv, gaps.csv (#32); mitigation.md, mitigation.csv (#33)
 ├── tests/                       pytest, with small fixture files
 ├── data/                        gitignored: raw/, state/, interim/, processed/, slices/
 ├── logs/                        gitignored: Airflow task logs
@@ -349,6 +351,55 @@ All four were run in a clean clone on 2026-10-27, with team credentials: the pre
 - `ingest_311.py` records each file's SHA-256 and row count in `data/state/311/_manifest.json`, and a run with nothing new leaves `data/raw/311/` byte for byte as it was.
 - The 311 files grow every day, so a fresh download is a newer version, not the same bytes. The full fresh-clone test on another machine is [#42](https://github.com/PritKalariya/boston-resilience-twin/issues/42).
 
+## Bias detection and mitigation
+
+**Bias found (#32).** `bias_slicing` compares four measures across slices of the 24 neighborhoods: requests per capita, missing location, surge rate and label coverage. The slices are ACS poverty, people of color and limited-English shares above or below the median, the flood zone, and the 311 system. A tract check repeats requests per capita on the 207 tracts. 105 of 314 tests are significant ([reports/bias/report.md](reports/bias/report.md)). The main finding is about **reporting**: 311 counts reported demand, not need.
+
+| slice | storm requests per 1,000 residents a year, 2015 to 2023 |
+|---|---|
+| poverty, neighborhoods | 20.5 higher-poverty vs 29.2 lower-poverty (0.70) |
+| poverty, tracts | 17.8 vs 31.0 (0.57) |
+| people of color, tracts | 21.2 vs 27.3 (0.78) |
+| limited English, tracts | 21.2 vs 27.7 (0.76) |
+
+The labels don't carry this gap: each neighborhood is compared with its own ADR-005 baseline, so higher-poverty neighborhoods surge about as often (3.40% against 3.76%). But 8 of the model's 31 inputs were raw 311 lag counts, so the features did carry it. The other gaps are:
+- higher surge rates where more people of color or limited-English speakers live;
+- very low surge rates in the smallest neighborhoods (Longwood, Chinatown, West End, South Boston Waterfront; Chinatown in 2024 and Harbor Islands with none);
+- a jump in requests in the year the new 311 system took storm requests;
+- missing locations, under 0.25% everywhere.
+
+**How it was addressed (#33, [ADR-025](../docs/decisions/ADR-025-bias-mitigation.md)).**
+- **Reporting: self-relative 311 lags.** `feature_table` adds `{group}_rel_last` and `{group}_rel3`, `rel7`, `rel28`: each lag over the neighborhood's own ADR-005 baseline mean, as (requests + 1) / (baseline + 1). A value of 1 is a usual day for that neighborhood, whatever it usually reports.
+  - **Default inputs:** they're the default model inputs in `config/feature_catalog.csv`, and the raw lags stay in the table with `use_in_model = no`.
+  - **Leakage:** the baseline uses only the same weeks of the 3 previous years, and `check_no_leakage` recomputes these features by date.
+- **Labels:** documented, not changed. They're already self-relative; the worst-group recall gap (ADR-008) covers the model.
+- **Small neighborhoods:** deferred to the surge rule freeze ADR, which sets the request floor m (m 5 against m 4, #16).
+- **The 311 migration:** deferred to drift monitoring (ADR-008), with the switch dates. The two eras are different years, so the slice cannot separate the system from that year's weather.
+- **Missing location:** documented. It's too small, and only partly measured.
+
+**Before and after** (`scripts/bias_mitigation.py`, [reports/bias/mitigation.md](reports/bias/mitigation.md)):
+- **What's compared:** each lag version's mean between the two groups of each slice (poverty, people of color, limited English, flood zone), per period, storm group and window.
+- **Rows:** 90,091 labeled neighborhood-days, 3,554 of them surge days.
+- **The rule:** a gap is a lower mean under 0.8 times the higher one.
+
+| version | gaps, all labeled days | gaps, surge days |
+|---|---|---|
+| raw (before) | 52 of 96 | 53 of 96 |
+| per capita | 45 of 96 | 64 of 96 |
+| self-relative (now) | 0 of 96 | 7 of 96 |
+
+The 7 left are surge days in 2024, the smallest sample. Both groups are above 1 there, so the storm still shows in each.
+
+**Trade-offs.**
+- **An input-level result.** Dividing by a neighborhood's own baseline puts it near 1 on an ordinary day by construction, so equal means on all days are partly expected; the surge-day numbers say more. Neither shows the model will be fairer or more accurate.
+- **Size of a storm:** the model loses a storm's absolute size in requests. Population and density stay as features to recover scale, and the +1 makes tiny neighborhoods' values coarse.
+- **Coverage:** the self-relative lags start just after the first labels, so 696 of 70,008 labeled training rows (0.99%, January 2016) miss at least one window. The raw lags miss none.
+- **Rejected alternatives:**
+  - per-capita lags keep the gap;
+  - reweighting training rows leaves the features biased;
+  - deferring everything to modeling gives no evidence before a model exists.
+- **What Model Development checks** (ADR-025): it compares raw lags, self-relative lags, and self-relative lags plus the baseline level on 2024 validation recall per slice and the worst-group gap, and records the inputs it picks. Grading keeps watching the same groups.
+
 ## Evaluation criteria
 
 | Criterion | Where | State |
@@ -361,8 +412,8 @@ All four were run in a clean clone on 2026-10-27, with team credentials: the pre
 | Pipeline flow optimization (Gantt) | [Pipeline performance](../README.md#pipeline-performance-37) in the root README | done (#37): legacy years in parallel, full build 124 s to 73 s |
 | Schema and statistics generation | `schema_stats.py` in [Run it step by step](#run-it-step-by-step); runbook, "Schema and statistics (every run)" | done (#35): every run, with data docs and `drift.json` |
 | Anomaly detection and alerts | Great Expectations checks in [Run it step by step](#run-it-step-by-step); `ALERT` line and Slack in [Run it in Airflow](#run-it-in-airflow) | done (#17, #34) |
-| Bias detection and mitigation | [reports/bias/report.md](reports/bias/report.md) (105 of 314 gaps significant); Bias slicing in [What the pipeline does](#what-the-pipeline-does); runbook, "Bias slicing (#32)"; [data card](../docs/data/data-card.md), "Reported demand, not need" | slicing done ([#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32)): the `bias_slicing` task and DVC stage; mitigation in progress in [#33](https://github.com/PritKalariya/boston-resilience-twin/issues/33), which adds its section here when it merges |
-| Test modules | `tests/`, 986 tests with 97.7% coverage (`docker compose run --rm --build test`), run in CI on every PR (`.github/workflows/ci.yml`) | done (#38) |
+| Bias detection and mitigation | [Bias detection and mitigation](#bias-detection-and-mitigation); [reports/bias/report.md](reports/bias/report.md) (105 of 314 gaps significant) and [mitigation.md](reports/bias/mitigation.md); Bias slicing in [What the pipeline does](#what-the-pipeline-does); runbook, "Bias slicing (#32)"; [data card](../docs/data/data-card.md), "Reported demand, not need" | done: slicing ([#32](https://github.com/PritKalariya/boston-resilience-twin/issues/32)), the `bias_slicing` task and DVC stage; mitigation ([#33](https://github.com/PritKalariya/boston-resilience-twin/issues/33), [ADR-025](../docs/decisions/ADR-025-bias-mitigation.md)), self-relative 311 lags with before and after numbers in [Bias detection and mitigation](#bias-detection-and-mitigation) |
+| Test modules | `tests/`, 999 passed and 1 skipped with 97.8% coverage (`docker compose run --rm --build test`; 986 passed and 14 skipped on a host Python), run in CI on every PR (`.github/workflows/ci.yml`) | done (#38) |
 | Reproducibility | [Environment setup](#environment-setup) to [Small run](#small-run-one-year), [DVC and reproducibility](#dvc-and-reproducibility) | done here; second-machine test [#42](https://github.com/PritKalariya/boston-resilience-twin/issues/42) |
 | Error handling and logging | runbook, "Run the data pipeline DAG": retries, input checks, `check_range` (#36) | done |
 

@@ -50,6 +50,8 @@ Every feature for day D uses only what is known at the cutoff, 18:00 Boston time
 
 **311 lags.** `check_no_leakage` recomputes every 311 feature from the counts by date (each group's count on `features_last_day` and the sums over the windows that end there) and stops on any difference. `features_last_day` is set to D-2, so the check that it is at least 2 days before D cannot fail by itself; this comparison fails when a lag reads a later day than `features_last_day` says.
 
+**Self-relative 311 lags (#33, ADR-025).** `{group}_rel_last` and `{group}_rel3`, `rel7`, `rel28` divide the raw lag by the neighborhood's own ADR-005 baseline mean over the same days, as (requests + 1) / (baseline + 1). They are the default model 311 inputs; the raw lags stay in the table with `use_in_model = no`, because #32 found the raw counts carry a reporting gap (poorer and more diverse neighborhoods file fewer requests per resident). The baseline uses only the same weeks of the 3 previous years, so it is known before D, and `check_no_leakage` reads these by date too (`relative_by_date`). They start on 2016-01-08 (`rel_last`) to 2016-02-04 (`rel28`), just after the first labels on 2016-01-06: 696 of the 70,008 labeled training rows (0.99%), up to 2016-02-03, miss at least one window. Model Development compares them with the raw lags before the model inputs are fixed (ADR-025).
+
 **Alerts (`alert_history.py`, ADR-014 Option A+).**
 - An alert counts for D when all three hold:
   - its first bulletin came before the cutoff;

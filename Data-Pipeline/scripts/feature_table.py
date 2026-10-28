@@ -11,6 +11,18 @@ out of the model:
   sums over the 3, 7 and 28 days that end there, from daily_counts.parquet
   (#15). Day D-1 is not over at the cutoff, so min_lag is 2. Flooding is left
   out: it has no live source (ADR-003 live rule).
+- 311, self-relative (#33, ADR-025): the same count and sums over the
+  neighborhood's own ADR-005 baseline mean for the same days, as
+  (requests + 1) / (baseline + 1). 311 counts are reported demand, and poorer
+  and more diverse neighborhoods report less (#32), so the raw counts carry
+  that gap; relative to its own history a neighborhood's storm shows the same
+  way whatever it usually reports, as the labels already compare it. The
+  baseline uses only the same weeks of the 3 previous years, so it is known
+  before D. Missing until a neighborhood has a baseline: they start on
+  2016-01-08 (rel_last) to 2016-02-04 (rel28), just after the first labels
+  (2016-01-06), so 0.99% of labeled training rows miss at least one window.
+  They are the default model inputs in place of the raw counts
+  (feature_catalog.csv), until Model Development compares the two.
 - NWS alerts (ADR-014, Option A+): per storm group, the alerts whose first
   bulletin came before the cutoff, whose first-announced end is after D begins
   and that were not cancelled or upgraded before the cutoff, and whether one of
@@ -34,7 +46,7 @@ out of the model:
 Leakage: each row stores the last 311 day it uses (`features_last_day`) and the
 moment the forecast is made (`forecast_cutoff_utc`); the run stops if a row
 reaches past D - min_lag, a 311 feature is not what the counts give when read by
-date up to features_last_day (lags_by_date), the cutoff is not before D starts,
+date up to features_last_day (lags_by_date, relative_by_date), the cutoff is not before D starts,
 a row after the training years takes observed weather of its own day, or a
 forecast it uses became available only after the cutoff (`wx_known_by_utc`).
 It also stops before any of this when a day from --start to --end is not in the
@@ -52,7 +64,7 @@ import pandas as pd
 
 from alert_history import alert_feature_names, alert_features, cutoff_utc, day_start_utc
 from daily_counts import STORM_GROUPS
-from surge_labels import check_counts, load_settings, requested_days
+from surge_labels import check_counts, group_baselines, load_settings, requested_days
 from tide_features import TIDE_FEATURES, tide_features
 from weather_features import OBSERVED_UNTIL, WEATHER_FEATURES, weather_features
 
@@ -84,6 +96,20 @@ def feature_names(groups: list[str]) -> list[str]:
     return names
 
 
+def relative_names(groups: list[str]) -> list[str]:
+    """The self-relative 311 features (#33), one per raw one in feature_names."""
+    names = []
+    for group in groups:
+        names.append(f"{group}_rel_last")
+        names += [f"{group}_rel{w}" for w in WINDOWS]
+    return names
+
+
+def _relative(raw: pd.Series | np.ndarray, base: pd.Series | np.ndarray):
+    """(requests + 1) / (baseline + 1): 1 is a usual day for that neighborhood; missing without a baseline."""
+    return (raw + 1) / (base + 1)
+
+
 def lag_features(counts: pd.DataFrame, groups: list[str], min_lag: int) -> pd.DataFrame:
     """Per unit and day, each group's count on day D - min_lag and its sums over WINDOWS ending there.
 
@@ -111,6 +137,42 @@ def lag_features(counts: pd.DataFrame, groups: list[str], min_lag: int) -> pd.Da
     out = out.reset_index()
     out.insert(2, "features_last_day", out["date"] - pd.Timedelta(days=min_lag))
     return out
+
+
+def baseline_frame(counts: pd.DataFrame) -> pd.DataFrame:
+    """Each unit, day and storm group's ADR-005 baseline mean (method A, from baseline_requests, as the
+    labels use it), missing where the history is too short."""
+    cells = group_baselines(check_counts(counts))
+    return cells[["unit", "date", "storm_group", "mean"]]
+
+
+def relative_features(counts: pd.DataFrame, groups: list[str], min_lag: int) -> pd.DataFrame:
+    """Per unit and day, the self-relative 311 features: each group's count on day D - min_lag and its
+    sums over WINDOWS ending there, each over the same days' baseline means (_relative). Missing
+    where a day has no baseline, never filled (ADR-003)."""
+    if min_lag < 1:
+        raise ValueError("min_lag must be 1 or more, or a feature would use the day it forecasts")
+    df = check_counts(counts)
+    base = baseline_frame(df)
+    keys = df[["unit", "date"]].drop_duplicates().sort_values(["unit", "date"], ignore_index=True)
+    out = keys.set_index(["unit", "date"])
+    for group in groups:
+        part = df[df["storm_group"] == group].merge(base, on=["unit", "date", "storm_group"], how="left")
+        frames = []
+        for unit, rows in part.groupby("unit", sort=True):
+            rows = rows.set_index("date").sort_index()
+            series, mean = rows["requests"].astype(float), rows["mean"].astype(float)
+            feats = {f"{group}_rel_last": _relative(series, mean).shift(min_lag)}
+            for w in WINDOWS:
+                raw = series.rolling(w, min_periods=w).sum()
+                expected = mean.rolling(w, min_periods=w).sum()  # missing if any day of the window has no baseline
+                feats[f"{group}_rel{w}"] = _relative(raw, expected).shift(min_lag)
+            frames.append(pd.DataFrame(feats).assign(unit=unit).reset_index().set_index(["unit", "date"]))
+        if frames:
+            out = out.join(pd.concat(frames))
+        else:
+            out = out.assign(**{name: pd.Series(dtype=float) for name in relative_names([group])})
+    return out.reset_index()
 
 
 def calendar_features(dates: pd.Series) -> pd.DataFrame:
@@ -168,23 +230,45 @@ def lags_by_date(counts: pd.DataFrame, rows: pd.DataFrame, groups: list[str]) ->
     features_last_day and its sums over WINDOWS ending there, missing where a day they need is not
     in the counts. lag_features shifts rows; this looks the days up, so the two agree only if every
     feature reads exactly the days up to features_last_day."""
+    return _by_date(check_counts(counts), rows, groups, "requests")
+
+
+def relative_by_date(counts: pd.DataFrame, rows: pd.DataFrame, groups: list[str]) -> pd.DataFrame:
+    """The self-relative 311 features of each row recomputed by date, as lags_by_date does for the raw
+    ones: the counts and the baseline means read by date up to features_last_day, then _relative.
+    A window with a day that has no baseline is missing, as in relative_features."""
     df = check_counts(counts)
+    raw = _by_date(df, rows, groups, "requests")
+    base = _by_date(baseline_frame(df), rows, groups, "mean")
+    out = pd.DataFrame(index=rows.index)
+    for raw_name, name in zip(feature_names(groups), relative_names(groups)):
+        out[name] = _relative(raw[raw_name], base[raw_name])
+    return out
+
+
+def _by_date(df: pd.DataFrame, rows: pd.DataFrame, groups: list[str], column: str) -> pd.DataFrame:
+    """column of each group read by date for every row: the value on features_last_day and the sums
+    over WINDOWS ending there, named like feature_names; missing where a day is not in df or a
+    value in the window is missing."""
     first = df["date"].min()
     calendar = pd.date_range(first, df["date"].max())
     units = pd.Index(sorted(df["unit"].unique()))
-    column = units.get_indexer(rows["unit"])
+    unit_column = units.get_indexer(rows["unit"])
     position = ((pd.DatetimeIndex(rows["features_last_day"]) - first) // pd.Timedelta(days=1)).to_numpy()
-    known = (column >= 0) & (position >= 0) & (position < len(calendar))
-    col, pos = np.where(known, column, 0), np.where(known, position, 0)
+    known = (unit_column >= 0) & (position >= 0) & (position < len(calendar))
+    col, pos = np.where(known, unit_column, 0), np.where(known, position, 0)
     out = pd.DataFrame(index=rows.index)
     for group in groups:
-        grid = (df[df["storm_group"] == group].pivot(index="date", columns="unit", values="requests")
+        grid = (df[df["storm_group"] == group].pivot(index="date", columns="unit", values=column)
                 .reindex(index=calendar, columns=units).to_numpy(dtype="float64"))
-        before = np.vstack([np.zeros((1, len(units))), grid.cumsum(axis=0)])  # before[i]: days 0 to i - 1
+        gaps = np.isnan(grid)
+        before = np.vstack([np.zeros((1, len(units))), np.where(gaps, 0, grid).cumsum(axis=0)])  # days 0 to i - 1
+        holes = np.vstack([np.zeros((1, len(units))), gaps.cumsum(axis=0)])
         out[f"{group}_last"] = np.where(known, grid[pos, col], np.nan)
         for w in WINDOWS:
-            whole = known & (position >= w - 1)
-            out[f"{group}_sum{w}"] = np.where(whole, before[pos + 1, col] - before[np.maximum(pos + 1 - w, 0), col], np.nan)
+            start = np.maximum(pos + 1 - w, 0)
+            whole = known & (position >= w - 1) & (holes[pos + 1, col] - holes[start, col] == 0)
+            out[f"{group}_sum{w}"] = np.where(whole, before[pos + 1, col] - before[start, col], np.nan)
     return out
 
 
@@ -211,6 +295,17 @@ def check_no_leakage(features: pd.DataFrame, min_lag: int, counts: pd.DataFrame 
                 worst = features.loc[wrong, ["unit", "date", "features_last_day", name]].assign(by_date=want[wrong])
                 raise AssertionError(f"{name} is not the counts up to features_last_day, read by date:\n"
                                      f"{worst.head(3).to_string(index=False)}")
+        relative = [name for name in relative_names(list(groups)) if name in features]
+        if relative:
+            expected = relative_by_date(counts, features, list(groups))
+            for name in relative:
+                got, want = features[name].to_numpy(dtype="float64"), expected[name].to_numpy()
+                # rolling sums and differences of cumulative sums of the means differ in the last bits
+                wrong = ~(np.isclose(got, want, rtol=1e-9, atol=0) | (np.isnan(got) & np.isnan(want)))
+                if wrong.any():
+                    worst = features.loc[wrong, ["unit", "date", "features_last_day", name]].assign(by_date=want[wrong])
+                    raise AssertionError(f"{name} is not the counts and baselines up to features_last_day, read by "
+                                         f"date:\n{worst.head(3).to_string(index=False)}")
     if "forecast_cutoff_utc" in features:
         begins = day_start_utc(pd.DatetimeIndex(features["date"])).as_unit("ns").asi8
         cutoff = pd.DatetimeIndex(features["forecast_cutoff_utc"]).as_unit("ns").asi8
@@ -252,12 +347,12 @@ def build_features(
     one row per day (weather_features, tide_features) and must cover every day
     the table writes.
     """
-    table = lag_features(counts, groups, min_lag)
+    table = lag_features(counts, groups, min_lag).merge(relative_features(counts, groups, min_lag), on=["unit", "date"])
     days = pd.DatetimeIndex(table["date"])
     table.insert(3, "forecast_cutoff_utc", cutoff_utc(days, cutoff_local) if len(days) else
                  pd.Series(dtype="datetime64[ns, UTC]"))
     table = pd.concat([table, calendar_features(table["date"])], axis=1)
-    columns = [*KEYS, *CALENDAR, *feature_names(groups)]
+    columns = [*KEYS, *CALENDAR, *feature_names(groups), *relative_names(groups)]
     if alerts is not None:
         daily = alert_features(alerts, table["date"], cutoff_local, STORM_GROUPS).drop(columns="forecast_cutoff_utc")
         daily["date"] = daily["date"].astype(table["date"].dtype)  # same time unit on both sides of the merge
