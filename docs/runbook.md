@@ -730,13 +730,22 @@ files it names pushed to the remote. The versions so far:
 | `0812b8b` | #94, a rebuild after rebasing onto #18 (2026-10-27) | newer weather, alert and static downloads, so `features.parquet` changed; the 311 parquet files were rewritten with the same rows; `daily_counts` and `labels.parquet` are identical |
 
 **Making one.** From `Data-Pipeline/`, after new public data (the 2026 legacy
-311 file and the new-system export refresh daily):
+311 file and the new-system export refresh daily). `dvc repro` alone does not
+download it: the download stages depend only on their code and config, so with
+nothing new on disk DVC prints `Stage 'ingest_legacy_311' didn't change,
+skipping`. Fetch first, then rebuild:
 
 ```bash
-dvc repro                                  # reruns what changed; dvc.lock changes with it
+python scripts/pipeline_steps.py ingest_legacy_311   # replaces a file only when its content changed
+python scripts/pipeline_steps.py ingest_new_311
+dvc status                                 # the download stages show "changed outs"
+dvc repro                                  # reruns them and everything after; dvc.lock changes
 python scripts/dvc_push.py                 # push first, so the commit never points at missing data
-git add dvc.lock && git commit             # the user does git writes
+git add dvc.lock && git commit
 ```
+
+A full `daily_pipeline` DAG run fetches the same files and can replace the two
+download commands (Srikar, #99).
 
 Do not force the download stages (`dvc repro -f ingest_...`) to make a version.
 Without the schedule state in `Data-Pipeline/data/state/`, they download every
