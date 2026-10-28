@@ -10,6 +10,8 @@ IE7374 MLOps, Northeastern University, Fall 2026.
 - Grades every forecast against the next day's 311 reports, tracks fairness across neighborhoods, detects drift, and retrains automatically.
 - Core innovation: a fairness-aware retraining controller that decides when and how to retrain, compared against fixed schedules.
 
+**Data Pipeline submission:** [Data-Pipeline/README.md](Data-Pipeline/README.md) has the full pipeline documentation: setup, getting the data, running each step and the DAG, a one-year small run, code structure, DVC, and where each evaluation criterion is met.
+
 ## Repository structure
 
 ```
@@ -47,7 +49,8 @@ cd boston-resilience-twin
 On Linux (the VM too), first save your user id in `.env` so the files Airflow writes to `Data-Pipeline/logs/` stay owned by you. macOS and Windows skip this step and need no `.env`:
 
 ```bash
-echo "AIRFLOW_UID=$(id -u)" > .env
+cp -n .env.example .env
+sed -i "s/^AIRFLOW_UID=.*/AIRFLOW_UID=$(id -u)/" .env
 ```
 
 Then, on every system:
