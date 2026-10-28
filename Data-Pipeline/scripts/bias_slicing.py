@@ -189,6 +189,7 @@ def request_group(units: pd.Series, groups: pd.Series) -> pd.Series:
 
 
 def check_columns(df: pd.DataFrame, needed: set[str], name: str) -> None:
+    """Fail naming the input when it lacks a needed column or has no rows."""
     missing = needed - set(df.columns)
     if missing:
         raise ValueError(f"{name} is missing columns: {sorted(missing)}")

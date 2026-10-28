@@ -6,14 +6,22 @@ forecast_cutoff_utc,key,labels_features.csv,2015-01-01,n/a,n/a,no,18:00 Boston t
 day_of_week,calendar,date,2015-01-01,pass,pass,yes,known for any day
 month,calendar,date,2015-01-01,pass,pass,yes,known for any day
 day_of_year,calendar,date,2015-01-01,pass,pass,yes,known for any day
-snow_ice_last,311,daily_counts.parquet (#15),2015-01-03,pass,pass,yes,count on day D-2; snow has not been through the new 311 system yet (#7 data card)
-snow_ice_sum3,311,daily_counts.parquet (#15),2015-01-05,pass,pass,yes,days D-4 to D-2
-snow_ice_sum7,311,daily_counts.parquet (#15),2015-01-09,pass,pass,yes,days D-8 to D-2
-snow_ice_sum28,311,daily_counts.parquet (#15),2015-01-30,pass,pass,yes,days D-29 to D-2
-tree_last,311,daily_counts.parquet (#15),2015-01-03,pass,pass,yes,count on day D-2
-tree_sum3,311,daily_counts.parquet (#15),2015-01-05,pass,pass,yes,days D-4 to D-2
-tree_sum7,311,daily_counts.parquet (#15),2015-01-09,pass,pass,yes,days D-8 to D-2
-tree_sum28,311,daily_counts.parquet (#15),2015-01-30,pass,pass,yes,days D-29 to D-2
+snow_ice_last,311,daily_counts.parquet (#15),2015-01-03,pass,pass,no,"count on day D-2; snow has not been through the new 311 system yet (#7 data card); kept for the record: the model uses the self-relative version, since raw counts carry the reporting gap (#33, ADR-025)"
+snow_ice_sum3,311,daily_counts.parquet (#15),2015-01-05,pass,pass,no,"days D-4 to D-2; kept for the record: the model uses the self-relative version, since raw counts carry the reporting gap (#33, ADR-025)"
+snow_ice_sum7,311,daily_counts.parquet (#15),2015-01-09,pass,pass,no,"days D-8 to D-2; kept for the record: the model uses the self-relative version, since raw counts carry the reporting gap (#33, ADR-025)"
+snow_ice_sum28,311,daily_counts.parquet (#15),2015-01-30,pass,pass,no,"days D-29 to D-2; kept for the record: the model uses the self-relative version, since raw counts carry the reporting gap (#33, ADR-025)"
+tree_last,311,daily_counts.parquet (#15),2015-01-03,pass,pass,no,"count on day D-2; kept for the record: the model uses the self-relative version, since raw counts carry the reporting gap (#33, ADR-025)"
+tree_sum3,311,daily_counts.parquet (#15),2015-01-05,pass,pass,no,"days D-4 to D-2; kept for the record: the model uses the self-relative version, since raw counts carry the reporting gap (#33, ADR-025)"
+tree_sum7,311,daily_counts.parquet (#15),2015-01-09,pass,pass,no,"days D-8 to D-2; kept for the record: the model uses the self-relative version, since raw counts carry the reporting gap (#33, ADR-025)"
+tree_sum28,311,daily_counts.parquet (#15),2015-01-30,pass,pass,no,"days D-29 to D-2; kept for the record: the model uses the self-relative version, since raw counts carry the reporting gap (#33, ADR-025)"
+snow_ice_rel_last,311,daily_counts.parquet (#15),2016-01-08,pass,pass,yes,"(requests + 1) / (ADR-005 baseline mean + 1) of the neighborhood for days D-2; the baseline starts in 2016 as the labels do (#33, ADR-025)"
+snow_ice_rel3,311,daily_counts.parquet (#15),2016-01-10,pass,pass,yes,"(requests + 1) / (ADR-005 baseline mean + 1) of the neighborhood for days D-4 to D-2; the baseline starts in 2016 as the labels do (#33, ADR-025)"
+snow_ice_rel7,311,daily_counts.parquet (#15),2016-01-14,pass,pass,yes,"(requests + 1) / (ADR-005 baseline mean + 1) of the neighborhood for days D-8 to D-2; the baseline starts in 2016 as the labels do (#33, ADR-025)"
+snow_ice_rel28,311,daily_counts.parquet (#15),2016-02-04,pass,pass,yes,"(requests + 1) / (ADR-005 baseline mean + 1) of the neighborhood for days D-29 to D-2; the baseline starts in 2016 as the labels do (#33, ADR-025)"
+tree_rel_last,311,daily_counts.parquet (#15),2016-01-08,pass,pass,yes,"(requests + 1) / (ADR-005 baseline mean + 1) of the neighborhood for days D-2; the baseline starts in 2016 as the labels do (#33, ADR-025)"
+tree_rel3,311,daily_counts.parquet (#15),2016-01-10,pass,pass,yes,"(requests + 1) / (ADR-005 baseline mean + 1) of the neighborhood for days D-4 to D-2; the baseline starts in 2016 as the labels do (#33, ADR-025)"
+tree_rel7,311,daily_counts.parquet (#15),2016-01-14,pass,pass,yes,"(requests + 1) / (ADR-005 baseline mean + 1) of the neighborhood for days D-8 to D-2; the baseline starts in 2016 as the labels do (#33, ADR-025)"
+tree_rel28,311,daily_counts.parquet (#15),2016-02-04,pass,pass,yes,"(requests + 1) / (ADR-005 baseline mean + 1) of the neighborhood for days D-29 to D-2; the baseline starts in 2016 as the labels do (#33, ADR-025)"
 flooding_last,311,daily_counts.parquet (#15),2015-01-03,pass,fail,excluded,not in feature_groups: flooding requests have no new-system category so live counts are zero (ADR-003 live rule)
 flooding_sum3,311,daily_counts.parquet (#15),2015-01-05,pass,fail,excluded,as flooding_last
 flooding_sum7,311,daily_counts.parquet (#15),2015-01-09,pass,fail,excluded,as flooding_last

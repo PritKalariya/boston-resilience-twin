@@ -654,6 +654,18 @@ python Data-Pipeline/scripts/bias_slicing.py   # about 40 s on the full build
 - **Run only this task in Airflow** with `docker compose exec airflow-scheduler airflow tasks test daily_pipeline bias_slicing`, after `docker compose exec airflow-scheduler airflow dags pause daily_pipeline`. The test creates a temporary run, and while the DAG is unpaused the scheduler starts that run's other tasks too, downloads and `ingest_static_layers` included, which clears `interim/static/` while the test reads it.
 - **Missing locations** count under the neighborhoods their recorded 311 neighborhood name covers, learned from the placed requests with the same name (`name_unit_min_share`, `name_min_placed`); the report lists the names. Most requests without coordinates have no usable name, so these shares are lower bounds.
 
+## Bias mitigation (#33, ADR-025)
+
+The model uses self-relative 311 lags (`{group}_rel_last`, `{group}_rel3`, `rel7`, `rel28` in `features.parquet`), not the raw counts, because the raw counts carry the reporting gap #32 found. `feature_table` builds both; `feature_catalog.csv` marks which ones the model uses.
+
+```bash
+python Data-Pipeline/scripts/bias_mitigation.py   # before and after numbers, about 6 s
+```
+
+- **Reads** `features.parquet`, `labels.parquet`, the static layers, `bias_slicing.csv` (`ratio_min`) and `labels_features.csv` (`feature_groups`).
+- **Writes** `mitigation.csv` (every group mean) and `mitigation.md` to `Data-Pipeline/data/interim/reports/bias/`. It is not a DAG task or DVC stage: rerun it after a `dvc repro` that changes the features or labels, and copy both files to `Data-Pipeline/reports/bias/` with the #32 files.
+- **A self-relative lag is missing** until the neighborhood has a baseline (from January 2016), never filled; the leakage check reads it by date like the raw lags.
+
 ## Versioned data (DVC)
 
 The DVC remote is `gs://boston-resilience-twin-data/dvc` (`.dvc/config`), a

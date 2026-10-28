@@ -25,6 +25,9 @@ from feature_table import (
     check_no_leakage,
     feature_names,
     lag_features,
+    relative_by_date,
+    relative_features,
+    relative_names,
     static_attributes,
     written_days,
 )
@@ -170,6 +173,69 @@ def test_a_lag_off_by_one_day_stops_the_build_although_features_last_day_says_d_
 def test_a_lag_below_one_is_refused():
     with pytest.raises(ValueError, match="1 or more"):
         lag_features(counts_table(), GROUPS, 0)
+    with pytest.raises(ValueError, match="1 or more"):
+        relative_features(counts_table(), GROUPS, 0)
+
+
+# Self-relative 311 lags (#33, ADR-025)
+
+LONG = {"days": 1400, "start": "2015-01-01"}  # three years of history before the checked days
+
+
+def test_self_relative_lags_divide_by_the_neighborhoods_own_baseline():
+    # tree on day i has i requests, so the ADR-005 mean of a day with all 3 years of history is i - 730.
+    table = build_features(counts_table(**LONG), GROUPS, LAG)
+    d = row(table, "East", pd.Timestamp("2015-01-01") + pd.Timedelta(days=1200))  # D - 2 is day 1198
+    assert d["tree_rel_last"] == pytest.approx((1198 + 1) / (1198 - 730 + 1))
+    assert d["tree_rel3"] == pytest.approx((3 * 1197 + 1) / (3 * (1197 - 730) + 1))
+    assert d["snow_ice_rel_last"] == pytest.approx((2 * 1198 + 1) / (2 * (1198 - 730) + 1))
+
+
+def test_self_relative_lags_are_missing_until_there_is_a_baseline():
+    table = build_features(counts_table(**LONG), GROUPS, LAG)
+    first_year = table[table["date"] < "2016-01-01"]
+    assert first_year[relative_names(GROUPS)].isna().all().all()
+    assert first_year["tree_sum3"].notna().any()  # the raw lags are there
+    later = table[table["date"] >= "2016-03-01"]
+    assert later[relative_names(GROUPS)].notna().all().all()
+
+
+def test_a_neighborhood_that_reports_half_as_much_gets_about_the_same_self_relative_lags():
+    # The reporting gap (#32): West files half of East's requests for the same storms.
+    counts = counts_table(**LONG)
+    west = counts["unit"] == "West"
+    counts.loc[west, ["requests", "baseline_requests"]] = counts.loc[west, "requests"] // 2
+    table = build_features(counts, GROUPS, LAG)
+    day = pd.Timestamp("2015-01-01") + pd.Timedelta(days=1300)
+    east, west = row(table, "East", day), row(table, "West", day)
+    assert east["tree_sum7"] / west["tree_sum7"] == pytest.approx(2, rel=0.01)
+    assert east["tree_rel7"] / west["tree_rel7"] == pytest.approx(1, rel=0.01)
+
+
+def test_changing_the_day_before_or_later_does_not_change_the_self_relative_lags():
+    counts = counts_table(**LONG)
+    target = pd.Timestamp("2015-01-01") + pd.Timedelta(days=1200)
+    before = row(build_features(counts, GROUPS, LAG), "East", target)[relative_names(GROUPS)]
+    changed = counts.copy()
+    changed.loc[changed["date"] >= target - pd.Timedelta(days=LAG - 1), ["requests", "baseline_requests"]] = 999
+    after = row(build_features(changed, GROUPS, LAG), "East", target)[relative_names(GROUPS)]
+    pd.testing.assert_series_equal(before, after)
+
+
+def test_the_leakage_check_reads_the_self_relative_lags_by_date(monkeypatch):
+    counts = counts_table(**LONG)
+    table = build_features(counts, GROUPS, LAG)
+    check_no_leakage(table, LAG, counts, GROUPS)
+    expected = relative_by_date(counts, table, GROUPS)
+    assert np.allclose(table["tree_rel7"], expected["tree_rel7"], equal_nan=True)
+    window_into_d = table.assign(tree_rel3=table.groupby("unit")["tree_rel3"].shift(-LAG))
+    with pytest.raises(AssertionError, match="tree_rel3 is not the counts and baselines up to features_last_day"):
+        check_no_leakage(window_into_d, LAG, counts, GROUPS)
+
+    real = feature_table.relative_features
+    monkeypatch.setattr(feature_table, "relative_features", lambda c, g, m: real(c, g, m - 1))  # reads D - 1
+    with pytest.raises(AssertionError, match="is not the counts and baselines"):
+        build_features(counts, GROUPS, LAG)
 
 
 def test_flooding_has_no_311_features_with_the_repo_settings():
@@ -186,7 +252,7 @@ def test_calendar_fields():
 
 def test_columns_and_one_row_per_unit_and_day():
     table = build_features(counts_table(days=50), GROUPS, LAG)
-    assert list(table.columns) == [*KEYS, *CALENDAR, *feature_names(GROUPS)]
+    assert list(table.columns) == [*KEYS, *CALENDAR, *feature_names(GROUPS), *relative_names(GROUPS)]
     assert len(table) == 2 * 50 and not table.duplicated(["unit", "date"]).any()
     assert len(feature_names(GROUPS)) == len(GROUPS) * (1 + len(WINDOWS))
 
@@ -236,7 +302,7 @@ def test_full_table_has_every_feature_group(tmp_path):
     static = static_attributes(make_static_dir(tmp_path / "static"))
     alerts = alerts_table(("flooding", "W", "2016-02-14 12:00", "2016-02-16 00:00"))
     table = build_features(counts_table(), GROUPS, LAG, alerts=alerts, static=static)
-    assert list(table.columns) == [*KEYS, *CALENDAR, *feature_names(GROUPS), *alert_feature_names(STORM_GROUPS),
+    assert list(table.columns) == [*KEYS, *CALENDAR, *feature_names(GROUPS), *relative_names(GROUPS), *alert_feature_names(STORM_GROUPS),
                                    *STATIC_FEATURES]
     assert len(table) == 2 * 120 and not table.duplicated(["unit", "date"]).any()
     assert table.groupby("unit")[STATIC_FEATURES].nunique().max().max() == 1
@@ -249,7 +315,7 @@ def test_weather_and_tides_join_by_date_and_are_the_same_for_every_unit():
     counts = counts_table()
     days = written_days(counts)
     table = build_features(counts, GROUPS, LAG, weather=weather_frame(days), tides=tide_frame(days))
-    assert list(table.columns) == [*KEYS, *CALENDAR, *feature_names(GROUPS), *weather_columns(LAG), *TIDE_COLUMNS]
+    assert list(table.columns) == [*KEYS, *CALENDAR, *feature_names(GROUPS), *relative_names(GROUPS), *weather_columns(LAG), *TIDE_COLUMNS]
     on_day = table[table["date"] == "2016-02-15"][[*weather_columns(LAG), *TIDE_COLUMNS]]
     assert len(on_day) == 2 and len(on_day.drop_duplicates()) == 1
 
@@ -371,7 +437,7 @@ def test_empty_counts_give_an_empty_table(tmp_path):
     alerts = alerts_table(("snow_ice", "W", "2016-02-14 12:00", "2016-02-16 00:00"))
     table = build_features(counts_table().iloc[0:0], GROUPS, LAG, alerts=alerts, static=static)
     assert table.empty
-    assert list(table.columns) == [*KEYS, *CALENDAR, *feature_names(GROUPS), *alert_feature_names(STORM_GROUPS),
+    assert list(table.columns) == [*KEYS, *CALENDAR, *feature_names(GROUPS), *relative_names(GROUPS), *alert_feature_names(STORM_GROUPS),
                                    *STATIC_FEATURES]
 
 
