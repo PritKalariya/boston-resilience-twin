@@ -65,19 +65,20 @@ under `/opt/airflow/repo` (scripts, config and `docs/data` read-only,
 `Data-Pipeline/data` writable) and puts `Data-Pipeline/scripts` on
 `PYTHONPATH`, so tasks import the scripts (ADR-017).
 
-- Nineteen tasks run scripts: the 311 downloads (`ingest_legacy_311` and
+- Twenty tasks run scripts: the 311 downloads (`ingest_legacy_311` and
   `ingest_new_311`, #6), `ingest_static_layers`, `ingest_alert_history`, the
   five weather and tide downloads (`ingest_noaa_logan`, `ingest_nws_forecasts`,
   `ingest_nws_alerts`, `ingest_tides` and `ingest_open_meteo`, #7 and #8),
   `validate_raw`, `parse_legacy_311`, `parse_new_311`, `combine_311`,
   `spatial_join`, `daily_counts`, `surge_labels`, `feature_table`,
-  `validate_processed` and `schema_and_statistics`. `parse_legacy_311` runs
+  `validate_processed`, `schema_and_statistics` and `bias_slicing`. `parse_legacy_311` runs
   once per legacy year, at most 4 at a time by default (`LEGACY_PARALLEL`),
   and `merge_legacy_311` joins the years with `legacy_311.read_years`' rule
   for repeated case ids (#37). `check_range` starts the run and `push_data`
   ends it.
-- The other one, `bias_slicing`, is a placeholder. It logs the issue that builds it
-  (`PLANNED` in `Data-Pipeline/scripts/pipeline_steps.py`) and succeeds.
+- No task is a placeholder now. A task listed in `PLANNED`
+  (`Data-Pipeline/scripts/pipeline_steps.py`) logs the issue that builds it and
+  succeeds.
 - `ingest_legacy_311` and then `ingest_new_311` refresh the raw 311 files in
   `Data-Pipeline/data/raw/311/` on their schedule, for any range (see "311
   ingestion" below).
@@ -637,6 +638,22 @@ python Data-Pipeline/scripts/feature_table.py --noaa-dir Data-Pipeline/data/raw/
 
 **Slices.** A label needs the 3 years before its day and a feature the 28 days before, so in a slice both tasks read the full build's `Data-Pipeline/data/processed/daily_counts.parquet` and write only the slice's days. Run the full build once before a slice. If its counts end before the slice does, both tasks stop before writing and name the missing days (`daily counts cover ... have no counts`); run the full build again, then the slice.
 
+## Bias slicing (#32)
+
+`bias_slicing.py` slices the labels and the located requests by neighborhood, ACS group, flood zone and 311 system, and tests each gap. It is the `bias_slicing` task, after `validate_processed`.
+
+```bash
+python Data-Pipeline/scripts/bias_slicing.py   # about 40 s on the full build
+```
+
+- **Reads** `Data-Pipeline/data/processed/labels.parquet` (`surge_labels`), `Data-Pipeline/data/interim/311_located.parquet` (`spatial_join`) and the static layers in `Data-Pipeline/data/interim/static/`; thresholds in `Data-Pipeline/config/bias_slicing.csv`.
+- **Writes** `slices.csv` (every rate, with numerator and denominator), `gaps.csv` (every test) and `report.md` to `Data-Pipeline/data/interim/reports/bias/` (a slice's own `interim/reports/bias/` for a slice run). It prints how many gaps are significant; a gap never fails the task.
+- **Reviewed copy.** After a `dvc repro` whose results go to review, copy the three files to `Data-Pipeline/reports/bias/` in the PR, with the refreshed `dvc.lock` and the outputs pushed, so `dvc pull` reproduces the committed report; note the data dates in `docs/status.md`.
+- **DVC.** It is the `bias_slicing` stage of `Data-Pipeline/dvc.yaml` (ADR-024), so `dvc repro` reruns it when the labels, the located requests, the static layers or `bias_slicing.csv` change.
+- **A significant gap** fails the four-fifths rule (`ratio_min`) and its test gives p under `alpha`. A group with no surges is tested like any other. The tests assume independent days, while one storm raises many at once, so read the ratio first; and the system slice compares two different years, so weather is mixed into it. Change either only in a reviewed PR; #33 decides what to do about each gap.
+- **Run only this task in Airflow** with `docker compose exec airflow-scheduler airflow tasks test daily_pipeline bias_slicing`, after `docker compose exec airflow-scheduler airflow dags pause daily_pipeline`. The test creates a temporary run, and while the DAG is unpaused the scheduler starts that run's other tasks too, downloads and `ingest_static_layers` included, which clears `interim/static/` while the test reads it.
+- **Missing locations** count under the neighborhoods their recorded 311 neighborhood name covers, learned from the placed requests with the same name (`name_unit_min_share`, `name_min_placed`); the report lists the names. Most requests without coordinates have no usable name, so these shares are lower bounds.
+
 ## Versioned data (DVC)
 
 The DVC remote is `gs://boston-resilience-twin-data/dvc` (`.dvc/config`), a
@@ -701,13 +718,22 @@ files it names pushed to the remote. The versions so far:
 | `0812b8b` | #94, a rebuild after rebasing onto #18 (2026-10-27) | newer weather, alert and static downloads, so `features.parquet` changed; the 311 parquet files were rewritten with the same rows; `daily_counts` and `labels.parquet` are identical |
 
 **Making one.** From `Data-Pipeline/`, after new public data (the 2026 legacy
-311 file and the new-system export refresh daily):
+311 file and the new-system export refresh daily). `dvc repro` alone does not
+download it: the download stages depend only on their code and config, so with
+nothing new on disk DVC prints `Stage 'ingest_legacy_311' didn't change,
+skipping`. Fetch first, then rebuild:
 
 ```bash
-dvc repro                                  # reruns what changed; dvc.lock changes with it
+python scripts/pipeline_steps.py ingest_legacy_311   # replaces a file only when its content changed
+python scripts/pipeline_steps.py ingest_new_311
+dvc status                                 # the download stages show "changed outs"
+dvc repro                                  # reruns them and everything after; dvc.lock changes
 python scripts/dvc_push.py                 # push first, so the commit never points at missing data
-git add dvc.lock && git commit             # the user does git writes
+git add dvc.lock && git commit
 ```
+
+A full `daily_pipeline` DAG run fetches the same files and can replace the two
+download commands (Srikar, #99).
 
 Do not force the download stages (`dvc repro -f ingest_...`) to make a version.
 Without the schedule state in `Data-Pipeline/data/state/`, they download every
