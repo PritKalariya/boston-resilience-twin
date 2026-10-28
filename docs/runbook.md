@@ -648,9 +648,9 @@ python Data-Pipeline/scripts/bias_slicing.py   # about 40 s on the full build
 
 - **Reads** `Data-Pipeline/data/processed/labels.parquet` (`surge_labels`), `Data-Pipeline/data/interim/311_located.parquet` (`spatial_join`) and the static layers in `Data-Pipeline/data/interim/static/`; thresholds in `Data-Pipeline/config/bias_slicing.csv`.
 - **Writes** `slices.csv` (every rate, with numerator and denominator), `gaps.csv` (every test) and `report.md` to `Data-Pipeline/data/interim/reports/bias/` (a slice's own `interim/reports/bias/` for a slice run). It prints how many gaps are significant; a gap never fails the task.
-- **Reviewed copy.** After a full build whose results go to review, copy the three files to `Data-Pipeline/reports/bias/` in the PR, so the committed report matches the data it was run on, and note the data date in `docs/status.md`.
+- **Reviewed copy.** After a `dvc repro` whose results go to review, copy the three files to `Data-Pipeline/reports/bias/` in the PR, with the refreshed `dvc.lock` and the outputs pushed, so `dvc pull` reproduces the committed report; note the data dates in `docs/status.md`.
 - **DVC.** It is the `bias_slicing` stage of `Data-Pipeline/dvc.yaml` (ADR-024), so `dvc repro` reruns it when the labels, the located requests, the static layers or `bias_slicing.csv` change.
-- **A significant gap** fails the four-fifths rule (`ratio_min`) and its test gives p under `alpha`. Change either only in a reviewed PR; #33 decides what to do about each gap.
+- **A significant gap** fails the four-fifths rule (`ratio_min`) and its test gives p under `alpha`. A group with no surges is tested like any other. The tests assume independent days, while one storm raises many at once, so read the ratio first; and the system slice compares two different years, so weather is mixed into it. Change either only in a reviewed PR; #33 decides what to do about each gap.
 - **Run only this task in Airflow** with `docker compose exec airflow-scheduler airflow tasks test daily_pipeline bias_slicing`, after `docker compose exec airflow-scheduler airflow dags pause daily_pipeline`. The test creates a temporary run, and while the DAG is unpaused the scheduler starts that run's other tasks too, downloads and `ingest_static_layers` included, which clears `interim/static/` while the test reads it.
 - **Missing locations** count under the neighborhoods their recorded 311 neighborhood name covers, learned from the placed requests with the same name (`name_unit_min_share`, `name_min_placed`); the report lists the names. Most requests without coordinates have no usable name, so these shares are lower bounds.
 
@@ -707,10 +707,65 @@ python Data-Pipeline/scripts/dvc_stages.py           # rewrite Data-Pipeline/dvc
 python Data-Pipeline/scripts/dvc_stages.py --check   # exit 1 while it is stale (a test checks this too)
 ```
 
-**New data versions.** After `dvc repro` changes outputs, `dvc.lock` changes:
-push the data (`python Data-Pipeline/scripts/dvc_push.py`), then commit
-`Data-Pipeline/dvc.lock` so the commit points at it. The DAG writes the same
-files but does not update `dvc.lock`; recording its runs as versions is #40.
+### Data versions (#40)
+
+A data version is a commit that changes `Data-Pipeline/dvc.lock`, with the
+files it names pushed to the remote. The versions so far:
+
+| commit | from | what changed |
+|---|---|---|
+| `a86e6e5` | #18, the first full build (2026-10-27) | everything, from the public sources |
+| `0812b8b` | #94, a rebuild after rebasing onto #18 (2026-10-27) | newer weather, alert and static downloads, so `features.parquet` changed; the 311 parquet files were rewritten with the same rows; `daily_counts` and `labels.parquet` are identical |
+
+**Making one.** From `Data-Pipeline/`, after new public data (the 2026 legacy
+311 file and the new-system export refresh daily):
+
+```bash
+dvc repro                                  # reruns what changed; dvc.lock changes with it
+python scripts/dvc_push.py                 # push first, so the commit never points at missing data
+git add dvc.lock && git commit             # the user does git writes
+```
+
+Do not force the download stages (`dvc repro -f ingest_...`) to make a version.
+Without the schedule state in `Data-Pipeline/data/state/`, they download every
+year again, and Open-Meteo and the IEM alert files come back with a few bytes
+changed (response metadata), so `dvc.lock` changes while `features.parquet`
+stays byte-identical. That is noise, not a version. Checked 2026-10-27.
+
+The DAG writes the same files but does not update `dvc.lock`, so a DAG run is
+not a version until someone runs the steps above. Committing versions from the
+VM would need git write access there; that is for #39 or the team.
+
+**Listing and comparing.**
+
+```bash
+git log --oneline -- dvc.lock     # every version, newest first
+dvc diff a86e6e5 HEAD             # outputs added, deleted or modified between two versions
+dvc diff                          # the workspace against HEAD's dvc.lock
+```
+
+`dvc diff` reads folder listings from the cache, so run `dvc pull` (or
+`dvc fetch`) for both versions first if it reports missing cache.
+
+**Checking out a previous version.** Only the data, keeping today's code:
+
+```bash
+git checkout <older> -- dvc.lock
+dvc pull                          # or dvc checkout, when the cache has it
+dvc status                        # "Data and pipelines are up to date." for that version
+```
+
+Back to the current version:
+
+```bash
+git checkout HEAD -- dvc.lock
+dvc pull
+```
+
+With today's code and an older `dvc.lock`, `dvc status` may list stages whose
+code changed since; that is expected. For code and data from the same commit,
+check out the whole commit (`git checkout <older>`, then `dvc pull`) and return
+with `git checkout main` and `dvc pull`.
 
 - **`ERROR: '.../dvc.yaml' does not exist`.** DVC was run from the repo
   root. Run it from `Data-Pipeline/`.
@@ -719,6 +774,11 @@ files but does not update `dvc.lock`; recording its runs as versions is #40.
   not read `.env`, so `set -a && . ../.env && set +a` first).
 - **A stage you did not change reruns.** Its code changed: every stage depends
   on `pipeline_steps.py` and on the scripts it runs.
+- **`ingest_static_layers` stops with `... could not be read as a vector
+  layer`.** The open data portal (ArcGIS Hub) sent a short reply instead of the
+  file; it happened once in a fresh rebuild (Prit, #97). Delete that file in
+  `Data-Pipeline/data/raw/static/` and run `dvc repro` again. A check and retry
+  in `static_layers.py` itself is later work for its owner.
 
 Check the remote from the repo root:
 

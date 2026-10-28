@@ -23,7 +23,13 @@ The rates come from Fairlearn's MetricFrame. A gap is significant when it fails 
 rule (ratio_min in config/bias_slicing.csv) and its test gives p under alpha: a two-proportion test
 (chi-square, or Fisher's exact test when a cell expects under 5) or, for requests per capita, an
 exact rate test (binomial, conditioned on the two groups' total). A group with no surges in a period
-is reported but left out of the surge rate test, as ADR-004 does for the worst-group metric.
+is tested like any other: a surge rate of 0 is a real rate. (ADR-004 leaves such a group out of the
+worst-group recall metric only because recall has no value without positives.)
+
+Two limits, also stated in the report: the system slice compares different years, so it cannot
+separate the 311 system from that year's weather; and the tests treat neighborhood-days and requests
+as independent, while one storm raises many of them together, so the p values are too small and the
+four-fifths ratio is the sturdier signal.
 
 Writes slices.csv (every rate), gaps.csv (every test) and report.md to --out-dir.
 """
@@ -278,14 +284,12 @@ def rate_p(k1: float, e1: float, k2: float, e2: float) -> float:
     return float(stats.binomtest(int(round(k1)), total, e1 / (e1 + e2)).pvalue)
 
 
-def gap_rows(rates: pd.DataFrame, metric: str, versus: str, settings: dict, skip_zero: bool) -> list[dict]:
+def gap_rows(rates: pd.DataFrame, metric: str, versus: str, settings: dict) -> list[dict]:
     """The tests of one slice, metric and period. versus "pair": the lower of two groups against the
     higher; "overall": each group against the rest of the city. A ratio is the lower rate over the
     higher, so a group well above the rest fails the rule as much as one well below."""
     test = rate_p if metric == "requests_per_capita" else proportion_p
     parts = rates[(rates["group"] != "all") & (rates["denominator"] > 0)]
-    if skip_zero:
-        parts = parts[parts["numerator"] > 0]
     total = parts[["numerator", "denominator"]].sum()
     pairs = []
     if versus == "pair" and len(parts) == 2:
@@ -332,7 +336,7 @@ def slice_metrics(name: str, groups: pd.Series, cells: pd.DataFrame, storm: pd.D
             table = group_rates(num, den, g)
             for row in table.to_dict("records"):
                 rates.append({"slice": name, "metric": metric, "period": period, **row})
-            for row in gap_rows(table, metric, versus, settings, skip_zero=metric == "surge_rate"):
+            for row in gap_rows(table, metric, versus, settings):
                 gaps.append({"slice": name, "metric": metric, "period": period, **row})
     return rates, gaps
 
@@ -363,7 +367,7 @@ def system_metrics(cells: pd.DataFrame, storm: pd.DataFrame, eras: dict, setting
         label = f"{start.date()} to {end.date()}" if metric == "missing_location" else period
         for row in table.to_dict("records"):
             rates.append({"slice": "system", "metric": metric, "period": label, **row})
-        for row in gap_rows(table, metric, "pair", settings, skip_zero=metric == "surge_rate"):
+        for row in gap_rows(table, metric, "pair", settings):
             gaps.append({"slice": "system", "metric": metric, "period": label, **row})
     return rates, gaps
 
@@ -387,7 +391,7 @@ def tract_metrics(tracts: pd.DataFrame, storm: pd.DataFrame, cells: pd.DataFrame
             table = group_rates(requests, exposure, g.reindex(population.index))
             for row in table.to_dict("records"):
                 rates.append({"slice": f"tract {name}", "metric": "requests_per_capita", "period": period, **row})
-            for row in gap_rows(table, "requests_per_capita", "pair", settings, skip_zero=False):
+            for row in gap_rows(table, "requests_per_capita", "pair", settings):
                 gaps.append({"slice": f"tract {name}", "metric": "requests_per_capita", "period": period, **row})
     return rates, gaps
 
@@ -452,6 +456,13 @@ def report(rates: pd.DataFrame, gaps: pd.DataFrame, info: dict, settings: dict) 
         f"{info['storm']:,} storm-related requests, {info['unplaced']:,} without a location, "
         f"{info['unplaced_named']:,} of those with a recorded neighborhood name that covers a neighborhood.",
         f"Significant gap: ratio under {settings['ratio_min']:g} (four-fifths rule) and p under {settings['alpha']:g}.",
+        "",
+        "Two limits:",
+        "- The system slice compares two different years, so it cannot separate the 311 system change from "
+        "that year's weather and other changes.",
+        "- The tests treat neighborhood-days and requests as independent, but one storm raises many of them at "
+        "once, so the p values are too small. Read the four-fifths ratio as the main signal and p as a check "
+        "against tiny groups.",
         "",
     ]
     if info["no_population"]:

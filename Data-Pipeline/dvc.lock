@@ -1049,8 +1049,8 @@ stages:
       size: 27093
     - path: scripts/bias_slicing.py
       hash: md5
-      md5: e3b4cd931ee9d4451d06e940480db1c1
-      size: 28470
+      md5: a76d5bd432a6bd0bce0d894ab7a502e0
+      size: 29179
     - path: scripts/compare_units.py
       hash: md5
       md5: d7c8d9af828ece45ac95af89e69a99dd
@@ -1106,12 +1106,12 @@ stages:
     outs:
     - path: data/interim/reports/bias/gaps.csv
       hash: md5
-      md5: fda861cce54a687aec6603b19b770403
-      size: 47518
+      md5: 3a2eb0f0c533d3e317031ec508dc8d8a
+      size: 48055
     - path: data/interim/reports/bias/report.md
       hash: md5
-      md5: 619a302faff5f8445c1496f79a6f4c08
-      size: 25898
+      md5: 8a1ffaa8cbb186188b7223caaeedc295
+      size: 27041
     - path: data/interim/reports/bias/slices.csv
       hash: md5
       md5: 9a981a51d8ac9d0a54f55a55a62a90f7

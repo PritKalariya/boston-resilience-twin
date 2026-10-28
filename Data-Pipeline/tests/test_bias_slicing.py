@@ -229,26 +229,30 @@ def rates_of(rows):
 
 def test_a_gap_needs_both_the_four_fifths_rule_and_the_test():
     big = rates_of([("lower", 50, 1000, 0.05), ("higher", 100, 1000, 0.10)])
-    [row] = gap_rows(big, "surge_rate", "pair", SETTINGS, skip_zero=True)
+    [row] = gap_rows(big, "surge_rate", "pair", SETTINGS)
     assert row["group"] == "lower" and row["ratio"] == pytest.approx(0.5) and row["significant"]
     small = rates_of([("lower", 1, 20, 0.05), ("higher", 2, 20, 0.10)])  # same ratio, too few to tell
-    assert not gap_rows(small, "surge_rate", "pair", SETTINGS, skip_zero=True)[0]["significant"]
+    assert not gap_rows(small, "surge_rate", "pair", SETTINGS)[0]["significant"]
     close = rates_of([("lower", 9000, 100000, 0.09), ("higher", 10000, 100000, 0.10)])  # sure, but within 4/5
-    [row] = gap_rows(close, "surge_rate", "pair", SETTINGS, skip_zero=True)
+    [row] = gap_rows(close, "surge_rate", "pair", SETTINGS)
     assert row["p_value"] < 0.01 and not row["significant"]
 
 
 def test_each_neighborhood_is_tested_against_the_rest_of_the_city():
     rates = rates_of([("A", 10, 1000, 0.01), ("B", 50, 1000, 0.05), ("C", 50, 1000, 0.05), ("D", 50, 1000, 0.05)])
-    rows = {row["group"]: row for row in gap_rows(rates, "surge_rate", "overall", SETTINGS, skip_zero=True)}
+    rows = {row["group"]: row for row in gap_rows(rates, "surge_rate", "overall", SETTINGS)}
     assert rows["A"]["other_value"] == pytest.approx(150 / 3000) and rows["A"]["significant"]
     assert not rows["B"]["significant"]
 
 
-def test_a_group_with_no_surges_is_left_out_of_the_surge_test_only():
-    rates = rates_of([("none", 0, 1000, 0.0), ("some", 100, 1000, 0.1)])
-    assert gap_rows(rates, "surge_rate", "pair", SETTINGS, skip_zero=True) == []
-    assert gap_rows(rates, "missing_location", "pair", SETTINGS, skip_zero=False)[0]["significant"]
+def test_a_group_with_no_surges_is_tested_and_stays_in_the_rest_of_the_city():
+    # A surge rate of 0 is a real rate (ADR-004 leaves such groups out of recall only).
+    [row] = gap_rows(rates_of([("none", 0, 1000, 0.0), ("some", 100, 1000, 0.1)]), "surge_rate", "pair", SETTINGS)
+    assert row["group"] == "none" and row["ratio"] == 0 and row["significant"]
+    rates = rates_of([("none", 0, 1000, 0.0), ("B", 50, 1000, 0.05), ("C", 50, 1000, 0.05), ("D", 50, 1000, 0.05)])
+    rows = {row["group"]: row for row in gap_rows(rates, "surge_rate", "overall", SETTINGS)}
+    assert rows["none"]["significant"]
+    assert rows["B"]["other_value"] == pytest.approx(100 / 3000)  # the rest includes the group with none
 
 
 # Input tables
