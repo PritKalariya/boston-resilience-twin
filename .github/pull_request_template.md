@@ -14,8 +14,9 @@ Commands and output for each criterion:
 
 ## Checklist
 - [ ] CI is green (once W2-9 lands)
+- [ ] PR body follows this template: every section filled, nothing deleted
 - [ ] Tests added or updated for new code
-- [ ] `docs/status.md` updated
 - [ ] ADR included if the issue has the ADR checkbox
 - [ ] Terraform changes: `terraform plan` output pasted above
 - [ ] No secrets, raw data, Terraform state, or scoping PDF committed
+- [ ] After fixes: replied on each thread with the commit and re-requested review from everyone who requested changes

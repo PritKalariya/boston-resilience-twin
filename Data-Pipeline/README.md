@@ -416,5 +416,3 @@ The 7 left are surge days in 2024, the smallest sample. Both groups are above 1 
 | Test modules | `tests/`, 999 passed and 1 skipped with 97.8% coverage (`docker compose run --rm --build test`; 986 passed and 14 skipped on a host Python), run in CI on every PR (`.github/workflows/ci.yml`) | done (#38) |
 | Reproducibility | [Environment setup](#environment-setup) to [Small run](#small-run-one-year), [DVC and reproducibility](#dvc-and-reproducibility) | done here; second-machine test [#42](https://github.com/PritKalariya/boston-resilience-twin/issues/42) |
 | Error handling and logging | runbook, "Run the data pipeline DAG": retries, input checks, `check_range` (#36) | done |
-
-Owners update their row when their issue merges.

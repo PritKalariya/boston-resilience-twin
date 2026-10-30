@@ -17,6 +17,15 @@ body:
       placeholder: "@username"
     validations:
       required: true
+  - type: dropdown
+    id: part
+    attributes:
+      label: Part
+      options:
+        - "1: code and tests"
+        - "2: README and runbook (sub-issue of part 1)"
+    validations:
+      required: true
   - type: input
     id: due
     attributes:

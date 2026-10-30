@@ -5,8 +5,7 @@ IE7374 MLOps team project (Northeastern, Fall 2026). Each evening, forecast per 
 ## Read first, every task
 1. The issue you were given (its acceptance criteria are your definition of done)
 2. `docs/project-spec.md`
-3. `docs/status.md`
-4. `docs/decisions/`: accepted ADRs bind you. If a task conflicts with one, stop and say so.
+3. `docs/decisions/`: accepted ADRs bind you. If a task conflicts with one, stop and say so.
 
 `docs/project-spec.md` is read-only context mirrored from project knowledge. Do not edit it; flag a needed change instead.
 
@@ -32,8 +31,11 @@ Airflow executor and metadata DB (the local stack in `docker-compose.yaml` uses 
 - The user creates the branch `<issue-number>-<slug>` and does every git write. Never run `git add`, `commit`, `push`, `merge`, `rebase`, `reset`, `stash`, or `tag`. Read-only git (`status`, `diff`, `log`) is fine. Leave all changes uncommitted.
 - Finish with a report: files changed, each acceptance-criteria command with its actual output, and anything skipped or uncertain. The user takes it to review before committing.
 - Out-of-scope findings: list them in your final report as “Maps to #n” or “Later”. Never propose or draft new issues.
-- Finish every task by updating `docs/status.md`. Update the runbook (`docs/runbook.md`, create if absent) when an operational step changes.
+- docs/status.md is retired. Never recreate or edit it. Status lives in GitHub issues and PRs.
+- Update the runbook (`docs/runbook.md`, create if absent) when an operational step changes.
 - Do not write ADRs unless the task says so. Owners author them in `docs/decisions/` from the template.
+- ADR numbers: the next free number in docs/decisions/ at merge; rename the file if it was taken.
+- After pushing fixes to a PR with requested changes: reply on each thread with the commit, then re-request review with `gh api -X POST repos/PritKalariya/boston-resilience-twin/pulls/<number>/requested_reviewers -f "reviewers[]=<login>"`.
 - `docs/` holds project docs only. No scoping PDF, no personal notes.
 - No em dashes in docs, comments, or commit messages.
 
