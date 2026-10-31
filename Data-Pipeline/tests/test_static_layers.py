@@ -13,6 +13,8 @@ from static_layers import (
     USER_AGENT,
     DefaultPortRedirect,
     download,
+    fetch_layer,
+    is_vector,
     load_layer,
     manifest_row,
     read_config,
@@ -280,3 +282,83 @@ def test_vector_with_no_geometry_left_is_rejected(tmp_path):
     path = write_geojson(tmp_path, [{"type": "Feature", "properties": {"id": 1}, "geometry": None}])
     with pytest.raises(ValueError, match="has no features with geometry"):
         read_vector(path)
+
+
+# The ArcGIS Hub status reply that was saved as crb_flood_9in_10pct.geojson.
+STATUS_REPLY = b'{"status":"Pending","message":"The file is being generated. Try again in a few seconds."}'
+
+
+class SequenceServer(BaseHTTPRequestHandler):
+    """Answers each request with the next body in bodies."""
+
+    bodies = []
+
+    def do_GET(self):
+        body = SequenceServer.bodies.pop(0)
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+def serve_sequence(bodies):
+    SequenceServer.bodies = list(bodies)
+    server = HTTPServer(("127.0.0.1", 0), SequenceServer)
+
+    def handle_all():
+        for _ in bodies:
+            server.handle_request()
+
+    threading.Thread(target=handle_all, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}/flood.geojson"
+
+
+def flood_layer(url):
+    return pd.Series({"name": "crb_flood", "kind": "vector", "file": "flood.geojson", "url": url, "key": "", "text_columns": ""})
+
+
+def geojson_bytes():
+    return json.dumps({"type": "FeatureCollection", "features": [feature(SQUARE, id=1)]}).encode()
+
+
+def test_is_vector(tmp_path):
+    assert is_vector(write_geojson(tmp_path, [feature(SQUARE, id=1)]))
+    assert not is_vector(write(tmp_path, STATUS_REPLY.decode(), "flood.geojson"))
+
+
+def test_a_download_that_is_not_a_vector_layer_is_deleted_and_fetched_again(tmp_path, capsys):
+    server, url = serve_sequence([STATUS_REPLY, geojson_bytes()])
+    dest = tmp_path / "raw" / "flood.geojson"
+    try:
+        fetch_layer(flood_layer(url), dest, wait=0)
+    finally:
+        server.server_close()
+    assert "not a vector layer (89 bytes), deleted (try 1 of 3)" in capsys.readouterr().out
+    gdf, _ = read_vector(dest)
+    assert len(gdf) == 1
+    assert sorted(p.name for p in dest.parent.iterdir()) == ["flood.geojson"]
+
+
+def test_a_layer_that_is_never_a_vector_layer_fails_and_leaves_no_file(tmp_path):
+    server, url = serve_sequence([STATUS_REPLY] * 3)
+    dest = tmp_path / "raw" / "flood.geojson"
+    try:
+        with pytest.raises(ValueError, match="not a vector layer in 3 downloads"):
+            fetch_layer(flood_layer(url), dest, wait=0)
+    finally:
+        server.server_close()
+    assert list(dest.parent.iterdir()) == []
+
+
+def test_a_table_download_is_not_checked_as_a_vector_layer(tmp_path):
+    server, url = serve_sequence([b"name,value\nA,1\n"])
+    layer = flood_layer(url).copy().replace({"vector": "table", "flood.geojson": "population.csv"})
+    dest = tmp_path / "raw" / "population.csv"
+    try:
+        fetch_layer(layer, dest, wait=0)
+    finally:
+        server.server_close()
+    assert dest.read_bytes() == b"name,value\nA,1\n"

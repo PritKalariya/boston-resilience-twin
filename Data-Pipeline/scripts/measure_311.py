@@ -1,6 +1,6 @@
 """Re-measure legacy 311 counts, cell sparsity, and storm ratios.
 
-Prints markdown tables for docs/status.md. Uses the parquet written by
+Prints markdown tables to paste into an issue or PR. Uses the parquet written by
 legacy_311.py and the Logan GHCN-D daily file.
 """
 
@@ -167,7 +167,7 @@ def markdown(df: pd.DataFrame) -> str:
 
 
 def main() -> None:
-    """Print the reconciliation, sparsity and storm ratio tables for docs/status.md."""
+    """Print the reconciliation, sparsity and storm ratio tables as markdown."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parsed", default="Data-Pipeline/data/interim/legacy_311.parquet")
     parser.add_argument("--raw-dir", default="Data-Pipeline/data/raw/311")

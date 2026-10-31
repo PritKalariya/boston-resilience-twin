@@ -49,6 +49,28 @@ def test_repo_map_is_valid():
     assert set(legacy_groups["storm_group"]) == {"snow_ice", "flooding", "tree"}
 
 
+def test_repo_map_one_system_rows_match_the_other_system():
+    # A new-system category that also exists in legacy must not stay legacy_only
+    # on the legacy side, or its switch date never reaches change-points.csv.
+    cmap = load_category_map(REPO_MAP)
+    cmap = cmap[cmap["match"] != "excluded"]
+    categories = {system: set(cmap.loc[cmap["system"] == system, "category"]) for system in ("legacy", "new")}
+    for system, other in (("legacy", "new"), ("new", "legacy")):
+        rows = cmap[cmap["system"] == system]
+        one_sided = rows[rows["match"] == f"{system}_only"]
+        assert not one_sided["category"].isin(categories[other]).any(), one_sided["category"].tolist()
+        shared = rows[rows["match"].isin(["same", "renamed"])]
+        assert shared["category"].isin(categories[other]).all(), shared["category"].tolist()
+
+
+def test_repo_map_has_the_october_2026_transportation_categories():
+    cmap = load_category_map(REPO_MAP).set_index(["system", "source_category"])
+    added = ["Illegal Parking", "Abandoned Vehicles", "Parking Meter Repairs", "OPC Public Inquiry", "Moving Permits"]
+    rows = cmap.loc[[("new", name) for name in added]]
+    assert (rows["storm_group"] == "").all()
+    assert cmap.loc[("legacy", "Parking Enforcement"), "category"] == "Illegal Parking"
+
+
 @pytest.mark.parametrize(
     "body, message",
     [
