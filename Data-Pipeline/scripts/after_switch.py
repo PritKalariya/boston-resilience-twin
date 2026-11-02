@@ -1,7 +1,7 @@
 """Policy for legacy rows opened after their category's switch date (#53, ADR-021).
 
-map_311.py marks legacy rows opened on or after the first new-system day of
-their category (`after_switch`). The processing step reads the policy from
+map_311.py marks legacy rows opened on or after the switch day of their
+category (`after_switch`). The processing step reads the policy from
 Data-Pipeline/config/processing.csv and applies it with apply_policy:
 
 - keep: the rows count on their day and in later baselines (the default)
@@ -25,6 +25,7 @@ import pandas as pd
 
 from compare_units import STORM_GROUPS, any_group, locate, panel, tract_neighborhoods
 from live_baselines import last_full_day, seasonal_baseline, surge_flags
+from map_311 import switch_day
 from measure_311 import markdown
 
 SETTING = "after_switch_policy"
@@ -99,17 +100,17 @@ def apply_policy(df: pd.DataFrame, policy: str) -> pd.DataFrame:
 def overlap_table(df: pd.DataFrame) -> pd.DataFrame:
     """Categories with after_switch rows: the window from the switch to the last such row, and both systems' rows in it.
 
-    The switch is the category's first new-system day, as in map_311.change_points.
+    The switch is the category's switch day, as in map_311.change_points.
     """
     late = after_switch_flags(df)
     new = df[df["source_system"] == "new"]
     rows = []
     for category, legacy in df[late].groupby("category"):
-        opened = new.loc[new["category"] == category, "open_dt"].dt.normalize()
+        opened = new.loc[new["category"] == category, "open_dt"]
         if opened.empty:
             raise ValueError(f"{category} has after_switch rows but no new-system rows; rerun map_311.py")
-        switch, last = opened.min(), legacy["open_dt"].max().normalize()
-        in_window = int(opened.between(switch, last).sum())
+        switch, last = switch_day(opened)[0], legacy["open_dt"].max().normalize()
+        in_window = int(opened.dt.normalize().between(switch, last).sum())
         rows.append({
             "category": category,
             "storm_group": ", ".join(sorted(set(legacy["storm_group"].dropna()) - {""})),
@@ -201,7 +202,7 @@ def main() -> None:
     print(f"- days {days[0].date()} to {last_day.date()} (the last full day of both systems)\n")
 
     print("## After_switch rows by category\n")
-    print("Window: the category's first new-system day to its last legacy row. new_in_window: new-system rows of the category in the same days.\n")
+    print("Window: the category's switch day to its last legacy row. new_in_window: new-system rows of the category in the same days.\n")
     print(markdown(overlap) + "\n")
 
     tracts = gpd.read_parquet(args.tracts)

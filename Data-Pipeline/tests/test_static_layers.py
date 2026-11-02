@@ -284,7 +284,7 @@ def test_vector_with_no_geometry_left_is_rejected(tmp_path):
         read_vector(path)
 
 
-# The ArcGIS Hub status reply that was saved as crb_flood_9in_10pct.geojson.
+# A status reply like the one saved as crb_flood_9in_10pct.geojson (183 bytes).
 STATUS_REPLY = b'{"status":"Pending","message":"The file is being generated. Try again in a few seconds."}'
 
 

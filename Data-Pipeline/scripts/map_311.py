@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 UNMAPPED = "unmapped"
@@ -67,6 +68,15 @@ LEGACY_COLUMNS = [
 
 MAX_CLOCK_OFFSET_HOURS = 0.5
 MIN_LINKED_CASES = 20
+
+# A category's first new-system cases are sometimes lone ones, weeks before the
+# rest (Broken Park Equipment: one case on 2026-01-09, regular volume from
+# 2026-03-10). Leading cases each more than STRAY_GAP_DAYS before the next do
+# not set the switch date when the case after them opens at least
+# REGULAR_MIN_CASES in REGULAR_WINDOW_DAYS.
+STRAY_GAP_DAYS = 14
+REGULAR_WINDOW_DAYS = 30
+REGULAR_MIN_CASES = 10
 
 
 def load_category_map(path: Path | str) -> pd.DataFrame:
@@ -151,8 +161,26 @@ def check_clock(legacy: pd.DataFrame, new: pd.DataFrame) -> tuple[float, int]:
     return offset, n
 
 
+def switch_day(opened: pd.Series) -> tuple[pd.Timestamp, list[pd.Timestamp]]:
+    """A category's switch day from its new-system open times, and the lone earlier cases it skips."""
+    opened = np.sort(opened.dropna().to_numpy())
+    lone = np.diff(opened) > np.timedelta64(STRAY_GAP_DAYS, "D")
+    first = len(lone) if lone.all() else int(np.argmin(lone))
+    window_end = opened[first] + np.timedelta64(REGULAR_WINDOW_DAYS, "D")
+    if np.searchsorted(opened, window_end) - first < REGULAR_MIN_CASES:
+        first = 0
+    return pd.Timestamp(opened[first]).normalize(), [pd.Timestamp(t) for t in opened[:first]]
+
+
+def stray_note(strays: list[pd.Timestamp]) -> str:
+    if not strays:
+        return ""
+    days = ", ".join(str(t.date()) for t in strays)
+    return f"{len(strays)} earlier new-system case(s) skipped as stray: {days}"
+
+
 def change_points(combined: pd.DataFrame) -> pd.DataFrame:
-    """First new-system date for every category and storm group fed by both systems."""
+    """Switch day (switch_day) for every category and storm group fed by both systems."""
     columns = ["level", "name", "storm_group", "switch_date", "legacy_last", "legacy_after_switch", "note"]
     if combined.empty:
         return pd.DataFrame(columns=columns)
@@ -162,30 +190,35 @@ def change_points(combined: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for level in ("category", "storm_group"):
         key = combined[level]
-        new_first = opened.where(~is_legacy).groupby(key).min().dt.normalize()
+        new_opened = combined.loc[~is_legacy].groupby(level)["open_dt"]
         legacy_last = opened.where(is_legacy).groupby(key).max()
-        both = new_first.notna() & legacy_last.reindex(new_first.index).notna()
-        names = sorted(n for n in new_first.index[both] if n != UNMAPPED)
+        both = legacy_last.reindex(new_opened.size().index).notna()
+        names = sorted(n for n in both.index[both] if n != UNMAPPED)
         if not names:
             continue
-        switch = new_first[names]
+        days = {name: switch_day(new_opened.get_group(name)) for name in names}
+        switch = pd.Series({name: day for name, (day, _) in days.items()})
         after = (is_legacy & (opened >= key.map(switch))).groupby(key).sum()
         group = combined["storm_group"].groupby(key).first()
         for name in names:
+            day, strays = days[name]
+            notes = [stray_note(strays)]
+            if day == new_start.normalize():
+                notes.append("new data starts here, switch may be earlier")
             rows.append({
                 "level": level,
                 "name": name,
                 "storm_group": group.get(name) if pd.notna(group.get(name)) else "",
-                "switch_date": switch[name].date(),
+                "switch_date": day.date(),
                 "legacy_last": legacy_last[name].date(),
                 "legacy_after_switch": int(after[name]),
-                "note": "new data starts here, switch may be earlier" if switch[name] == new_start.normalize() else "",
+                "note": "; ".join(n for n in notes if n),
             })
     return pd.DataFrame(rows, columns=columns)
 
 
 def flag_after_switch(combined: pd.DataFrame, points: pd.DataFrame) -> pd.Series:
-    """Legacy rows opened on or after their category's first new-system day.
+    """Legacy rows opened on or after their category's switch day (switch_day).
 
     Only flags them; what to do with them is #53.
     """
