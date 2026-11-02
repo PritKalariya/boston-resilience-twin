@@ -98,6 +98,7 @@ stages:
     - scripts/daily_counts.py
     - scripts/legacy_311.py
     - scripts/live_baselines.py
+    - scripts/map_311.py
     - scripts/measure_311.py
     - scripts/pipeline_steps.py
     - scripts/static_layers.py
@@ -287,6 +288,7 @@ stages:
     - scripts/daily_counts.py
     - scripts/legacy_311.py
     - scripts/live_baselines.py
+    - scripts/map_311.py
     - scripts/measure_311.py
     - scripts/pipeline_steps.py
     - data/interim/311_located.parquet
@@ -302,6 +304,7 @@ stages:
     - scripts/daily_counts.py
     - scripts/legacy_311.py
     - scripts/live_baselines.py
+    - scripts/map_311.py
     - scripts/measure_311.py
     - scripts/pipeline_steps.py
     - scripts/surge_labels.py
@@ -320,6 +323,7 @@ stages:
     - scripts/feature_table.py
     - scripts/legacy_311.py
     - scripts/live_baselines.py
+    - scripts/map_311.py
     - scripts/measure_311.py
     - scripts/open_meteo_forecast.py
     - scripts/period_files.py
@@ -374,6 +378,7 @@ stages:
     - scripts/feature_table.py
     - scripts/legacy_311.py
     - scripts/live_baselines.py
+    - scripts/map_311.py
     - scripts/measure_311.py
     - scripts/open_meteo_forecast.py
     - scripts/period_files.py

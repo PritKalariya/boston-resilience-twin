@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
+import pyogrio
 from pyogrio.errors import DataSourceError
 
 STORED_CRS = "EPSG:4326"
@@ -28,6 +30,10 @@ BOSTON_BOUNDS = (-71.4, 42.1, -70.6, 42.6)
 CONFIG_COLUMNS = {"name", "kind", "file", "url", "publisher", "vintage", "license", "key", "text_columns"}
 KINDS = {"vector", "table", "document"}
 USER_AGENT = "boston-resilience-twin (IE7374 course project)"
+# The ArcGIS Hub flood downloads sometimes answer with a short status
+# message instead of the GeoJSON (183 bytes on 2026-10-27).
+DOWNLOAD_TRIES = 3
+RETRY_WAIT_SECONDS = 20
 
 
 @dataclass
@@ -85,6 +91,30 @@ def download(url: str, dest: Path) -> None:
         while chunk := response.read(1 << 20):
             out.write(chunk)
     partial.replace(dest)
+
+
+def is_vector(path: Path) -> bool:
+    """Whether GDAL can open path as a vector layer."""
+    try:
+        pyogrio.read_info(path)
+    except DataSourceError:
+        return False
+    return True
+
+
+def fetch_layer(layer: pd.Series, dest: Path, tries: int = DOWNLOAD_TRIES, wait: float = RETRY_WAIT_SECONDS) -> None:
+    """Download a layer to dest. A vector download GDAL cannot open is deleted and fetched again, up to tries
+    times in all."""
+    for attempt in range(1, tries + 1):
+        download(layer["url"], dest)
+        if layer["kind"] != "vector" or is_vector(dest):
+            return
+        size = dest.stat().st_size
+        dest.unlink()
+        print(f"{dest.name} is not a vector layer ({size:,} bytes), deleted (try {attempt} of {tries})")
+        if attempt < tries:
+            time.sleep(wait * attempt)
+    raise ValueError(f"{dest.name} was not a vector layer in {tries} downloads from {layer['url']}")
 
 
 def sha256(path: Path) -> str:
@@ -234,7 +264,7 @@ def main() -> None:
     parser.add_argument("--raw-dir", default="Data-Pipeline/data/raw/static")
     parser.add_argument("--out-dir", default="Data-Pipeline/data/interim/static")
     parser.add_argument("--manifest", default="docs/data/static-layers.csv")
-    parser.add_argument("--download", action="store_true", help="fetch layers whose file is missing")
+    parser.add_argument("--download", action="store_true", help="fetch layers whose file is missing or not readable")
     parser.add_argument("--refresh", action="store_true", help="fetch every layer again")
     args = parser.parse_args()
 
@@ -244,8 +274,11 @@ def main() -> None:
     if args.download or args.refresh:
         for _, layer in config.iterrows():
             dest = raw_dir / layer["file"]
-            if args.refresh or not dest.exists():
-                download(layer["url"], dest)
+            unreadable = dest.exists() and layer["kind"] == "vector" and not is_vector(dest)
+            if unreadable:
+                print(f"{dest.name} is not a vector layer, downloading it again")
+            if args.refresh or not dest.exists() or unreadable:
+                fetch_layer(layer, dest)
                 print(f"downloaded {layer['file']} ({dest.stat().st_size:,} bytes)")
 
     rows, summary = [], []

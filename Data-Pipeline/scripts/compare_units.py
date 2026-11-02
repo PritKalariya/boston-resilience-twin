@@ -4,7 +4,7 @@ Storm-related requests from 311_combined.parquet are placed in 2020 tracts and
 in the 24 neighborhoods built from whole 2020 tracts by their coordinates, so
 both 311 systems share one unit list. Every candidate unit gets a full panel of
 daily counts (zero-filled), the ADR-005 baseline (method A) and the analysis
-surge grid. Prints markdown tables for docs/status.md.
+surge grid. Prints markdown tables for the ADR-004 discussion (#10).
 
 The surge rule here is for comparison only; #16 freezes the real one.
 """
