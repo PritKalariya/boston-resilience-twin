@@ -1040,8 +1040,8 @@ stages:
     deps:
     - path: config/bias_slicing.csv
       hash: md5
-      md5: 0f21890065cda8947bdb3a4971915848
-      size: 634
+      md5: c2a03144037106ea5ceb328b41f59ef8
+      size: 788
     - path: data/interim/311_located.parquet
       hash: md5
       md5: 518a2b77ff08886b740aac8ab6944e2c
@@ -1065,8 +1065,8 @@ stages:
       size: 27093
     - path: scripts/bias_slicing.py
       hash: md5
-      md5: 56042a3971d2cfc620c169b849c5b485
-      size: 29257
+      md5: 0bcfc3745b967c032520455b753dfde5
+      size: 33118
     - path: scripts/compare_units.py
       hash: md5
       md5: 70d06f683e1ab1ef12a92df3e5fbc871
@@ -1126,13 +1126,13 @@ stages:
     outs:
     - path: data/interim/reports/bias/gaps.csv
       hash: md5
-      md5: 3a2eb0f0c533d3e317031ec508dc8d8a
-      size: 48055
+      md5: bf677ebd6a156cc7d90f3a85c8dc5071
+      size: 51801
     - path: data/interim/reports/bias/report.md
       hash: md5
-      md5: 8a1ffaa8cbb186188b7223caaeedc295
-      size: 27041
+      md5: 312ddd80db6f9eb1031f41c0fb301ac8
+      size: 31411
     - path: data/interim/reports/bias/slices.csv
       hash: md5
-      md5: 9a981a51d8ac9d0a54f55a55a62a90f7
-      size: 39772
+      md5: 0753304abc28b56387f90ffa45a6b8c7
+      size: 46670

@@ -13,7 +13,11 @@ No 2025 population or ACS values (left out of per capita and ACS slices): Harbor
 - **poc_share:** higher (11): Allston, Chinatown, Dorchester, East Boston, Fenway, Hyde Park, Jamaica Plain, Mattapan, Mission Hill, Roslindale, Roxbury; lower (12): Back Bay, Beacon Hill, Brighton, Charlestown, Downtown, Longwood, North End, South Boston, South Boston Waterfront, South End, West End, West Roxbury
 - **limited_english_share:** higher (11): Brighton, Chinatown, Dorchester, Downtown, East Boston, Hyde Park, Mattapan, Mission Hill, Roslindale, Roxbury, South End; lower (12): Allston, Back Bay, Beacon Hill, Charlestown, Fenway, Jamaica Plain, Longwood, North End, South Boston, South Boston Waterfront, West End, West Roxbury
 - **flood_zone:** in flood zone (10): Charlestown, Dorchester, Downtown, East Boston, Fenway, Harbor Islands, North End, South Boston, South Boston Waterfront, West End; not in flood zone (14): Allston, Back Bay, Beacon Hill, Brighton, Chinatown, Hyde Park, Jamaica Plain, Longwood, Mattapan, Mission Hill, Roslindale, Roxbury, South End, West Roxbury
+- **student_area:** other (18): Back Bay, Beacon Hill, Brighton, Charlestown, Chinatown, Dorchester, East Boston, Hyde Park, Jamaica Plain, Mattapan, North End, Roslindale, Roxbury, South Boston, South Boston Waterfront, South End, West End, West Roxbury; student area (5): Allston, Downtown, Fenway, Longwood, Mission Hill
+- **poverty_share_without_student_areas:** higher (6): Brighton, Chinatown, Dorchester, Mattapan, Roxbury, South End; lower (12): Back Bay, Beacon Hill, Charlestown, East Boston, Hyde Park, Jamaica Plain, North End, Roslindale, South Boston, South Boston Waterfront, West End, West Roxbury
 - **system:** legacy era 2024-10-27 to 2025-10-25; migration era 2025-10-27 to 2026-10-25
+- A **student area** has at least 2 times the city's share of residents enrolled in college or graduate school (16.6%, so a cutoff of 33.25%; ACS B14002). ACS poverty counts off-campus students, so `poverty_share_without_student_areas` shows the poverty split with those neighborhoods left out (#126).
+  - Student areas, college share: Longwood 92.9% (poverty counts 10% of residents); Fenway 61.3% (poverty counts 61% of residents); Allston 42.7% (poverty counts 83% of residents); Downtown 36.2% (poverty counts 76% of residents); Mission Hill 33.5% (poverty counts 91% of residents). The poverty count leaves out people in college dorms, so where most students live in dorms the college share overstates how much of the poverty count is students; B14006 (poverty by school enrollment) would measure it, but the city's tables do not carry it. An area within 1 point of the cutoff can move with the factor's second decimal.
 
 ## Significant gaps
 
@@ -113,6 +117,16 @@ No 2025 population or ACS values (left out of per capita and ACS slices): Harbor
 | limited_english_share | surge rate of labeled days | validate 2024 | lower | 4.01% | higher | 6.14% | 0.65 | 8.0e-06 |
 | flood_zone | share of storm requests with no location | train 2015 to 2023 | in flood zone | 0.05% | not in flood zone | 0.09% | 0.51 | 3.9e-03 |
 | flood_zone | share of storm requests with no location | 2025 onward | in flood zone | 0.02% | not in flood zone | 0.22% | 0.08 | 6.5e-08 |
+| student_area | requests per 1,000 residents a year | train 2015 to 2023 | student area | 11.2 | other | 26.6 | 0.42 | 0.0e+00 |
+| student_area | share of storm requests with no location | train 2015 to 2023 | other | 0.03% | student area | 0.16% | 0.16 | 1.8e-03 |
+| student_area | surge rate of labeled days | train 2015 to 2023 | student area | 1.86% | other | 4.07% | 0.46 | 1.2e-36 |
+| student_area | requests per 1,000 residents a year | validate 2024 | student area | 10.1 | other | 22.5 | 0.45 | 6.1e-187 |
+| student_area | surge rate of labeled days | validate 2024 | student area | 2.84% | other | 5.63% | 0.5 | 1.3e-06 |
+| student_area | requests per 1,000 residents a year | 2025 onward | student area | 18.4 | other | 38.4 | 0.48 | 0.0e+00 |
+| student_area | share of storm requests with no location | 2025 onward | other | 0.02% | student area | 0.54% | 0.04 | 4.0e-04 |
+| student_area | surge rate of labeled days | 2025 onward | student area | 3.62% | other | 5.09% | 0.71 | 4.6e-04 |
+| poverty_share_without_student_areas | requests per 1,000 residents a year | validate 2024 | higher | 18.9 | lower | 26.1 | 0.72 | 3.0e-77 |
+| poverty_share_without_student_areas | surge rate of labeled days | validate 2024 | lower | 5.08% | higher | 6.74% | 0.75 | 5.8e-03 |
 | system | requests per 1,000 residents a year | 2025-10-27 to 2026-10-25 and a year earlier | legacy era | 24.0 | migration era | 45.8 | 0.52 | 0.0e+00 |
 | system | surge rate of labeled days | 2025-10-27 to 2026-10-25 and a year earlier | legacy era | 4.13% | migration era | 5.79% | 0.71 | 4.4e-07 |
 | tract poverty_share | requests per 1,000 residents a year | train 2015 to 2023 | higher | 17.8 | lower | 31.0 | 0.57 | 0.0e+00 |
@@ -165,6 +179,12 @@ No 2025 population or ACS values (left out of per capita and ACS slices): Harbor
 | flood_zone | all | 24.1 | 20.5 | 35.2 |  |
 | flood_zone | in flood zone | 22.4 | 18.8 | 34.4 |  |
 | flood_zone | not in flood zone | 25.5 | 21.9 | 35.8 |  |
+| student_area | all | 24.1 | 20.5 | 35.2 |  |
+| student_area | other | 26.6 | 22.5 | 38.4 |  |
+| student_area | student area | 11.2 | 10.1 | 18.4 |  |
+| poverty_share_without_student_areas | all | 26.6 | 22.5 | 38.4 |  |
+| poverty_share_without_student_areas | higher | 24.0 | 18.9 | 35.7 |  |
+| poverty_share_without_student_areas | lower | 29.2 | 26.1 | 41.0 |  |
 | system | all |  |  |  | 34.9 |
 | system | legacy era |  |  |  | 24.0 |
 | system | migration era |  |  |  | 45.8 |
@@ -213,6 +233,12 @@ No 2025 population or ACS values (left out of per capita and ACS slices): Harbor
 | flood_zone | all | 0.07% | 0.07% | 0.13% |  |
 | flood_zone | in flood zone | 0.05% | 0.04% | 0.02% |  |
 | flood_zone | not in flood zone | 0.09% | 0.09% | 0.22% |  |
+| student_area | all | 0.03% | 0.03% | 0.03% |  |
+| student_area | other | 0.03% | 0.03% | 0.02% |  |
+| student_area | student area | 0.16% | 0.00% | 0.54% |  |
+| poverty_share_without_student_areas | all | 0.02% | 0.03% | 0.02% |  |
+| poverty_share_without_student_areas | higher | 0.01% | 0.00% | 0.01% |  |
+| poverty_share_without_student_areas | lower | 0.03% | 0.04% | 0.02% |  |
 | system | all |  |  |  | 0.38% |
 | system | legacy system |  |  |  | 0.36% |
 | system | new system |  |  |  | 0.46% |
@@ -258,6 +284,12 @@ No 2025 population or ACS values (left out of per capita and ACS slices): Harbor
 | flood_zone | all | 3.44% | 4.82% | 4.57% |  |
 | flood_zone | in flood zone | 3.04% | 4.56% | 4.28% |  |
 | flood_zone | not in flood zone | 3.72% | 5.00% | 4.77% |  |
+| student_area | all | 3.59% | 5.02% | 4.77% |  |
+| student_area | other | 4.07% | 5.63% | 5.09% |  |
+| student_area | student area | 1.86% | 2.84% | 3.62% |  |
+| poverty_share_without_student_areas | all | 4.07% | 5.63% | 5.09% |  |
+| poverty_share_without_student_areas | higher | 4.68% | 6.74% | 5.43% |  |
+| poverty_share_without_student_areas | lower | 3.76% | 5.08% | 4.91% |  |
 | system | all |  |  |  | 4.96% |
 | system | legacy era |  |  |  | 4.13% |
 | system | migration era |  |  |  | 5.79% |
@@ -303,6 +335,12 @@ No 2025 population or ACS values (left out of per capita and ACS slices): Harbor
 | flood_zone | all | 88.74% | 100.00% | 100.00% |  |
 | flood_zone | in flood zone | 88.74% | 100.00% | 100.00% |  |
 | flood_zone | not in flood zone | 88.74% | 100.00% | 100.00% |  |
+| student_area | all | 88.74% | 100.00% | 100.00% |  |
+| student_area | other | 88.74% | 100.00% | 100.00% |  |
+| student_area | student area | 88.74% | 100.00% | 100.00% |  |
+| poverty_share_without_student_areas | all | 88.74% | 100.00% | 100.00% |  |
+| poverty_share_without_student_areas | higher | 88.74% | 100.00% | 100.00% |  |
+| poverty_share_without_student_areas | lower | 88.74% | 100.00% | 100.00% |  |
 | system | all |  |  |  | 100.00% |
 | system | legacy era |  |  |  | 100.00% |
 | system | migration era |  |  |  | 100.00% |
