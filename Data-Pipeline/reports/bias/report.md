@@ -36,26 +36,26 @@ No 2025 population or ACS values (left out of per capita and ACS slices): Harbor
 | neighborhood | requests per 1,000 residents a year | train 2015 to 2023 | West End | 9.5 | rest of the city | 24.3 | 0.39 | 2.1e-212 |
 | neighborhood | requests per 1,000 residents a year | train 2015 to 2023 | West Roxbury | 39.9 | rest of the city | 23.4 | 0.59 | 0.0e+00 |
 | neighborhood | share of storm requests with no location | train 2015 to 2023 | East Boston | 0.14% | rest of the city | 0.01% | 0.06 | 1.3e-08 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | Allston | 2.26% | rest of the city | 3.49% | 0.65 | 3.7e-04 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | Beacon Hill | 2.23% | rest of the city | 3.49% | 0.64 | 2.5e-04 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | Brighton | 5.76% | rest of the city | 3.34% | 0.58 | 2.1e-12 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | Chinatown | 0.41% | rest of the city | 3.57% | 0.12 | 5.0e-20 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | Dorchester | 6.82% | rest of the city | 3.29% | 0.48 | 1.2e-24 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | Downtown | 1.75% | rest of the city | 3.51% | 0.5 | 3.1e-07 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | East Boston | 4.66% | rest of the city | 3.38% | 0.73 | 2.1e-04 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | Harbor Islands | 0.00% | rest of the city | 3.59% | 0.0 | 2.2e-25 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | Hyde Park | 5.28% | rest of the city | 3.36% | 0.64 | 2.5e-08 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | Jamaica Plain | 5.49% | rest of the city | 3.35% | 0.61 | 5.7e-10 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | Longwood | 0.27% | rest of the city | 3.58% | 0.08 | 9.7e-22 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | Mission Hill | 1.34% | rest of the city | 3.53% | 0.38 | 2.0e-10 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | North End | 1.95% | rest of the city | 3.50% | 0.56 | 7.0e-06 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | Roslindale | 4.70% | rest of the city | 3.38% | 0.72 | 1.4e-04 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | Roxbury | 5.52% | rest of the city | 3.35% | 0.61 | 2.9e-10 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | South Boston | 5.59% | rest of the city | 3.34% | 0.6 | 7.6e-11 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | South Boston Waterfront | 0.96% | rest of the city | 3.55% | 0.27 | 6.2e-14 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | South End | 5.97% | rest of the city | 3.33% | 0.56 | 2.0e-14 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | West End | 0.93% | rest of the city | 3.55% | 0.26 | 2.8e-14 |
-| neighborhood | surge rate of labeled days | train 2015 to 2023 | West Roxbury | 6.34% | rest of the city | 3.31% | 0.52 | 1.5e-18 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | Allston | 2.26% | rest of the city | 3.47% | 0.65 | 4.6e-04 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | Beacon Hill | 2.23% | rest of the city | 3.47% | 0.64 | 3.1e-04 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | Brighton | 5.66% | rest of the city | 3.32% | 0.59 | 1.0e-11 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | Chinatown | 0.41% | rest of the city | 3.55% | 0.12 | 7.0e-20 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | Dorchester | 6.65% | rest of the city | 3.28% | 0.49 | 9.1e-23 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | Downtown | 1.75% | rest of the city | 3.49% | 0.5 | 4.0e-07 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | East Boston | 4.66% | rest of the city | 3.36% | 0.72 | 1.6e-04 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | Harbor Islands | 0.00% | rest of the city | 3.57% | 0.0 | 3.2e-25 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | Hyde Park | 5.25% | rest of the city | 3.34% | 0.64 | 2.8e-08 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | Jamaica Plain | 5.42% | rest of the city | 3.33% | 0.61 | 1.3e-09 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | Longwood | 0.27% | rest of the city | 3.55% | 0.08 | 1.4e-21 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | Mission Hill | 1.34% | rest of the city | 3.51% | 0.38 | 2.7e-10 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | North End | 1.95% | rest of the city | 3.48% | 0.56 | 8.9e-06 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | Roslindale | 4.70% | rest of the city | 3.36% | 0.72 | 1.0e-04 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | Roxbury | 5.45% | rest of the city | 3.33% | 0.61 | 6.5e-10 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | South Boston | 5.59% | rest of the city | 3.32% | 0.59 | 4.3e-11 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | South Boston Waterfront | 0.96% | rest of the city | 3.52% | 0.27 | 8.5e-14 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | South End | 5.93% | rest of the city | 3.31% | 0.56 | 2.3e-14 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | West End | 0.93% | rest of the city | 3.53% | 0.26 | 3.9e-14 |
+| neighborhood | surge rate of labeled days | train 2015 to 2023 | West Roxbury | 6.34% | rest of the city | 3.29% | 0.52 | 6.4e-19 |
 | neighborhood | requests per 1,000 residents a year | validate 2024 | Allston | 9.5 | rest of the city | 21.0 | 0.45 | 2.4e-54 |
 | neighborhood | requests per 1,000 residents a year | validate 2024 | Beacon Hill | 31.3 | rest of the city | 20.4 | 0.65 | 6.8e-12 |
 | neighborhood | requests per 1,000 residents a year | validate 2024 | Charlestown | 29.0 | rest of the city | 20.3 | 0.7 | 2.8e-15 |
@@ -71,15 +71,15 @@ No 2025 population or ACS values (left out of per capita and ACS slices): Harbor
 | neighborhood | requests per 1,000 residents a year | validate 2024 | South Boston Waterfront | 10.2 | rest of the city | 20.6 | 0.5 | 5.8e-13 |
 | neighborhood | requests per 1,000 residents a year | validate 2024 | South End | 27.7 | rest of the city | 20.1 | 0.73 | 8.0e-20 |
 | neighborhood | requests per 1,000 residents a year | validate 2024 | West Roxbury | 37.4 | rest of the city | 19.7 | 0.53 | 1.2e-82 |
-| neighborhood | surge rate of labeled days | validate 2024 | Brighton | 9.02% | rest of the city | 4.63% | 0.51 | 1.3e-04 |
-| neighborhood | surge rate of labeled days | validate 2024 | Chinatown | 0.00% | rest of the city | 5.02% | 0.0 | 1.1e-05 |
-| neighborhood | surge rate of labeled days | validate 2024 | Dorchester | 10.38% | rest of the city | 4.57% | 0.44 | 3.7e-07 |
-| neighborhood | surge rate of labeled days | validate 2024 | East Boston | 9.29% | rest of the city | 4.62% | 0.5 | 4.4e-05 |
-| neighborhood | surge rate of labeled days | validate 2024 | Harbor Islands | 0.00% | rest of the city | 5.02% | 0.0 | 1.1e-05 |
-| neighborhood | surge rate of labeled days | validate 2024 | Longwood | 0.55% | rest of the city | 5.00% | 0.11 | 9.7e-05 |
-| neighborhood | surge rate of labeled days | validate 2024 | North End | 1.91% | rest of the city | 4.94% | 0.39 | 8.1e-03 |
-| neighborhood | surge rate of labeled days | validate 2024 | Roxbury | 9.56% | rest of the city | 4.61% | 0.48 | 1.5e-05 |
-| neighborhood | surge rate of labeled days | validate 2024 | South Boston Waterfront | 1.09% | rest of the city | 4.98% | 0.22 | 6.8e-04 |
+| neighborhood | surge rate of labeled days | validate 2024 | Brighton | 9.02% | rest of the city | 4.61% | 0.51 | 1.1e-04 |
+| neighborhood | surge rate of labeled days | validate 2024 | Chinatown | 0.00% | rest of the city | 5.00% | 0.0 | 1.2e-05 |
+| neighborhood | surge rate of labeled days | validate 2024 | Dorchester | 10.11% | rest of the city | 4.56% | 0.45 | 1.2e-06 |
+| neighborhood | surge rate of labeled days | validate 2024 | East Boston | 9.29% | rest of the city | 4.60% | 0.49 | 3.9e-05 |
+| neighborhood | surge rate of labeled days | validate 2024 | Harbor Islands | 0.00% | rest of the city | 5.00% | 0.0 | 1.2e-05 |
+| neighborhood | surge rate of labeled days | validate 2024 | Longwood | 0.55% | rest of the city | 4.98% | 0.11 | 1.0e-04 |
+| neighborhood | surge rate of labeled days | validate 2024 | North End | 1.91% | rest of the city | 4.92% | 0.39 | 8.4e-03 |
+| neighborhood | surge rate of labeled days | validate 2024 | Roxbury | 9.29% | rest of the city | 4.60% | 0.49 | 3.9e-05 |
+| neighborhood | surge rate of labeled days | validate 2024 | South Boston Waterfront | 1.09% | rest of the city | 4.95% | 0.22 | 7.1e-04 |
 | neighborhood | requests per 1,000 residents a year | 2025 onward | Allston | 26.4 | rest of the city | 35.6 | 0.74 | 3.7e-33 |
 | neighborhood | requests per 1,000 residents a year | 2025 onward | Beacon Hill | 46.6 | rest of the city | 35.0 | 0.75 | 3.0e-14 |
 | neighborhood | requests per 1,000 residents a year | 2025 onward | Charlestown | 55.5 | rest of the city | 34.6 | 0.62 | 2.1e-80 |
@@ -94,27 +94,26 @@ No 2025 population or ACS values (left out of per capita and ACS slices): Harbor
 | neighborhood | requests per 1,000 residents a year | 2025 onward | West End | 17.6 | rest of the city | 35.4 | 0.5 | 1.5e-41 |
 | neighborhood | requests per 1,000 residents a year | 2025 onward | West Roxbury | 45.2 | rest of the city | 34.7 | 0.77 | 1.2e-35 |
 | neighborhood | share of storm requests with no location | 2025 onward | Downtown | 3.45% | rest of the city | 0.02% | 0.01 | 9.2e-05 |
-| neighborhood | surge rate of labeled days | 2025 onward | Chinatown | 2.11% | rest of the city | 4.68% | 0.45 | 2.0e-03 |
-| neighborhood | surge rate of labeled days | 2025 onward | Dorchester | 9.80% | rest of the city | 4.34% | 0.44 | 4.3e-11 |
-| neighborhood | surge rate of labeled days | 2025 onward | Harbor Islands | 0.00% | rest of the city | 4.77% | 0.0 | 8.7e-09 |
-| neighborhood | surge rate of labeled days | 2025 onward | Longwood | 0.75% | rest of the city | 4.73% | 0.16 | 1.5e-06 |
-| neighborhood | surge rate of labeled days | 2025 onward | Roslindale | 6.79% | rest of the city | 4.47% | 0.66 | 5.2e-03 |
-| neighborhood | surge rate of labeled days | 2025 onward | West End | 1.81% | rest of the city | 4.69% | 0.39 | 5.1e-04 |
-| neighborhood | surge rate of labeled days | 2025 onward | West Roxbury | 6.64% | rest of the city | 4.48% | 0.67 | 9.2e-03 |
+| neighborhood | surge rate of labeled days | 2025 onward | Chinatown | 2.11% | rest of the city | 4.62% | 0.46 | 2.3e-03 |
+| neighborhood | surge rate of labeled days | 2025 onward | Dorchester | 8.75% | rest of the city | 4.33% | 0.5 | 8.5e-08 |
+| neighborhood | surge rate of labeled days | 2025 onward | Harbor Islands | 0.00% | rest of the city | 4.72% | 0.0 | 1.1e-08 |
+| neighborhood | surge rate of labeled days | 2025 onward | Longwood | 0.75% | rest of the city | 4.68% | 0.16 | 1.9e-06 |
+| neighborhood | surge rate of labeled days | 2025 onward | Roslindale | 6.79% | rest of the city | 4.42% | 0.65 | 4.1e-03 |
+| neighborhood | surge rate of labeled days | 2025 onward | West End | 1.81% | rest of the city | 4.64% | 0.39 | 6.0e-04 |
+| neighborhood | surge rate of labeled days | 2025 onward | West Roxbury | 6.64% | rest of the city | 4.43% | 0.67 | 7.3e-03 |
 | poverty_share | requests per 1,000 residents a year | train 2015 to 2023 | higher | 20.5 | lower | 29.2 | 0.7 | 0.0e+00 |
 | poverty_share | share of storm requests with no location | train 2015 to 2023 | lower | 0.03% | higher | 0.10% | 0.31 | 5.6e-07 |
 | poverty_share | requests per 1,000 residents a year | validate 2024 | higher | 16.5 | lower | 26.1 | 0.63 | 1.3e-169 |
 | poverty_share | requests per 1,000 residents a year | 2025 onward | higher | 30.9 | lower | 41.0 | 0.75 | 3.3e-199 |
 | poverty_share | share of storm requests with no location | 2025 onward | lower | 0.02% | higher | 0.21% | 0.12 | 5.2e-08 |
 | poc_share | requests per 1,000 residents a year | validate 2024 | higher | 18.5 | lower | 24.0 | 0.77 | 4.1e-55 |
-| poc_share | surge rate of labeled days | validate 2024 | lower | 4.35% | higher | 5.76% | 0.75 | 3.0e-03 |
-| poc_share | surge rate of labeled days | 2025 onward | lower | 4.24% | higher | 5.35% | 0.79 | 1.3e-03 |
-| limited_english_share | surge rate of labeled days | train 2015 to 2023 | lower | 3.06% | higher | 4.16% | 0.73 | 1.6e-14 |
-| limited_english_share | surge rate of labeled days | validate 2024 | lower | 4.01% | higher | 6.14% | 0.65 | 8.0e-06 |
+| poc_share | surge rate of labeled days | validate 2024 | lower | 4.35% | higher | 5.71% | 0.76 | 4.1e-03 |
+| limited_english_share | surge rate of labeled days | train 2015 to 2023 | lower | 3.05% | higher | 4.13% | 0.74 | 6.3e-14 |
+| limited_english_share | surge rate of labeled days | validate 2024 | lower | 4.01% | higher | 6.09% | 0.66 | 1.2e-05 |
 | flood_zone | share of storm requests with no location | train 2015 to 2023 | in flood zone | 0.05% | not in flood zone | 0.09% | 0.51 | 3.9e-03 |
 | flood_zone | share of storm requests with no location | 2025 onward | in flood zone | 0.02% | not in flood zone | 0.22% | 0.08 | 6.5e-08 |
 | system | requests per 1,000 residents a year | 2025-10-27 to 2026-10-25 and a year earlier | legacy era | 24.0 | migration era | 45.8 | 0.52 | 0.0e+00 |
-| system | surge rate of labeled days | 2025-10-27 to 2026-10-25 and a year earlier | legacy era | 4.13% | migration era | 5.79% | 0.71 | 4.4e-07 |
+| system | surge rate of labeled days | 2025-10-27 to 2026-10-25 and a year earlier | legacy era | 4.04% | migration era | 5.79% | 0.7 | 8.6e-08 |
 | tract poverty_share | requests per 1,000 residents a year | train 2015 to 2023 | higher | 17.8 | lower | 31.0 | 0.57 | 0.0e+00 |
 | tract poc_share | requests per 1,000 residents a year | train 2015 to 2023 | higher | 21.2 | lower | 27.3 | 0.78 | 0.0e+00 |
 | tract limited_english_share | requests per 1,000 residents a year | train 2015 to 2023 | higher | 21.2 | lower | 27.7 | 0.76 | 0.0e+00 |
@@ -222,44 +221,44 @@ No 2025 population or ACS values (left out of per capita and ACS slices): Harbor
 | slice | group | train 2015 to 2023 | validate 2024 | 2025 onward | 2025-10-27 to 2026-10-25 and a year earlier |
 |---|---|---|---|---|---|
 | neighborhood | Allston | 2.26% | 3.28% | 5.13% |  |
-| neighborhood | Back Bay | 2.98% | 3.55% | 5.43% |  |
+| neighborhood | Back Bay | 2.95% | 3.55% | 5.43% |  |
 | neighborhood | Beacon Hill | 2.23% | 3.28% | 3.77% |  |
-| neighborhood | Brighton | 5.76% | 9.02% | 5.73% |  |
+| neighborhood | Brighton | 5.66% | 9.02% | 5.73% |  |
 | neighborhood | Charlestown | 4.01% | 5.74% | 4.98% |  |
 | neighborhood | Chinatown | 0.41% | 0.00% | 2.11% |  |
-| neighborhood | Dorchester | 6.82% | 10.38% | 9.80% |  |
+| neighborhood | Dorchester | 6.65% | 10.11% | 8.75% |  |
 | neighborhood | Downtown | 1.75% | 2.73% | 4.22% |  |
-| neighborhood | East Boston | 4.66% | 9.29% | 4.98% |  |
+| neighborhood | East Boston | 4.66% | 9.29% | 4.83% |  |
 | neighborhood | Fenway | 3.70% | 4.92% | 4.37% |  |
 | neighborhood | Harbor Islands | 0.00% | 0.00% | 0.00% |  |
-| neighborhood | Hyde Park | 5.28% | 5.74% | 5.73% |  |
-| neighborhood | Jamaica Plain | 5.49% | 6.83% | 6.18% |  |
+| neighborhood | Hyde Park | 5.25% | 5.74% | 5.73% |  |
+| neighborhood | Jamaica Plain | 5.42% | 6.83% | 6.18% |  |
 | neighborhood | Longwood | 0.27% | 0.55% | 0.75% |  |
 | neighborhood | Mattapan | 3.60% | 4.10% | 4.68% |  |
 | neighborhood | Mission Hill | 1.34% | 2.73% | 3.62% |  |
 | neighborhood | North End | 1.95% | 1.91% | 4.37% |  |
 | neighborhood | Roslindale | 4.70% | 6.56% | 6.79% |  |
-| neighborhood | Roxbury | 5.52% | 9.56% | 5.43% |  |
+| neighborhood | Roxbury | 5.45% | 9.29% | 5.43% |  |
 | neighborhood | South Boston | 5.59% | 7.10% | 5.43% |  |
 | neighborhood | South Boston Waterfront | 0.96% | 1.09% | 2.87% |  |
-| neighborhood | South End | 5.97% | 7.38% | 4.83% |  |
+| neighborhood | South End | 5.93% | 7.38% | 4.83% |  |
 | neighborhood | West End | 0.93% | 2.46% | 1.81% |  |
 | neighborhood | West Roxbury | 6.34% | 7.38% | 6.64% |  |
-| neighborhood | all | 3.44% | 4.82% | 4.57% |  |
-| poverty_share | all | 3.59% | 5.02% | 4.77% |  |
-| poverty_share | higher | 3.40% | 4.97% | 4.61% |  |
-| poverty_share | lower | 3.76% | 5.08% | 4.91% |  |
-| poc_share | all | 3.59% | 5.02% | 4.77% |  |
-| poc_share | higher | 3.98% | 5.76% | 5.35% |  |
-| poc_share | lower | 3.23% | 4.35% | 4.24% |  |
-| limited_english_share | all | 3.59% | 5.02% | 4.77% |  |
-| limited_english_share | higher | 4.16% | 6.14% | 5.27% |  |
-| limited_english_share | lower | 3.06% | 4.01% | 4.31% |  |
-| flood_zone | all | 3.44% | 4.82% | 4.57% |  |
-| flood_zone | in flood zone | 3.04% | 4.56% | 4.28% |  |
-| flood_zone | not in flood zone | 3.72% | 5.00% | 4.77% |  |
-| system | all |  |  |  | 4.96% |
-| system | legacy era |  |  |  | 4.13% |
+| neighborhood | all | 3.42% | 4.79% | 4.52% |  |
+| poverty_share | all | 3.57% | 5.00% | 4.72% |  |
+| poverty_share | higher | 3.37% | 4.92% | 4.51% |  |
+| poverty_share | lower | 3.75% | 5.08% | 4.90% |  |
+| poc_share | all | 3.57% | 5.00% | 4.72% |  |
+| poc_share | higher | 3.95% | 5.71% | 5.24% |  |
+| poc_share | lower | 3.21% | 4.35% | 4.24% |  |
+| limited_english_share | all | 3.57% | 5.00% | 4.72% |  |
+| limited_english_share | higher | 4.13% | 6.09% | 5.16% |  |
+| limited_english_share | lower | 3.05% | 4.01% | 4.31% |  |
+| flood_zone | all | 3.42% | 4.79% | 4.52% |  |
+| flood_zone | in flood zone | 3.02% | 4.54% | 4.16% |  |
+| flood_zone | not in flood zone | 3.70% | 4.98% | 4.77% |  |
+| system | all |  |  |  | 4.92% |
+| system | legacy era |  |  |  | 4.04% |
 | system | migration era |  |  |  | 5.79% |
 
 ## Share of days labeled

@@ -667,6 +667,21 @@ python Data-Pipeline/scripts/bias_mitigation.py   # before and after numbers, ab
 - **Writes** `mitigation.csv` (every group mean) and `mitigation.md` to `Data-Pipeline/data/interim/reports/bias/`. It is not a DAG task or DVC stage: rerun it after a `dvc repro` that changes the features or labels, and copy both files to `Data-Pipeline/reports/bias/` with the #32 files.
 - **A self-relative lag is missing** until the neighborhood has a baseline (from January 2016), never filled; the leakage check reads it by date like the raw lags.
 
+## Training interface (#106, ADR-027)
+
+Every model trains and is scored through `Model-Development/scripts/train.py`, on the frozen labels (`sd_k2_m5`, snow_ice and tree) and the ADR-003 splits in `Model-Development/config/training.csv`. Get the data first (`cd Data-Pipeline && dvc pull`), then from the repo root:
+
+```bash
+python Model-Development/scripts/train.py --model seasonal                          # about 2 s; prints the metrics
+python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run id>   # recompute and check
+python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run id> --gates-block
+```
+
+- **Writes** `Model-Development/runs/<UTC time>-<model>/` (gitignored): `predictions.parquet` (the contract in `predictions.py`), `metrics.json` (per split), `validation_counts.json` (validation tp, fp and fn with the data version, for the gates) and `run.json` (threshold, data version, git commit, inputs, settings, row counts).
+- **The threshold** is picked on validation with the shared rule (highest F1, the higher one on a tie) and reused on test.
+- **Settings** live in `training.csv`, never in code. That covers the split dates, the 2020 and 2021 weight, the threshold rule and the seasonal window.
+- **On Windows** with `core.autocrlf`, run DVC itself (`dvc status`, `dvc repro`) from a checkout with LF line endings or in the Airflow image: `dvc.lock` hashes the scripts and configs with LF endings, so a CRLF checkout shows every stage as changed. `train.py` and `evaluate.py` are not affected, and the data version they record ignores line endings.
+
 ## Versioned data (DVC)
 
 The DVC remote is `gs://boston-resilience-twin-data/dvc` (`.dvc/config`), a

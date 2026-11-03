@@ -23,30 +23,30 @@ poverty_share,train 2015 to 2023,all labeled days,tree,7,self-relative,higher,1.
 poverty_share,train 2015 to 2023,all labeled days,tree,28,raw,higher,24.74049357844372,lower,25.47853185595568,66424,0.9710329354264012,False
 poverty_share,train 2015 to 2023,all labeled days,tree,28,per capita,higher,0.5717826028446245,lower,0.9622752926802021,66424,0.5941985699872354,True
 poverty_share,train 2015 to 2023,all labeled days,tree,28,self-relative,higher,1.3568296863829679,lower,1.39732318137992,66424,0.9710206661303915,False
-poverty_share,train 2015 to 2023,surge days,snow_ice,last,raw,lower,6.489345509893455,higher,8.122018348623854,2404,0.7989818825012838,True
-poverty_share,train 2015 to 2023,surge days,snow_ice,last,per capita,higher,0.16260724270535634,lower,0.23650533351897257,2404,0.6875415462557081,True
-poverty_share,train 2015 to 2023,surge days,snow_ice,last,self-relative,lower,3.0145775844872413,higher,3.3237990192101914,2404,0.9069674691713375,False
-poverty_share,train 2015 to 2023,surge days,snow_ice,3,raw,lower,14.704718417047184,higher,18.1697247706422,2404,0.8092978073507413,False
-poverty_share,train 2015 to 2023,surge days,snow_ice,3,per capita,higher,0.362661750770966,lower,0.5314019190897418,2404,0.6824622526621336,True
-poverty_share,train 2015 to 2023,surge days,snow_ice,3,self-relative,lower,3.174198884072555,higher,3.5458468080556176,2404,0.8951878227963104,False
-poverty_share,train 2015 to 2023,surge days,snow_ice,7,raw,lower,23.270167427701676,higher,29.723853211009175,2404,0.7828785609492523,True
-poverty_share,train 2015 to 2023,surge days,snow_ice,7,per capita,higher,0.5728505212061324,lower,0.8320027768921227,2404,0.6885199630534504,True
-poverty_share,train 2015 to 2023,surge days,snow_ice,7,self-relative,lower,2.4848298134205047,higher,2.8260129562487903,2404,0.8792704958857771,False
-poverty_share,train 2015 to 2023,surge days,snow_ice,28,raw,lower,50.471841704718415,higher,61.788990825688074,2404,0.8168419815611443,False
-poverty_share,train 2015 to 2023,surge days,snow_ice,28,per capita,higher,1.1711196608025944,lower,1.7693584007621046,2404,0.6618894511695117,True
-poverty_share,train 2015 to 2023,surge days,snow_ice,28,self-relative,lower,1.7290366619848725,higher,2.067336015070324,2404,0.8363597641508974,False
-poverty_share,train 2015 to 2023,surge days,tree,last,raw,lower,1.678082191780822,higher,1.7064220183486238,2404,0.9833922521726323,False
-poverty_share,train 2015 to 2023,surge days,tree,last,per capita,higher,0.03186921646543048,lower,0.05358899310790829,2404,0.5946970565626739,True
-poverty_share,train 2015 to 2023,surge days,tree,last,self-relative,higher,1.349421197240905,lower,1.4811792423779924,2404,0.9110451717338723,False
-poverty_share,train 2015 to 2023,surge days,tree,3,raw,lower,4.198630136986301,higher,4.426605504587156,2404,0.9484988288735892,False
-poverty_share,train 2015 to 2023,surge days,tree,3,per capita,higher,0.08122249170551905,lower,0.13510393394732473,2404,0.6011852455546309,True
-poverty_share,train 2015 to 2023,surge days,tree,3,self-relative,higher,1.4187888756798386,lower,1.5978120011774926,2404,0.8879573282928627,False
-poverty_share,train 2015 to 2023,surge days,tree,7,raw,lower,9.904870624048707,higher,10.677064220183487,2404,0.9276773483599493,False
-poverty_share,train 2015 to 2023,surge days,tree,7,per capita,higher,0.1922636989309981,lower,0.31987965292362575,2404,0.6010501048558498,True
-poverty_share,train 2015 to 2023,surge days,tree,7,self-relative,higher,1.5521158616378532,lower,1.7151029577459755,2404,0.9049694973867205,False
-poverty_share,train 2015 to 2023,surge days,tree,28,raw,lower,32.47108066971081,higher,35.987155963302754,2404,0.902296383265813,False
-poverty_share,train 2015 to 2023,surge days,tree,28,per capita,higher,0.6753674736791642,lower,1.0613095241451458,2404,0.6363529755592773,True
-poverty_share,train 2015 to 2023,surge days,tree,28,self-relative,lower,1.5130887582065726,higher,1.5162583224511264,2404,0.9979096146101082,False
+poverty_share,train 2015 to 2023,surge days,snow_ice,last,raw,lower,6.5022900763358775,higher,8.182576459684894,2389,0.7946506957035238,True
+poverty_share,train 2015 to 2023,surge days,snow_ice,last,per capita,higher,0.16363225489546468,lower,0.23702221579353921,2389,0.6903667419850565,True
+poverty_share,train 2015 to 2023,surge days,snow_ice,last,self-relative,lower,3.021217189572037,higher,3.3409428545551854,2389,0.9043007681058596,False
+poverty_share,train 2015 to 2023,surge days,snow_ice,3,raw,lower,14.716030534351145,higher,18.240037071362373,2389,0.8067982798925301,False
+poverty_share,train 2015 to 2023,surge days,snow_ice,3,per capita,higher,0.36304628273613493,lower,0.5320260055516294,2389,0.6823844679541775,True
+poverty_share,train 2015 to 2023,surge days,snow_ice,3,self-relative,lower,3.1802873430399488,higher,3.551004596501864,2389,0.8956021476775577,False
+poverty_share,train 2015 to 2023,surge days,snow_ice,7,raw,lower,23.15801526717557,higher,29.77386468952734,2389,0.7777967525768051,True
+poverty_share,train 2015 to 2023,surge days,snow_ice,7,per capita,higher,0.5714266390841836,lower,0.8290794076213114,2389,0.6892302882345707,True
+poverty_share,train 2015 to 2023,surge days,snow_ice,7,self-relative,lower,2.48378107584583,higher,2.81814767489533,2389,0.8813523499750883,False
+poverty_share,train 2015 to 2023,surge days,snow_ice,28,raw,lower,50.422900763358776,higher,62.07043558850788,2389,0.8123497166611539,False
+poverty_share,train 2015 to 2023,surge days,snow_ice,28,per capita,higher,1.1732932274865653,lower,1.7687901939111503,2389,0.663330920493277,True
+poverty_share,train 2015 to 2023,surge days,snow_ice,28,self-relative,lower,1.7301648930634985,higher,2.0677222462237403,2389,0.8367491795492749,False
+poverty_share,train 2015 to 2023,surge days,tree,last,raw,higher,1.6737720111214087,lower,1.6801526717557251,2389,0.9962023328346413,False
+poverty_share,train 2015 to 2023,surge days,tree,last,per capita,higher,0.03171434839421116,lower,0.05368152918096007,2389,0.590786977906354,True
+poverty_share,train 2015 to 2023,surge days,tree,last,self-relative,higher,1.3503091341778704,lower,1.4826131770916904,2389,0.9107629387367587,False
+poverty_share,train 2015 to 2023,surge days,tree,3,raw,lower,4.20381679389313,higher,4.222428174235403,2389,0.9955922564992729,False
+poverty_share,train 2015 to 2023,surge days,tree,3,per capita,higher,0.0796887877313045,lower,0.13532866029271134,2389,0.5888537399168833,True
+poverty_share,train 2015 to 2023,surge days,tree,3,self-relative,higher,1.4136949909981236,lower,1.5996519215178242,2389,0.8837516287022892,False
+poverty_share,train 2015 to 2023,surge days,tree,7,raw,lower,9.88320610687023,higher,10.448563484708062,2389,0.9458913774448269,False
+poverty_share,train 2015 to 2023,surge days,tree,7,per capita,higher,0.1908703868910755,lower,0.31963267622894814,2389,0.5971554258562659,True
+poverty_share,train 2015 to 2023,surge days,tree,7,self-relative,higher,1.5551744689097449,lower,1.7117167973457803,2389,0.9085465956291526,False
+poverty_share,train 2015 to 2023,surge days,tree,28,raw,lower,32.4412213740458,higher,35.35681186283596,2389,0.9175380828989625,False
+poverty_share,train 2015 to 2023,surge days,tree,28,per capita,higher,0.6717015462349274,lower,1.0613207404474012,2389,0.6328921320728838,True
+poverty_share,train 2015 to 2023,surge days,tree,28,self-relative,lower,1.510679551330135,higher,1.52036584886529,2389,0.9936289692757935,False
 poverty_share,validate 2024,all labeled days,snow_ice,last,raw,higher,0.5136612021857924,lower,0.6020036429872495,8418,0.8532526475037823,False
 poverty_share,validate 2024,all labeled days,snow_ice,last,per capita,higher,0.011903704654928595,lower,0.02126413525499733,8418,0.5598019628910647,True
 poverty_share,validate 2024,all labeled days,snow_ice,last,self-relative,higher,1.204081046557936,lower,1.2504124491724107,8418,0.9629471038574997,False
@@ -71,30 +71,30 @@ poverty_share,validate 2024,all labeled days,tree,7,self-relative,lower,1.299811
 poverty_share,validate 2024,all labeled days,tree,28,raw,higher,31.83109786388475,lower,32.31625683060109,8418,0.9849871546305781,False
 poverty_share,validate 2024,all labeled days,tree,28,per capita,higher,0.7283261582016333,lower,1.2074131996573083,8418,0.6032120225357392,True
 poverty_share,validate 2024,all labeled days,tree,28,self-relative,lower,1.460364264312022,higher,1.5260790085175533,8418,0.9569388322368925,False
-poverty_share,validate 2024,surge days,snow_ice,last,raw,higher,5.165,lower,5.798206278026906,423,0.8907927300850734,False
-poverty_share,validate 2024,surge days,snow_ice,last,per capita,higher,0.10161763226146164,lower,0.1716018013791511,423,0.592171127836469,True
-poverty_share,validate 2024,surge days,snow_ice,last,self-relative,higher,4.770040053177481,lower,5.2621042888173655,423,0.9064890757323866,False
-poverty_share,validate 2024,surge days,snow_ice,3,raw,higher,13.495,lower,15.394618834080717,423,0.8766050101951646,False
-poverty_share,validate 2024,surge days,snow_ice,3,per capita,higher,0.2509446814259349,lower,0.45921504611249564,423,0.5464644147667148,True
-poverty_share,validate 2024,surge days,snow_ice,3,self-relative,higher,8.02431447415095,lower,9.062097574347105,423,0.885480917449631,False
-poverty_share,validate 2024,surge days,snow_ice,7,raw,higher,19.61,lower,23.27354260089686,423,0.8425876685934489,False
-poverty_share,validate 2024,surge days,snow_ice,7,per capita,higher,0.3516405282797143,lower,0.695300888156491,423,0.5057386439014167,True
-poverty_share,validate 2024,surge days,snow_ice,7,self-relative,higher,7.790579069208275,lower,8.930539982313244,423,0.8723525211955113,False
-poverty_share,validate 2024,surge days,snow_ice,28,raw,higher,27.205,lower,27.83408071748879,423,0.9773989044627034,False
-poverty_share,validate 2024,surge days,snow_ice,28,per capita,higher,0.4574513599041517,lower,0.8201167838181926,423,0.5577880722967398,True
-poverty_share,validate 2024,surge days,snow_ice,28,self-relative,higher,4.945552104718146,lower,5.7090673651542705,423,0.8662626990362212,False
-poverty_share,validate 2024,surge days,tree,last,raw,higher,1.27,lower,2.2376681614349776,423,0.5675551102204409,True
-poverty_share,validate 2024,surge days,tree,last,per capita,higher,0.02244543957278383,lower,0.06489517492492976,423,0.3458722408676537,True
-poverty_share,validate 2024,surge days,tree,last,self-relative,higher,1.0204014040719707,lower,1.517755344227264,423,0.6723095444552616,True
-poverty_share,validate 2024,surge days,tree,3,raw,higher,3.71,lower,5.488789237668161,423,0.6759232026143791,True
-poverty_share,validate 2024,surge days,tree,3,per capita,higher,0.06604907335848255,lower,0.1654606007523431,423,0.399183086838558,True
-poverty_share,validate 2024,surge days,tree,3,self-relative,higher,1.01020032243927,lower,1.4818078344547903,423,0.6817350394229482,True
-poverty_share,validate 2024,surge days,tree,7,raw,lower,11.399103139013453,higher,12.035,423,0.9471627036986666,False
-poverty_share,validate 2024,surge days,tree,7,per capita,higher,0.21066804882890489,lower,0.36678447979746903,423,0.574364675804253,True
-poverty_share,validate 2024,surge days,tree,7,self-relative,higher,1.3488060387286454,lower,1.4634120838493496,423,0.9216857326890145,False
-poverty_share,validate 2024,surge days,tree,28,raw,lower,42.30493273542601,higher,50.515,423,0.8374726860422846,False
-poverty_share,validate 2024,surge days,tree,28,per capita,higher,0.9375584553270193,lower,1.3583040302280702,423,0.6902419741547816,True
-poverty_share,validate 2024,surge days,tree,28,self-relative,lower,1.511908869661483,higher,1.6516082696536025,423,0.9154161416124302,False
+poverty_share,validate 2024,surge days,snow_ice,last,raw,higher,5.141414141414141,lower,5.798206278026906,421,0.886724944729585,False
+poverty_share,validate 2024,surge days,snow_ice,last,per capita,higher,0.10183693798357416,lower,0.1716018013791511,421,0.5934491197943037,True
+poverty_share,validate 2024,surge days,snow_ice,last,self-relative,higher,4.775815076836738,lower,5.2621042888173655,421,0.9075865499256536,False
+poverty_share,validate 2024,surge days,snow_ice,3,raw,higher,13.535353535353535,lower,15.394618834080717,421,0.8792262855764167,False
+poverty_share,validate 2024,surge days,snow_ice,3,per capita,higher,0.2523645468219648,lower,0.45921504611249564,421,0.5495563548241015,True
+poverty_share,validate 2024,surge days,snow_ice,3,self-relative,higher,8.07877452033577,lower,9.062097574347105,421,0.8914905687183379,False
+poverty_share,validate 2024,surge days,snow_ice,7,raw,higher,19.7020202020202,lower,23.27354260089686,421,0.8465415231311185,False
+poverty_share,validate 2024,surge days,snow_ice,7,per capita,higher,0.35399543878048084,lower,0.695300888156491,421,0.5091255380372925,True
+poverty_share,validate 2024,surge days,snow_ice,7,self-relative,higher,7.859831192424256,lower,8.930539982313244,421,0.8801070492927073,False
+poverty_share,validate 2024,surge days,snow_ice,28,raw,higher,27.363636363636363,lower,27.83408071748879,421,0.9830982614936216,False
+poverty_share,validate 2024,surge days,snow_ice,28,per capita,higher,0.46069723199907603,lower,0.8201167838181926,421,0.5617458892308264,True
+poverty_share,validate 2024,surge days,snow_ice,28,self-relative,higher,4.994260939787282,lower,5.7090673651542705,421,0.8747945365420167,False
+poverty_share,validate 2024,surge days,tree,last,raw,higher,1.2676767676767677,lower,2.2376681614349776,421,0.5665168721280945,True
+poverty_share,validate 2024,surge days,tree,last,per capita,higher,0.02240540915731472,lower,0.06489517492492976,421,0.3452553935363165,True
+poverty_share,validate 2024,surge days,tree,last,self-relative,higher,1.0192370057047195,lower,1.517755344227264,421,0.6715423599602902,True
+poverty_share,validate 2024,surge days,tree,3,raw,higher,3.7323232323232323,lower,5.488789237668161,421,0.6799902620981052,True
+poverty_share,validate 2024,surge days,tree,3,per capita,higher,0.06644948368832353,lower,0.1654606007523431,421,0.4016030607055712,True
+poverty_share,validate 2024,surge days,tree,3,self-relative,higher,1.0150521832616786,lower,1.4818078344547903,421,0.6850093241915894,True
+poverty_share,validate 2024,surge days,tree,7,raw,lower,11.399103139013453,higher,12.1010101010101,421,0.9419960023057863,False
+poverty_share,validate 2024,surge days,tree,7,per capita,higher,0.21196154318638324,lower,0.36678447979746903,421,0.5778912545684161,True
+poverty_share,validate 2024,surge days,tree,7,self-relative,higher,1.3558526128497592,lower,1.4634120838493496,421,0.926500900063182,False
+poverty_share,validate 2024,surge days,tree,28,raw,lower,42.30493273542601,higher,50.015151515151516,421,0.8458423388482631,False
+poverty_share,validate 2024,surge days,tree,28,per capita,higher,0.9344157755312152,lower,1.3583040302280702,421,0.6879282949446298,True
+poverty_share,validate 2024,surge days,tree,28,self-relative,lower,1.511908869661483,higher,1.6413822477408868,421,0.9211193015779205,False
 poverty_share,2025 onward,all labeled days,snow_ice,last,raw,lower,1.926721970839618,higher,2.3204442616207324,15249,0.8303246075360948,False
 poverty_share,2025 onward,all labeled days,snow_ice,last,per capita,higher,0.050640922034386374,lower,0.07288150554652328,15249,0.6948391317473563,True
 poverty_share,2025 onward,all labeled days,snow_ice,last,self-relative,lower,1.4593831304997813,higher,1.4814434421088367,15249,0.9851089073116065,False
@@ -119,30 +119,30 @@ poverty_share,2025 onward,all labeled days,tree,7,self-relative,lower,0.88448485
 poverty_share,2025 onward,all labeled days,tree,28,raw,higher,22.15412038941451,lower,22.92885872297637,15249,0.9662112125630782,False
 poverty_share,2025 onward,all labeled days,tree,28,per capita,higher,0.49866018211776214,lower,0.8534848376182509,15249,0.5842636683615043,True
 poverty_share,2025 onward,all labeled days,tree,28,self-relative,lower,0.8482554959086873,higher,0.9541097271974534,15249,0.8890544470186924,False
-poverty_share,2025 onward,surge days,snow_ice,last,raw,lower,24.48081841432225,higher,33.49404761904762,727,0.7309005675504066,True
-poverty_share,2025 onward,surge days,snow_ice,last,per capita,higher,0.6874791932138008,lower,0.9281553803751961,727,0.7406940774678215,True
-poverty_share,2025 onward,surge days,snow_ice,last,self-relative,lower,8.354935515336924,higher,9.107797938943358,727,0.9173386993592243,False
-poverty_share,2025 onward,surge days,snow_ice,3,raw,lower,64.68797953964194,higher,87.62797619047619,727,0.7382114976503649,True
-poverty_share,2025 onward,surge days,snow_ice,3,per capita,higher,1.7890164298989006,lower,2.4572470393099217,727,0.7280572125142604,True
-poverty_share,2025 onward,surge days,snow_ice,3,self-relative,lower,10.049403428660694,higher,10.557358410098669,727,0.9518861668130838,False
-poverty_share,2025 onward,surge days,snow_ice,7,raw,lower,127.48593350383632,higher,175.7470238095238,727,0.7253945514434812,True
-poverty_share,2025 onward,surge days,snow_ice,7,per capita,higher,3.5020655071423117,lower,4.827795696541288,727,0.7253963769948362,True
-poverty_share,2025 onward,surge days,snow_ice,7,self-relative,lower,9.604631547088305,higher,10.124553674417612,727,0.9486474027350925,False
-poverty_share,2025 onward,surge days,snow_ice,28,raw,lower,268.0971867007673,higher,405.79761904761904,727,0.6606672245391044,True
-poverty_share,2025 onward,surge days,snow_ice,28,per capita,higher,7.6638087476815215,lower,9.843311247010467,727,0.7785803532331779,True
-poverty_share,2025 onward,surge days,snow_ice,28,self-relative,lower,5.175534811361478,higher,5.892849497553472,727,0.8782737135082441,False
-poverty_share,2025 onward,surge days,tree,last,raw,lower,0.7186700767263428,higher,0.7886904761904762,727,0.9112194180379289,False
-poverty_share,2025 onward,surge days,tree,last,per capita,higher,0.010356687005415638,lower,0.023357383556899675,727,0.44340099053416093,True
-poverty_share,2025 onward,surge days,tree,last,self-relative,higher,0.9439708021272397,lower,0.9803591433677755,727,0.9628826420534694,False
-poverty_share,2025 onward,surge days,tree,3,raw,lower,2.0179028132992327,higher,2.175595238095238,727,0.9275175721867882,False
-poverty_share,2025 onward,surge days,tree,3,per capita,higher,0.030478899067260597,lower,0.06610605259342281,727,0.4610606422791168,True
-poverty_share,2025 onward,surge days,tree,3,self-relative,higher,0.8606952847498901,lower,0.9104502177958121,727,0.9453512865685528,False
-poverty_share,2025 onward,surge days,tree,7,raw,lower,4.329923273657289,higher,4.375,727,0.9896967482645231,False
-poverty_share,2025 onward,surge days,tree,7,per capita,higher,0.06600517165658441,lower,0.1421305129895151,727,0.46439832143189114,True
-poverty_share,2025 onward,surge days,tree,7,self-relative,higher,0.7759904246159612,lower,0.8145920746637758,727,0.9526122936271538,False
-poverty_share,2025 onward,surge days,tree,28,raw,lower,16.736572890025574,higher,17.446428571428573,727,0.9593122639113941,False
-poverty_share,2025 onward,surge days,tree,28,per capita,higher,0.26547198632707275,lower,0.5752342703146125,727,0.4615023826412121,True
-poverty_share,2025 onward,surge days,tree,28,self-relative,higher,0.6419357667585167,lower,0.762463164717332,727,0.8419236449232292,False
+poverty_share,2025 onward,surge days,snow_ice,last,raw,lower,24.543589743589745,higher,34.13373860182371,719,0.7190419435121127,True
+poverty_share,2025 onward,surge days,snow_ice,last,per capita,higher,0.7015136041465064,lower,0.9305352659659017,719,0.7538818030913967,True
+poverty_share,2025 onward,surge days,snow_ice,last,self-relative,lower,8.373794324350609,higher,9.270784524714596,719,0.903245491471327,False
+poverty_share,2025 onward,surge days,snow_ice,3,raw,lower,64.85384615384615,higher,89.17021276595744,719,0.7273039296661343,True
+poverty_share,2025 onward,surge days,snow_ice,3,per capita,higher,1.8244623830049735,lower,2.46354767274405,719,0.7405833478240654,True
+poverty_share,2025 onward,surge days,snow_ice,3,self-relative,lower,10.072607027195723,higher,10.734992350217391,719,0.9382966189996162,False
+poverty_share,2025 onward,surge days,snow_ice,7,raw,lower,127.81282051282051,higher,179.05775075987842,719,0.7138078076509582,True
+poverty_share,2025 onward,surge days,snow_ice,7,per capita,higher,3.57309480428709,lower,4.8401746598657525,719,0.7382160883397116,True
+poverty_share,2025 onward,surge days,snow_ice,7,self-relative,lower,9.626694704901352,higher,10.282443853050948,719,0.9362263332023908,False
+poverty_share,2025 onward,surge days,snow_ice,28,raw,lower,268.7846153846154,higher,411.3829787234043,719,0.6533683435778083,True
+poverty_share,2025 onward,surge days,snow_ice,28,per capita,higher,7.802094159853144,lower,9.868550506618186,719,0.7906018370804095,True
+poverty_share,2025 onward,surge days,snow_ice,28,self-relative,lower,5.186241310877789,higher,5.931164058282281,719,0.8744053039024807,False
+poverty_share,2025 onward,surge days,tree,last,raw,higher,0.7142857142857143,lower,0.717948717948718,719,0.9948979591836735,False
+poverty_share,2025 onward,surge days,tree,last,per capita,higher,0.00983603461785435,lower,0.023362593260252397,719,0.42101638753385917,True
+poverty_share,2025 onward,surge days,tree,last,self-relative,higher,0.938987470515777,lower,0.9808631827513243,719,0.9573072850812019,False
+poverty_share,2025 onward,surge days,tree,3,raw,higher,1.9848024316109423,lower,2.017948717948718,719,0.9835742672531989,False
+poverty_share,2025 onward,surge days,tree,3,per capita,higher,0.0292007669628604,lower,0.0661661932449478,719,0.44132457272793246,True
+poverty_share,2025 onward,surge days,tree,3,self-relative,higher,0.8585205264252234,lower,0.9114354499506236,719,0.9419433120269056,False
+poverty_share,2025 onward,surge days,tree,7,raw,higher,3.9635258358662613,lower,4.328205128205128,719,0.9157435284288163,False
+poverty_share,2025 onward,surge days,tree,7,per capita,higher,0.06330929589704214,lower,0.14222154508372745,719,0.44514560617219584,True
+poverty_share,2025 onward,surge days,tree,7,self-relative,higher,0.7716608793388754,lower,0.8154275311502373,719,0.9463267425498562,False
+poverty_share,2025 onward,surge days,tree,28,raw,higher,15.854103343465045,lower,16.746153846153845,719,0.9467310218881286,False
+poverty_share,2025 onward,surge days,tree,28,per capita,higher,0.25516396646407835,lower,0.5759983766737745,719,0.4429942458129433,True
+poverty_share,2025 onward,surge days,tree,28,self-relative,higher,0.634873959242307,lower,0.7637954513298316,719,0.8312094005495038,False
 poc_share,train 2015 to 2023,all labeled days,snow_ice,last,raw,lower,0.6043109418282548,higher,0.9582284059430873,66424,0.630654380605105,True
 poc_share,train 2015 to 2023,all labeled days,snow_ice,last,per capita,higher,0.021680332315232028,lower,0.024678262224721245,66424,0.8785194078014916,False
 poc_share,train 2015 to 2023,all labeled days,snow_ice,last,self-relative,lower,1.0164241058656904,higher,1.0272175708400604,66424,0.9894925230245594,False
@@ -167,30 +167,30 @@ poc_share,train 2015 to 2023,all labeled days,tree,7,self-relative,lower,1.22468
 poc_share,train 2015 to 2023,all labeled days,tree,28,raw,lower,21.161876731301938,higher,29.449571896247797,66424,0.7185801140286932,True
 poc_share,train 2015 to 2023,all labeled days,tree,28,per capita,higher,0.6605246344597732,lower,0.8809284303663159,66424,0.7498051052627598,True
 poc_share,train 2015 to 2023,all labeled days,tree,28,self-relative,higher,1.3707239488953313,lower,1.38458677407692,66424,0.9899877527063403,False
-poc_share,train 2015 to 2023,surge days,snow_ice,last,raw,lower,6.079787234042553,higher,8.246081504702195,2404,0.7372940990912656,True
-poc_share,train 2015 to 2023,surge days,snow_ice,last,per capita,higher,0.1769552829366455,lower,0.2324600724872418,2404,0.7612287178752274,True
-poc_share,train 2015 to 2023,surge days,snow_ice,last,self-relative,lower,3.0884955269833094,higher,3.21338003332145,2404,0.9611360918898049,False
-poc_share,train 2015 to 2023,surge days,snow_ice,3,raw,lower,13.90514184397163,higher,18.371473354231973,2404,0.7568876799295198,True
-poc_share,train 2015 to 2023,surge days,snow_ice,3,per capita,higher,0.3961649293799023,lower,0.5213271100492185,2404,0.7599162248487333,True
-poc_share,train 2015 to 2023,surge days,snow_ice,3,self-relative,higher,3.321399575468742,lower,3.3668124965902884,2404,0.986511597789441,False
-poc_share,train 2015 to 2023,surge days,snow_ice,7,raw,lower,22.07358156028369,higher,29.84090909090909,2404,0.7397087499257291,True
-poc_share,train 2015 to 2023,surge days,snow_ice,7,per capita,higher,0.627633029648839,lower,0.8127650453182756,2404,0.772219515669575,True
-poc_share,train 2015 to 2023,surge days,snow_ice,7,self-relative,higher,2.6138258642143324,lower,2.6685981333406357,2404,0.9794752651431493,False
-poc_share,train 2015 to 2023,surge days,snow_ice,28,raw,lower,48.0540780141844,higher,62.27664576802508,2404,0.7716227716113924,True
-poc_share,train 2015 to 2023,surge days,snow_ice,28,per capita,higher,1.2838941184619408,lower,1.740433044076948,2404,0.7376865906053076,True
-poc_share,train 2015 to 2023,surge days,snow_ice,28,self-relative,higher,1.8388869501504248,lower,1.9316761364209523,2404,0.9519644186098146,False
-poc_share,train 2015 to 2023,surge days,tree,last,raw,lower,1.6054964539007093,higher,1.7664576802507836,2404,0.9088790928027085,False
-poc_share,train 2015 to 2023,surge days,tree,last,per capita,higher,0.03558848578774461,lower,0.05296318707974165,2404,0.6719475875604388,True
-poc_share,train 2015 to 2023,surge days,tree,last,self-relative,lower,1.398775942788213,higher,1.4414728573763045,2404,0.9703796610740169,False
-poc_share,train 2015 to 2023,surge days,tree,3,raw,lower,4.054078014184397,higher,4.52115987460815,2404,0.8966898155831672,False
-poc_share,train 2015 to 2023,surge days,tree,3,per capita,higher,0.0890254194448135,lower,0.13516192371827873,2404,0.6586575345758716,True
-poc_share,train 2015 to 2023,surge days,tree,3,self-relative,lower,1.4996829361681738,higher,1.531632047053722,2404,0.9791404789766537,False
-poc_share,train 2015 to 2023,surge days,tree,7,raw,lower,9.444148936170214,higher,10.9717868338558,2404,0.8607667173252279,False
-poc_share,train 2015 to 2023,surge days,tree,7,per capita,higher,0.21852270092276063,lower,0.31121837712676376,2404,0.7021523052083559,True
-poc_share,train 2015 to 2023,surge days,tree,7,self-relative,lower,1.5955218570389407,higher,1.68158536122535,2404,0.948820020576478,False
-poc_share,train 2015 to 2023,surge days,tree,28,raw,lower,31.891843971631207,higher,35.98667711598746,2404,0.8862125243973392,False
-poc_share,train 2015 to 2023,surge days,tree,28,per capita,higher,0.7238237432562887,lower,1.0701348977322571,2404,0.6763855143778202,True
-poc_share,train 2015 to 2023,surge days,tree,28,self-relative,lower,1.5017091176951536,higher,1.52585604623435,2404,0.9841748318271645,False
+poc_share,train 2015 to 2023,surge days,snow_ice,last,raw,lower,6.086375779162957,higher,8.303317535545023,2389,0.7330053021708812,True
+poc_share,train 2015 to 2023,surge days,snow_ice,last,per capita,higher,0.1781267218317245,lower,0.23290282803453208,2389,0.7648113306950227,True
+poc_share,train 2015 to 2023,surge days,snow_ice,last,self-relative,lower,3.091375672219957,higher,3.2314826054513444,2389,0.9566431417594405,False
+poc_share,train 2015 to 2023,surge days,snow_ice,3,raw,lower,13.857524487978628,higher,18.481042654028435,2389,0.7498237381621978,True
+poc_share,train 2015 to 2023,surge days,snow_ice,3,per capita,higher,0.3982470693867821,lower,0.5204810476413694,2389,0.7651519131993236,True
+poc_share,train 2015 to 2023,surge days,snow_ice,3,self-relative,higher,3.3397238538330294,lower,3.356740854902253,2389,0.9949304990153257,False
+poc_share,train 2015 to 2023,surge days,snow_ice,7,raw,lower,21.933214603739984,higher,29.88309636650869,2389,0.7339672681416478,True
+poc_share,train 2015 to 2023,surge days,snow_ice,7,per capita,higher,0.6268673718882883,lower,0.8094828804498476,2389,0.7744047305113163,True
+poc_share,train 2015 to 2023,surge days,snow_ice,7,self-relative,higher,2.6213929352074268,lower,2.6499119275133536,2389,0.9892377584289419,False
+poc_share,train 2015 to 2023,surge days,snow_ice,28,raw,lower,47.956366874443454,higher,62.53791469194313,2389,0.7668366799672288,True
+poc_share,train 2015 to 2023,surge days,snow_ice,28,per capita,higher,1.2875659310923058,lower,1.7391274066952374,2389,0.7403516994416139,True
+poc_share,train 2015 to 2023,surge days,snow_ice,28,self-relative,higher,1.8454367536603147,lower,1.9245462007610332,2389,0.9588944931176836,False
+poc_share,train 2015 to 2023,surge days,tree,last,raw,lower,1.608192341941229,higher,1.7385466034755135,2389,0.9250211289857319,False
+poc_share,train 2015 to 2023,surge days,tree,last,per capita,higher,0.0354665268175629,lower,0.053109494384129034,2389,0.6678001217831502,True
+poc_share,train 2015 to 2023,surge days,tree,last,self-relative,lower,1.4006023663584808,higher,1.442599020811582,2389,0.9708881998065724,False
+poc_share,train 2015 to 2023,surge days,tree,3,raw,lower,4.046304541406946,higher,4.3593996840442335,2389,0.9281792986811368,False
+poc_share,train 2015 to 2023,surge days,tree,3,per capita,higher,0.0879488182606452,lower,0.13528187268704592,2389,0.6501153222804761,True
+poc_share,train 2015 to 2023,surge days,tree,3,self-relative,lower,1.5003307689693213,higher,1.5292649754524306,2389,0.9810796644482431,False
+poc_share,train 2015 to 2023,surge days,tree,7,raw,lower,9.447907390917186,higher,10.751184834123222,2389,0.8787782497172256,False
+poc_share,train 2015 to 2023,surge days,tree,7,per capita,higher,0.21674985547849104,lower,0.3118990527868414,2389,0.6949359209071488,True
+poc_share,train 2015 to 2023,surge days,tree,7,self-relative,lower,1.598362864876525,higher,1.6788473611534354,2389,0.9520596701408195,False
+poc_share,train 2015 to 2023,surge days,tree,28,raw,lower,31.859305431878894,higher,35.44233807266983,2389,0.8989052970082166,False
+poc_share,train 2015 to 2023,surge days,tree,28,per capita,higher,0.7201749422290508,lower,1.0715535721385607,2389,0.672084869067028,True
+poc_share,train 2015 to 2023,surge days,tree,28,self-relative,lower,1.5019121445264627,higher,1.5267121839375255,2389,0.9837559170143639,False
 poc_share,validate 2024,all labeled days,snow_ice,last,raw,lower,0.4544626593806922,higher,0.674615002483855,8418,0.6736622484045165,True
 poc_share,validate 2024,all labeled days,snow_ice,last,per capita,higher,0.01554169911376362,lower,0.01792930700106522,8418,0.866832115309323,False
 poc_share,validate 2024,all labeled days,snow_ice,last,self-relative,lower,1.1890921930872211,higher,1.2709758713781427,8418,0.9355741677439292,False
@@ -215,30 +215,30 @@ poc_share,validate 2024,all labeled days,tree,7,self-relative,lower,1.2892480770
 poc_share,validate 2024,all labeled days,tree,28,raw,lower,26.266848816029142,higher,38.4304520615996,8418,0.6834904979500736,True
 poc_share,validate 2024,all labeled days,tree,28,per capita,higher,0.8767304301912723,lower,1.0713759503334725,8418,0.8183219251079739,False
 poc_share,validate 2024,all labeled days,tree,28,self-relative,lower,1.458704707342912,higher,1.527889434302037,8418,0.9547187607912678,False
-poc_share,validate 2024,surge days,snow_ice,last,raw,lower,4.785340314136126,higher,6.086206896551724,423,0.7862598816427628,True
-poc_share,validate 2024,surge days,snow_ice,last,per capita,higher,0.1319217428696729,lower,0.14651771630407806,423,0.9003808290042334,False
-poc_share,validate 2024,surge days,snow_ice,last,self-relative,lower,4.556181492716088,higher,5.419080180745672,423,0.8407665767530961,False
-poc_share,validate 2024,surge days,snow_ice,3,raw,lower,12.424083769633508,higher,16.20258620689655,423,0.7667963380034515,True
-poc_share,validate 2024,surge days,snow_ice,3,per capita,higher,0.34500092439846997,lower,0.37986218381062037,423,0.908226559794827,False
-poc_share,validate 2024,surge days,snow_ice,3,self-relative,lower,7.505679017163172,higher,9.448818800135468,423,0.7943510375133411,True
-poc_share,validate 2024,surge days,snow_ice,7,raw,lower,17.602094240837697,higher,24.78448275862069,423,0.7102062371955383,True
-poc_share,validate 2024,surge days,snow_ice,7,per capita,higher,0.5308007126260159,lower,0.5352588397152078,423,0.9916710818049004,False
-poc_share,validate 2024,surge days,snow_ice,7,self-relative,lower,7.189058741882953,higher,9.381534526714931,423,0.7662988097961301,True
-poc_share,validate 2024,surge days,snow_ice,28,raw,lower,21.099476439790575,higher,32.83620689655172,423,0.642567410610582,True
-poc_share,validate 2024,surge days,snow_ice,28,per capita,lower,0.6329825433409854,higher,0.6615372801472374,423,0.9568357858836063,False
-poc_share,validate 2024,surge days,snow_ice,28,self-relative,lower,4.516269138742988,higher,6.0328665425565555,423,0.7486108149226723,True
-poc_share,validate 2024,surge days,tree,last,raw,lower,1.225130890052356,higher,2.2370689655172415,423,0.5476500317767757,True
-poc_share,validate 2024,surge days,tree,last,per capita,lower,0.04210115567673719,higher,0.04706634132999697,423,0.8945066577738154,False
-poc_share,validate 2024,surge days,tree,last,self-relative,lower,1.130481638299692,higher,1.4078350416458314,423,0.8029929678253362,False
-poc_share,validate 2024,surge days,tree,3,raw,lower,3.2408376963350785,higher,5.806034482758621,423,0.5581843693761976,True
-poc_share,validate 2024,surge days,tree,3,per capita,lower,0.11088502551188498,higher,0.12469176192542668,423,0.8892730666377224,False
-poc_share,validate 2024,surge days,tree,3,self-relative,lower,1.1276164192784004,higher,1.36684687710818,423,0.8249764023780656,False
-poc_share,validate 2024,surge days,tree,7,raw,lower,8.738219895287958,higher,14.137931034482758,423,0.6180692121057336,True
-poc_share,validate 2024,surge days,tree,7,per capita,higher,0.2855329181659747,lower,0.30200477353984523,423,0.9454582946461364,False
-poc_share,validate 2024,surge days,tree,7,self-relative,lower,1.2619135613914334,higher,1.5305026388722855,423,0.8245092359469857,False
-poc_share,validate 2024,surge days,tree,28,raw,lower,39.86387434554974,higher,51.39224137931034,423,0.7756788432582018,True
-poc_share,validate 2024,surge days,tree,28,per capita,higher,1.0411317654174117,lower,1.3029891111488168,423,0.799033358382764,True
-poc_share,validate 2024,surge days,tree,28,self-relative,lower,1.52726566600736,higher,1.6196965071457994,423,0.9429332342629303,False
+poc_share,validate 2024,surge days,snow_ice,last,raw,lower,4.785340314136126,higher,6.073913043478261,421,0.7878513044032275,True
+poc_share,validate 2024,surge days,snow_ice,last,per capita,higher,0.13237405049660636,lower,0.14651771630407806,421,0.9034678797605717,False
+poc_share,validate 2024,surge days,snow_ice,last,self-relative,lower,4.556181492716088,higher,5.4296955500485815,421,0.8391228293960832,False
+poc_share,validate 2024,surge days,snow_ice,3,raw,lower,12.424083769633508,higher,16.26086956521739,421,0.764047932357141,True
+poc_share,validate 2024,surge days,snow_ice,3,per capita,higher,0.34704112367829165,lower,0.37986218381062037,421,0.9135974531524002,False
+poc_share,validate 2024,surge days,snow_ice,3,self-relative,lower,7.505679017163172,higher,9.508088790555309,421,0.7893993401301431,True
+poc_share,validate 2024,surge days,snow_ice,7,raw,lower,17.602094240837697,higher,24.908695652173915,421,0.7066646317669175,True
+poc_share,validate 2024,surge days,snow_ice,7,per capita,higher,0.5343858980514263,lower,0.5352588397152078,421,0.9983691223777903,False
+poc_share,validate 2024,surge days,snow_ice,7,self-relative,lower,7.189058741882953,higher,9.454985967200923,421,0.7603457865322691,True
+poc_share,validate 2024,surge days,snow_ice,28,raw,lower,21.099476439790575,higher,33.02173913043478,421,0.6389571535420451,True
+poc_share,validate 2024,surge days,snow_ice,28,per capita,lower,0.6329825433409854,higher,0.666106212822373,421,0.9502726909856632,False
+poc_share,validate 2024,surge days,snow_ice,28,self-relative,lower,4.516269138742988,higher,6.084253404379885,421,0.7422881393289523,True
+poc_share,validate 2024,surge days,tree,last,raw,lower,1.225130890052356,higher,2.243478260869565,421,0.5460854742481432,True
+poc_share,validate 2024,surge days,tree,last,per capita,lower,0.04210115567673719,higher,0.047245975161525414,421,0.8911056557262492,False
+poc_share,validate 2024,surge days,tree,last,self-relative,lower,1.130481638299692,higher,1.410201634682492,421,0.8016453892100479,False
+poc_share,validate 2024,surge days,tree,3,raw,lower,3.2408376963350785,higher,5.843478260869565,421,0.5546076414859137,True
+poc_share,validate 2024,surge days,tree,3,per capita,lower,0.11088502551188498,higher,0.12554639941430668,421,0.8832194792457667,False
+poc_share,validate 2024,surge days,tree,3,self-relative,lower,1.1276164192784004,higher,1.3741249708132877,421,0.8206068903696663,False
+poc_share,validate 2024,surge days,tree,7,raw,lower,8.738219895287958,higher,14.21304347826087,421,0.6148028681297737,True
+poc_share,validate 2024,surge days,tree,7,per capita,higher,0.28729744695490883,lower,0.30200477353984523,421,0.9513010128530436,False
+poc_share,validate 2024,surge days,tree,7,self-relative,lower,1.2619135613914334,higher,1.5381487905082327,421,0.8204105930314283,False
+poc_share,validate 2024,surge days,tree,28,raw,lower,39.86387434554974,higher,50.969565217391306,421,0.7821113281136604,True
+poc_share,validate 2024,surge days,tree,28,per capita,higher,1.0393269655070272,lower,1.3029891111488168,421,0.7976482355947515,True
+poc_share,validate 2024,surge days,tree,28,self-relative,lower,1.52726566600736,higher,1.6106157425208718,421,0.9482495580335906,False
 poc_share,2025 onward,all labeled days,snow_ice,last,raw,lower,1.6206636500754148,higher,2.654326066090772,15249,0.6105744395082137,True
 poc_share,2025 onward,all labeled days,snow_ice,last,per capita,higher,0.05806733544509891,lower,0.06607395992003681,15249,0.8788232991540452,False
 poc_share,2025 onward,all labeled days,snow_ice,last,self-relative,lower,1.413862129474912,higher,1.5311027159541486,15249,0.9234273538557635,False
@@ -263,30 +263,30 @@ poc_share,2025 onward,all labeled days,tree,7,self-relative,higher,0.89055483388
 poc_share,2025 onward,all labeled days,tree,28,raw,lower,18.899069884364003,higher,26.550253667900726,15249,0.7118225731761272,True
 poc_share,2025 onward,all labeled days,tree,28,per capita,higher,0.5879283678177043,lower,0.7716556673933038,15249,0.761905073287104,True
 poc_share,2025 onward,all labeled days,tree,28,self-relative,lower,0.8934249186403582,higher,0.9048339933083578,15249,0.9873909747507558,False
-poc_share,2025 onward,surge days,snow_ice,last,raw,lower,23.96439169139466,higher,32.69230769230769,727,0.7330284517367778,True
-poc_share,2025 onward,surge days,snow_ice,last,per capita,higher,0.6922957340473717,lower,0.9611466657806046,727,0.7202810545933871,True
-poc_share,2025 onward,surge days,snow_ice,last,self-relative,lower,8.582670854236328,higher,8.806768759241189,727,0.974553901535145,False
-poc_share,2025 onward,surge days,snow_ice,3,raw,lower,63.54005934718101,higher,85.44358974358974,727,0.7436492256219606,True
-poc_share,2025 onward,surge days,snow_ice,3,per capita,higher,1.812345460984015,lower,2.5373245787312886,727,0.7142741910813093,True
-poc_share,2025 onward,surge days,snow_ice,3,self-relative,higher,9.947987989090537,lower,10.673216174047997,727,0.9320515790993854,False
-poc_share,2025 onward,surge days,snow_ice,7,raw,lower,120.20474777448071,higher,175.35641025641024,727,0.6854881871652968,True
-poc_share,2025 onward,surge days,snow_ice,7,per capita,higher,3.657169801159887,lower,4.860729689302981,727,0.7523911089333416,True
-poc_share,2025 onward,surge days,snow_ice,7,self-relative,higher,9.519288985647199,lower,10.221775267398925,727,0.9312755110169347,False
-poc_share,2025 onward,surge days,snow_ice,28,raw,lower,251.51632047477744,higher,401.05897435897435,727,0.6271305133535141,True
-poc_share,2025 onward,surge days,snow_ice,28,per capita,higher,7.987202256662908,lower,9.818295420485313,727,0.8135019282469405,False
-poc_share,2025 onward,surge days,snow_ice,28,self-relative,lower,5.380199700786679,higher,5.616677546808189,727,0.957897200960754,False
-poc_share,2025 onward,surge days,tree,last,raw,lower,0.6261127596439169,higher,0.8589743589743589,727,0.7289073918242615,True
-poc_share,2025 onward,surge days,tree,last,per capita,higher,0.014422889264927158,lower,0.020734887214379334,727,0.69558561451567,True
-poc_share,2025 onward,surge days,tree,last,self-relative,higher,0.9535027613930698,lower,0.9751588653657436,727,0.9777922298183164,False
-poc_share,2025 onward,surge days,tree,3,raw,lower,1.771513353115727,higher,2.3666666666666667,727,0.7485267689221382,True
-poc_share,2025 onward,surge days,tree,3,per capita,higher,0.040499334375069744,lower,0.060218505176114774,727,0.6725396828869393,True
-poc_share,2025 onward,surge days,tree,3,self-relative,higher,0.8765506399528322,lower,0.900073890957036,727,0.9738652001346335,False
-poc_share,2025 onward,surge days,tree,7,raw,lower,3.7091988130563798,higher,4.9051282051282055,727,0.7561879441149963,True
-poc_share,2025 onward,surge days,tree,7,per capita,higher,0.08959468068054237,lower,0.12702920709228857,727,0.7053077219906642,True
-poc_share,2025 onward,surge days,tree,7,self-relative,higher,0.7956937872478703,lower,0.7979753912101779,727,0.997140758991518,False
-poc_share,2025 onward,surge days,tree,28,raw,lower,14.626112759643917,higher,19.171794871794873,727,0.7628974155759164,True
-poc_share,2025 onward,surge days,tree,28,per capita,higher,0.3442666295412713,lower,0.5336830907353535,727,0.6450768921063468,True
-poc_share,2025 onward,surge days,tree,28,self-relative,higher,0.6469297288666318,lower,0.775996797558908,727,0.8336757714744584,False
+poc_share,2025 onward,surge days,snow_ice,last,raw,lower,23.96439169139466,higher,33.31413612565445,719,0.7193460337979538,True
+poc_share,2025 onward,surge days,snow_ice,last,per capita,higher,0.706283516028373,lower,0.9611466657806046,719,0.734834277820397,True
+poc_share,2025 onward,surge days,snow_ice,last,self-relative,lower,8.582670854236328,higher,8.962062348822506,719,0.9576669431856804,False
+poc_share,2025 onward,surge days,snow_ice,3,raw,lower,63.54005934718101,higher,86.95549738219896,719,0.7307192904423381,True
+poc_share,2025 onward,surge days,snow_ice,3,per capita,higher,1.8480453752522812,lower,2.5373245787312886,719,0.7283440954867271,True
+poc_share,2025 onward,surge days,snow_ice,3,self-relative,higher,10.11323396118764,lower,10.673216174047997,719,0.9475338825965169,False
+poc_share,2025 onward,surge days,snow_ice,7,raw,lower,120.20474777448071,higher,178.65968586387436,719,0.6728140553547595,True
+poc_share,2025 onward,surge days,snow_ice,7,per capita,higher,3.7307602163952667,lower,4.860729689302981,719,0.7675308965659126,True
+poc_share,2025 onward,surge days,snow_ice,7,self-relative,higher,9.666483501182856,lower,10.221775267398925,719,0.9456756041206362,False
+poc_share,2025 onward,surge days,snow_ice,28,raw,lower,251.51632047477744,higher,406.8324607329843,719,0.6182307085860947,True
+poc_share,2025 onward,surge days,snow_ice,28,per capita,higher,8.133136438401118,lower,9.818295420485313,719,0.8283654229258364,False
+poc_share,2025 onward,surge days,snow_ice,28,self-relative,lower,5.380199700786679,higher,5.656701013748947,719,0.9511196875545984,False
+poc_share,2025 onward,surge days,tree,last,raw,lower,0.6261127596439169,higher,0.7958115183246073,719,0.7867601124472904,True
+poc_share,2025 onward,surge days,tree,last,per capita,higher,0.014030915627033194,lower,0.020734887214379334,719,0.6766815503728887,True
+poc_share,2025 onward,surge days,tree,last,self-relative,higher,0.949829794357203,lower,0.9751588653657436,719,0.9740256978548407,False
+poc_share,2025 onward,surge days,tree,3,raw,lower,1.771513353115727,higher,2.2068062827225132,719,0.8027498231200566,False
+poc_share,2025 onward,surge days,tree,3,per capita,higher,0.03957652212554982,lower,0.060218505176114774,719,0.6572152863941824,True
+poc_share,2025 onward,surge days,tree,3,self-relative,higher,0.8758852812097399,lower,0.900073890957036,719,0.9731259733336151,False
+poc_share,2025 onward,surge days,tree,7,raw,lower,3.7091988130563798,higher,4.560209424083769,719,0.8133834366174151,False
+poc_share,2025 onward,surge days,tree,7,per capita,higher,0.08766051869811341,lower,0.12702920709228857,719,0.6900816017408246,True
+poc_share,2025 onward,surge days,tree,7,self-relative,higher,0.7931294754273629,lower,0.7979753912101779,719,0.993927236558679,False
+poc_share,2025 onward,surge days,tree,28,raw,lower,14.626112759643917,higher,17.848167539267017,719,0.8194741968588993,False
+poc_share,2025 onward,surge days,tree,28,per capita,higher,0.33700814212471136,lower,0.5336830907353535,719,0.6314761475023561,True
+poc_share,2025 onward,surge days,tree,28,self-relative,higher,0.6419969576753962,lower,0.775996797558908,719,0.8273190813350753,False
 limited_english_share,train 2015 to 2023,all labeled days,snow_ice,last,raw,lower,0.5866228070175439,higher,0.9775245530093175,66424,0.6001105600996115,True
 limited_english_share,train 2015 to 2023,all labeled days,snow_ice,last,per capita,higher,0.022879231610561105,lower,0.023579271204002928,66424,0.9703112285623577,False
 limited_english_share,train 2015 to 2023,all labeled days,snow_ice,last,self-relative,lower,1.0129677869249165,higher,1.030988100593632,66424,0.9825213175027533,False
@@ -311,30 +311,30 @@ limited_english_share,train 2015 to 2023,all labeled days,tree,7,self-relative,l
 limited_english_share,train 2015 to 2023,all labeled days,tree,28,raw,lower,19.3066135734072,higher,31.473495341223874,66424,0.6134245136770515,True
 limited_english_share,train 2015 to 2023,all labeled days,tree,28,per capita,higher,0.7377085408010691,lower,0.8101765162201279,66424,0.9105528561144212,False
 limited_english_share,train 2015 to 2023,all labeled days,tree,28,self-relative,higher,1.377372729750789,lower,1.3784920582927507,66424,0.9991880050848113,False
-limited_english_share,train 2015 to 2023,surge days,snow_ice,last,raw,lower,5.782974742750234,higher,8.388014981273407,2404,0.6894330488990501,True
-limited_english_share,train 2015 to 2023,surge days,snow_ice,last,per capita,higher,0.1835602374242881,lower,0.22727501013222057,2404,0.8076569320907707,False
-limited_english_share,train 2015 to 2023,surge days,snow_ice,last,self-relative,lower,2.9649373113974673,higher,3.3067999184055816,2404,0.8966182970111636,False
-limited_english_share,train 2015 to 2023,surge days,snow_ice,3,raw,lower,13.00841908325538,higher,18.892134831460673,2404,0.6885626849112221,True
-limited_english_share,train 2015 to 2023,surge days,snow_ice,3,per capita,higher,0.4135135188709115,lower,0.5065695812269476,2404,0.8163015194661951,False
-limited_english_share,train 2015 to 2023,surge days,snow_ice,3,self-relative,lower,3.1659106854384014,higher,3.4842785256316917,2404,0.9086273276228481,False
-limited_english_share,train 2015 to 2023,surge days,snow_ice,7,raw,lower,20.632366697848457,higher,30.651685393258425,2404,0.6731234003330325,True
-limited_english_share,train 2015 to 2023,surge days,snow_ice,7,per capita,higher,0.6523242461132286,lower,0.79214765985947,2404,0.8234881943966778,False
-limited_english_share,train 2015 to 2023,surge days,snow_ice,7,self-relative,lower,2.5585089261130887,higher,2.7044003409219726,2404,0.9460540613749712,False
-limited_english_share,train 2015 to 2023,surge days,snow_ice,28,raw,lower,47.574368568755844,higher,62.03220973782771,2404,0.7669300959908354,True
-limited_english_share,train 2015 to 2023,surge days,snow_ice,28,per capita,higher,1.284438256856421,lower,1.7649506978231166,2404,0.7277473860548298,True
-limited_english_share,train 2015 to 2023,surge days,snow_ice,28,self-relative,higher,1.8105360672650046,lower,1.9722027880972823,2404,0.9180273337975308,False
-limited_english_share,train 2015 to 2023,surge days,tree,last,raw,lower,1.4770813844714688,higher,1.8621722846441948,2404,0.7932033983384597,True
-limited_english_share,train 2015 to 2023,surge days,tree,last,per capita,higher,0.03974947615916068,lower,0.04872575511565127,2404,0.8157795823751676,False
-limited_english_share,train 2015 to 2023,surge days,tree,last,self-relative,lower,1.3877474548678659,higher,1.448416929006382,2404,0.9581132525286518,False
-limited_english_share,train 2015 to 2023,surge days,tree,3,raw,lower,3.845650140318054,higher,4.667415730337079,2404,0.823935634300209,False
-limited_english_share,train 2015 to 2023,surge days,tree,3,per capita,higher,0.09639575061095955,lower,0.12850398325553736,2404,0.7501382304957132,True
-limited_english_share,train 2015 to 2023,surge days,tree,3,self-relative,higher,1.5156799284159008,lower,1.5178411034640051,2404,0.9985761519811447,False
-limited_english_share,train 2015 to 2023,surge days,tree,7,raw,lower,8.862488306828812,higher,11.37003745318352,2404,0.7794599044480179,True
-limited_english_share,train 2015 to 2023,surge days,tree,7,per capita,higher,0.23464759387071896,lower,0.29619715431152693,2404,0.7922007029950298,True
-limited_english_share,train 2015 to 2023,surge days,tree,7,self-relative,lower,1.592810954832015,higher,1.6799525580135188,2404,0.9481285332934964,False
-limited_english_share,train 2015 to 2023,surge days,tree,28,raw,lower,29.407857811038355,higher,37.794756554307114,2404,0.7780935900137983,True
-limited_english_share,train 2015 to 2023,surge days,tree,28,per capita,higher,0.795846208363769,lower,0.9993045583455369,2404,0.7964000581378149,True
-limited_english_share,train 2015 to 2023,surge days,tree,28,self-relative,lower,1.4865729527915592,higher,1.5369091484801403,2404,0.9672484247111426,False
+limited_english_share,train 2015 to 2023,surge days,snow_ice,last,raw,lower,5.799249530956848,higher,8.43915343915344,2389,0.687183800219965,True
+limited_english_share,train 2015 to 2023,surge days,snow_ice,last,per capita,higher,0.18450591072592512,lower,0.22791462085491912,2389,0.8095395987928912,False
+limited_english_share,train 2015 to 2023,surge days,snow_ice,last,self-relative,lower,2.9717419566566217,higher,3.321840463044939,2389,0.8946070678941027,False
+limited_english_share,train 2015 to 2023,surge days,snow_ice,3,raw,lower,13.044090056285178,higher,18.93726379440665,2389,0.6888054260583257,True
+limited_english_share,train 2015 to 2023,surge days,snow_ice,3,per capita,higher,0.4135913888454274,lower,0.5079733573193466,2389,0.8141989789149823,False
+limited_english_share,train 2015 to 2023,surge days,snow_ice,3,self-relative,lower,3.1735143565636226,higher,3.488090759569934,2389,0.9098141577471174,False
+limited_english_share,train 2015 to 2023,surge days,snow_ice,7,raw,lower,20.68855534709193,higher,30.543461829176113,2389,0.6773480839467105,True
+limited_english_share,train 2015 to 2023,surge days,snow_ice,7,per capita,higher,0.6469418639639799,lower,0.7943332847386554,2389,0.8144463745804522,False
+limited_english_share,train 2015 to 2023,surge days,snow_ice,7,self-relative,lower,2.564583680475266,higher,2.6913744120812275,2389,0.9528899691411146,False
+limited_english_share,train 2015 to 2023,surge days,snow_ice,28,raw,lower,47.68198874296435,higher,62.130763416477706,2389,0.7674457244849917,True
+limited_english_share,train 2015 to 2023,surge days,snow_ice,28,per capita,higher,1.2827490378628368,lower,1.7692510031792472,2389,0.7250237730869203,True
+limited_english_share,train 2015 to 2023,surge days,snow_ice,28,self-relative,higher,1.806713223044173,lower,1.9768355717646886,2389,0.9139420844351509,False
+limited_english_share,train 2015 to 2023,surge days,tree,last,raw,lower,1.477485928705441,higher,1.838246409674981,2389,0.8037474850646786,False
+limited_english_share,train 2015 to 2023,surge days,tree,last,per capita,higher,0.03971873517952693,lower,0.04877551454211764,2389,0.8143170923441477,False
+limited_english_share,train 2015 to 2023,surge days,tree,last,self-relative,lower,1.3885488319838406,higher,1.4505017104106293,2389,0.9572886553789377,False
+limited_english_share,train 2015 to 2023,surge days,tree,3,raw,lower,3.848968105065666,higher,4.504913076341648,2389,0.8543934233224625,False
+limited_english_share,train 2015 to 2023,surge days,tree,3,per capita,higher,0.0952987575803685,lower,0.1286908918074126,2389,0.7405244943285044,True
+limited_english_share,train 2015 to 2023,surge days,tree,3,self-relative,higher,1.5123987118087545,lower,1.5197161507995711,2389,0.9951849962330356,False
+limited_english_share,train 2015 to 2023,surge days,tree,7,raw,lower,8.826454033771107,higher,11.195767195767196,2389,0.7883742024493096,True
+limited_english_share,train 2015 to 2023,surge days,tree,7,per capita,higher,0.23397325642728234,lower,0.29561100850103,2389,0.7914903359441944,True
+limited_english_share,train 2015 to 2023,surge days,tree,7,self-relative,lower,1.5877264733192231,higher,1.683949989356232,2389,0.9428584479080672,False
+limited_english_share,train 2015 to 2023,surge days,tree,28,raw,lower,29.357410881801126,higher,37.30385487528345,2389,0.7869806211704028,True
+limited_english_share,train 2015 to 2023,surge days,tree,28,per capita,higher,0.7938498817684417,lower,0.9989050138779868,2389,0.7947200892370414,True
+limited_english_share,train 2015 to 2023,surge days,tree,28,self-relative,lower,1.4837850616743513,higher,1.5402494991861424,2389,0.9633407200965646,False
 limited_english_share,validate 2024,all labeled days,snow_ice,last,raw,lower,0.4701730418943534,higher,0.6574764033780427,8418,0.7151177433572599,True
 limited_english_share,validate 2024,all labeled days,snow_ice,last,per capita,higher,0.015557320903886314,lower,0.017914987026786084,8418,0.8683969952434439,False
 limited_english_share,validate 2024,all labeled days,snow_ice,last,self-relative,lower,1.1899711770982948,higher,1.2700169797296987,8418,0.9369726516188466,False
@@ -359,30 +359,30 @@ limited_english_share,validate 2024,all labeled days,tree,7,self-relative,lower,
 limited_english_share,validate 2024,all labeled days,tree,28,raw,lower,23.196265938069217,higher,41.78017883755589,8418,0.5551978613652623,True
 limited_english_share,validate 2024,all labeled days,tree,28,per capita,higher,0.9709419062849242,lower,0.9850154305809582,8418,0.9857123818986941,False
 limited_english_share,validate 2024,all labeled days,tree,28,self-relative,lower,1.452765314175678,higher,1.534368772302656,8418,0.9468162676404616,False
-limited_english_share,validate 2024,surge days,snow_ice,last,raw,lower,5.494318181818182,higher,5.502024291497976,423,0.998599404642451,False
-limited_english_share,validate 2024,surge days,snow_ice,last,per capita,higher,0.11787304166681328,lower,0.1674777662962508,423,0.7038130748550114,True
-limited_english_share,validate 2024,surge days,snow_ice,last,self-relative,lower,4.934534936662054,higher,5.097081450158896,423,0.9681098850221875,False
-limited_english_share,validate 2024,surge days,snow_ice,3,raw,lower,14.306818181818182,higher,14.631578947368421,423,0.9778041203400916,False
-limited_english_share,validate 2024,surge days,snow_ice,3,per capita,higher,0.30314928004300246,lower,0.4415682920321131,423,0.6865286423712594,True
-limited_english_share,validate 2024,surge days,snow_ice,3,self-relative,lower,8.10847504889024,higher,8.901291681396406,423,0.9109324061177386,False
-limited_english_share,validate 2024,surge days,snow_ice,7,raw,higher,21.497975708502025,lower,21.602272727272727,423,0.9951719423188734,False
-limited_english_share,validate 2024,surge days,snow_ice,7,per capita,higher,0.4420623274901325,lower,0.6601750501407821,423,0.669613805301886,True
-limited_english_share,validate 2024,surge days,snow_ice,7,self-relative,lower,7.869295638505569,higher,8.763685010204567,423,0.8979436879968236,False
-limited_english_share,validate 2024,surge days,snow_ice,28,raw,lower,25.511363636363637,higher,28.979757085020243,423,0.8803166831771191,False
-limited_english_share,validate 2024,surge days,snow_ice,28,per capita,higher,0.56136869497969,lower,0.771126404047181,423,0.7279853108821092,True
-limited_english_share,validate 2024,surge days,snow_ice,28,self-relative,lower,4.735709882182068,higher,5.784402850643674,423,0.8187033310888936,False
-limited_english_share,validate 2024,surge days,tree,last,raw,lower,1.1590909090909092,higher,2.222672064777328,423,0.521485345255837,True
-limited_english_share,validate 2024,surge days,tree,last,per capita,lower,0.04106620257859872,higher,0.04750226829547662,423,0.8645103497617445,False
-limited_english_share,validate 2024,surge days,tree,last,self-relative,lower,1.144299818324643,higher,1.3811455649875988,423,0.8285150003974545,False
-limited_english_share,validate 2024,surge days,tree,3,raw,lower,3.1818181818181817,higher,5.6923076923076925,423,0.5589680589680589,True
-limited_english_share,validate 2024,surge days,tree,3,per capita,lower,0.11129150168409235,higher,0.1235636613079707,423,0.9006814827759826,False
-limited_english_share,validate 2024,surge days,tree,3,self-relative,lower,1.1902231827073242,higher,1.307708224351349,423,0.910159591064513,False
-limited_english_share,validate 2024,surge days,tree,7,raw,lower,7.573863636363637,higher,14.639676113360323,423,0.517351857904264,True
-limited_english_share,validate 2024,surge days,tree,7,per capita,lower,0.28531556809821074,higher,0.29842513674223264,423,0.9560708297325992,False
-limited_english_share,validate 2024,surge days,tree,7,self-relative,lower,1.3112150187863465,higher,1.479061777885575,423,0.8865180876087695,False
-limited_english_share,validate 2024,surge days,tree,28,raw,lower,32.33522727272727,higher,56.05668016194332,423,0.576830935747771,True
-limited_english_share,validate 2024,surge days,tree,28,per capita,higher,1.1555469151937083,lower,1.1647352372353266,423,0.9921112354568854,False
-limited_english_share,validate 2024,surge days,tree,28,self-relative,lower,1.5085202962612738,higher,1.6274403227661824,423,0.9269281798900136,False
+limited_english_share,validate 2024,surge days,snow_ice,last,raw,higher,5.485714285714286,lower,5.494318181818182,421,0.9984340375240065,False
+limited_english_share,validate 2024,surge days,snow_ice,last,per capita,higher,0.11818297371493158,lower,0.1674777662962508,421,0.7056636610848879,True
+limited_english_share,validate 2024,surge days,snow_ice,last,self-relative,lower,4.934534936662054,higher,5.104418337826225,421,0.9667183624223642,False
+limited_english_share,validate 2024,surge days,snow_ice,3,raw,lower,14.306818181818182,higher,14.673469387755102,421,0.9750126438234923,False
+limited_english_share,validate 2024,surge days,snow_ice,3,per capita,higher,0.30472292308646387,lower,0.4415682920321131,421,0.6900924015266541,True
+limited_english_share,validate 2024,surge days,snow_ice,3,self-relative,lower,8.10847504889024,higher,8.95246328776002,421,0.9057255850438731,False
+limited_english_share,validate 2024,surge days,snow_ice,7,raw,higher,21.587755102040816,lower,21.602272727272727,421,0.9993279584321894,False
+limited_english_share,validate 2024,surge days,snow_ice,7,per capita,higher,0.44470361678634723,lower,0.6601750501407821,421,0.673614697634384,True
+limited_english_share,validate 2024,surge days,snow_ice,7,self-relative,lower,7.869295638505569,higher,8.827595754199494,421,0.8914426824270878,False
+limited_english_share,validate 2024,surge days,snow_ice,28,raw,lower,25.511363636363637,higher,29.122448979591837,421,0.8760033764413582,False
+limited_english_share,validate 2024,surge days,snow_ice,28,per capita,higher,0.5648401943468169,lower,0.771126404047181,421,0.732487166024025,True
+limited_english_share,validate 2024,surge days,snow_ice,28,self-relative,lower,4.735709882182068,higher,5.830615303033633,421,0.8122144295333817,False
+limited_english_share,validate 2024,surge days,tree,last,raw,lower,1.1590909090909092,higher,2.2285714285714286,421,0.5201048951048951,True
+limited_english_share,validate 2024,surge days,tree,last,per capita,lower,0.04106620257859872,higher,0.047674462724792956,421,0.8613878422848459,False
+limited_english_share,validate 2024,surge days,tree,last,self-relative,lower,1.144299818324643,higher,1.3831493912941926,421,0.8273146961037509,False
+limited_english_share,validate 2024,surge days,tree,3,raw,lower,3.1818181818181817,higher,5.726530612244898,421,0.5556275513510011,True
+limited_english_share,validate 2024,surge days,tree,3,per capita,lower,0.11129150168409235,higher,0.12435676506800127,421,0.8949372526957861,False
+limited_english_share,validate 2024,surge days,tree,3,self-relative,lower,1.1902231827073242,higher,1.3140579559703738,421,0.9057615589172373,False
+limited_english_share,validate 2024,surge days,tree,7,raw,lower,7.573863636363637,higher,14.714285714285714,421,0.5147285966460724,True
+limited_english_share,validate 2024,surge days,tree,7,per capita,lower,0.28531556809821074,higher,0.30018687575695663,421,0.9504598339909227,False
+limited_english_share,validate 2024,surge days,tree,7,self-relative,lower,1.3112150187863465,higher,1.4858198723928995,421,0.8824858538704604,False
+limited_english_share,validate 2024,surge days,tree,28,raw,lower,32.33522727272727,higher,55.69795918367347,421,0.5805459974951035,True
+limited_english_share,validate 2024,surge days,tree,28,per capita,higher,1.1547866144596848,lower,1.1647352372353266,421,0.9914584684505156,False
+limited_english_share,validate 2024,surge days,tree,28,self-relative,lower,1.5085202962612738,higher,1.6189787381437637,421,0.9317727655836076,False
 limited_english_share,2025 onward,all labeled days,snow_ice,last,raw,lower,1.5806938159879336,higher,2.697929521458933,15249,0.5858914413498678,True
 limited_english_share,2025 onward,all labeled days,snow_ice,last,per capita,higher,0.059772232484036555,lower,0.06451113763434396,15249,0.9265412869143925,False
 limited_english_share,2025 onward,all labeled days,snow_ice,last,self-relative,lower,1.402724979204847,higher,1.543252334430583,15249,0.9089407790997532,False
@@ -407,30 +407,30 @@ limited_english_share,2025 onward,all labeled days,tree,7,self-relative,higher,0
 limited_english_share,2025 onward,all labeled days,tree,28,raw,lower,17.82503770739065,higher,27.72192513368984,15249,0.6429942228553339,True
 limited_english_share,2025 onward,all labeled days,tree,28,per capita,higher,0.6328488082878039,lower,0.7304785969623793,15249,0.8663481872288129,False
 limited_english_share,2025 onward,all labeled days,tree,28,self-relative,lower,0.889135512086676,higher,0.9095133459123748,15249,0.9775947940541138,False
-limited_english_share,2025 onward,surge days,snow_ice,last,raw,lower,22.749271137026238,higher,33.9140625,727,0.6707916852198476,True
-limited_english_share,2025 onward,surge days,snow_ice,last,per capita,higher,0.7303982893017658,lower,0.9137866459319552,727,0.7993094367852631,True
-limited_english_share,2025 onward,surge days,snow_ice,last,self-relative,lower,8.205320435105081,higher,9.14733068942881,727,0.897018016915867,False
-limited_english_share,2025 onward,surge days,snow_ice,3,raw,lower,59.481049562682216,higher,89.41145833333333,727,0.665250860140676,True
-limited_english_share,2025 onward,surge days,snow_ice,3,per capita,higher,1.9239228695077684,lower,2.399728078499204,727,0.8017253649467628,False
-limited_english_share,2025 onward,surge days,snow_ice,3,self-relative,lower,10.098473901339531,higher,10.450032860000066,727,0.9663581001734254,False
-limited_english_share,2025 onward,surge days,snow_ice,7,raw,lower,114.44314868804665,higher,181.36458333333334,727,0.6310115601661294,True
-limited_english_share,2025 onward,surge days,snow_ice,7,per capita,higher,3.8539513701190633,lower,4.619372599480291,727,0.834301907266077,False
-limited_english_share,2025 onward,surge days,snow_ice,7,self-relative,lower,9.62935485537917,higher,10.037479828439558,727,0.9593398960659395,False
-limited_english_share,2025 onward,surge days,snow_ice,28,raw,lower,232.9125364431487,higher,420.0130208333333,727,0.5545364664672419,True
-limited_english_share,2025 onward,surge days,snow_ice,28,per capita,higher,8.593785204259127,lower,9.107174689115393,727,0.9436280183062863,False
-limited_english_share,2025 onward,surge days,snow_ice,28,self-relative,lower,4.94958522627835,higher,6.005009921371954,727,0.8242426392440542,False
-limited_english_share,2025 onward,surge days,tree,last,raw,lower,0.6355685131195336,higher,0.8541666666666666,727,0.7440802104814052,True
-limited_english_share,2025 onward,surge days,tree,last,per capita,higher,0.014343837616910762,lower,0.020712974226453924,727,0.692504971043284,True
-limited_english_share,2025 onward,surge days,tree,last,self-relative,higher,0.952166309136307,lower,0.9762762444991571,727,0.9753041872126892,False
-limited_english_share,2025 onward,surge days,tree,3,raw,lower,1.848396501457726,higher,2.3072916666666665,727,0.8011108990516556,False
-limited_english_share,2025 onward,surge days,tree,3,per capita,higher,0.039249850192581696,lower,0.06127240284745337,727,0.6405795818110799,True
-limited_english_share,2025 onward,surge days,tree,3,self-relative,higher,0.8578693044059071,lower,0.9205767870036657,727,0.9318823986406808,False
-limited_english_share,2025 onward,surge days,tree,7,raw,lower,4.02332361516035,higher,4.643229166666667,727,0.8664925789240461,False
-limited_english_share,2025 onward,surge days,tree,7,per capita,higher,0.08293974622809214,lower,0.13382479797062796,727,0.6197636573028554,True
-limited_english_share,2025 onward,surge days,tree,7,self-relative,higher,0.7584014585115098,lower,0.83968549211685,727,0.9031970489326631,False
-limited_english_share,2025 onward,surge days,tree,28,raw,lower,14.973760932944606,higher,18.932291666666668,727,0.7909111689478305,True
-limited_english_share,2025 onward,surge days,tree,28,per capita,higher,0.3432950458321995,lower,0.5314574037881787,727,0.6459502556276843,True
-limited_english_share,2025 onward,surge days,tree,28,self-relative,higher,0.6704765302460173,lower,0.7473776309646291,727,0.8971054289926276,False
+limited_english_share,2025 onward,surge days,snow_ice,last,raw,lower,22.749271137026238,higher,34.5718085106383,719,0.6580295366968124,True
+limited_english_share,2025 onward,surge days,snow_ice,last,per capita,higher,0.7454199732346851,lower,0.9137866459319552,719,0.8157483768811746,False
+limited_english_share,2025 onward,surge days,snow_ice,last,self-relative,lower,8.205320435105081,higher,9.312348366720206,719,0.881122581756999,False
+limited_english_share,2025 onward,surge days,snow_ice,3,raw,lower,59.481049562682216,higher,91.03191489361703,719,0.6534087482636588,True
+limited_english_share,2025 onward,surge days,snow_ice,3,per capita,higher,1.9625664506744382,lower,2.399728078499204,719,0.8178286816153905,False
+limited_english_share,2025 onward,surge days,snow_ice,3,self-relative,lower,10.098473901339531,higher,10.628597541671262,719,0.9501228983171779,False
+limited_english_share,2025 onward,surge days,snow_ice,7,raw,lower,114.44314868804665,higher,184.84840425531914,719,0.6191189431636842,True
+limited_english_share,2025 onward,surge days,snow_ice,7,per capita,higher,3.932902942383926,lower,4.619372599480291,719,0.8513933132015379,False
+limited_english_share,2025 onward,surge days,snow_ice,7,self-relative,lower,9.62935485537917,higher,10.19804852970807,719,0.9442350492182665,False
+limited_english_share,2025 onward,surge days,snow_ice,28,raw,lower,232.9125364431487,higher,426.281914893617,719,0.5463814633123115,True
+limited_english_share,2025 onward,surge days,snow_ice,28,per capita,higher,8.75495414310159,lower,9.107174689115393,719,0.9613249379706349,False
+limited_english_share,2025 onward,surge days,snow_ice,28,self-relative,lower,4.94958522627835,higher,6.053934451605676,719,0.817581568787151,False
+limited_english_share,2025 onward,surge days,tree,last,raw,lower,0.6355685131195336,higher,0.7898936170212766,719,0.8046254576866823,False
+limited_english_share,2025 onward,surge days,tree,last,per capita,higher,0.013943927130581969,lower,0.020712974226453924,719,0.6731977251617128,True
+limited_english_share,2025 onward,surge days,tree,last,self-relative,higher,0.9484062957699367,lower,0.9762762444991571,719,0.9714528045865564,False
+limited_english_share,2025 onward,surge days,tree,3,raw,lower,1.848396501457726,higher,2.143617021276596,719,0.8622792612259366,False
+limited_english_share,2025 onward,surge days,tree,3,per capita,higher,0.03828572744583565,lower,0.06127240284745337,719,0.6248445575270417,True
+limited_english_share,2025 onward,surge days,tree,3,self-relative,higher,0.8567958530116607,lower,0.9205767870036657,719,0.9307163347018536,False
+limited_english_share,2025 onward,surge days,tree,7,raw,lower,4.02332361516035,higher,4.287234042553192,719,0.9384427290944736,False
+limited_english_share,2025 onward,surge days,tree,7,per capita,higher,0.0808331256086574,lower,0.13382479797062796,719,0.6040220260702261,True
+limited_english_share,2025 onward,surge days,tree,7,self-relative,higher,0.7550027730186248,lower,0.83968549211685,719,0.8991494793071395,False
+limited_english_share,2025 onward,surge days,tree,28,raw,lower,14.973760932944606,higher,17.58244680851064,719,0.8516312374507898,False
+limited_english_share,2025 onward,surge days,tree,28,per capita,higher,0.3359000594949695,lower,0.5314574037881787,719,0.6320357136822353,True
+limited_english_share,2025 onward,surge days,tree,28,self-relative,higher,0.6659660403949085,lower,0.7473776309646291,719,0.8910703408869171,False
 flood_zone,train 2015 to 2023,all labeled days,snow_ice,last,raw,not in flood zone,0.7344182825484764,in flood zone,0.8344875346260388,66424,0.8800829875518672,False
 flood_zone,train 2015 to 2023,all labeled days,snow_ice,last,per capita,not in flood zone,0.022764863444573017,in flood zone,0.023990523771131672,66424,0.9489106474601643,False
 flood_zone,train 2015 to 2023,all labeled days,snow_ice,last,self-relative,not in flood zone,1.0209725648769543,in flood zone,1.0225407379279545,66424,0.9984663955255436,False
@@ -455,30 +455,30 @@ flood_zone,train 2015 to 2023,all labeled days,tree,7,self-relative,in flood zon
 flood_zone,train 2015 to 2023,all labeled days,tree,28,raw,in flood zone,24.96025700215451,not in flood zone,25.23182132963989,66424,0.9892372285005692,False
 flood_zone,train 2015 to 2023,all labeled days,tree,28,per capita,in flood zone,0.6509107789865247,not in flood zone,0.8556225094696124,66424,0.7607452723398016,True
 flood_zone,train 2015 to 2023,all labeled days,tree,28,self-relative,not in flood zone,1.3695236101575692,in flood zone,1.3910749093961905,66424,0.9845074488131083,False
-flood_zone,train 2015 to 2023,surge days,snow_ice,last,raw,not in flood zone,6.707894736842105,in flood zone,8.126696832579185,2404,0.825414664165983,False
-flood_zone,train 2015 to 2023,surge days,snow_ice,last,per capita,not in flood zone,0.19562363459261295,in flood zone,0.2156809708280506,2404,0.9070046088978886,False
-flood_zone,train 2015 to 2023,surge days,snow_ice,last,self-relative,not in flood zone,3.1345541570424214,in flood zone,3.1895628487000716,2404,0.9827535326102543,False
-flood_zone,train 2015 to 2023,surge days,snow_ice,3,raw,not in flood zone,15.303289473684211,in flood zone,17.947963800904976,2404,0.852647667637517,False
-flood_zone,train 2015 to 2023,surge days,snow_ice,3,per capita,not in flood zone,0.4433707428759964,in flood zone,0.4747057701954288,2404,0.9339906331736135,False
-flood_zone,train 2015 to 2023,surge days,snow_ice,3,self-relative,in flood zone,3.3028892912304744,not in flood zone,3.3658659348711977,2404,0.9812896161465405,False
-flood_zone,train 2015 to 2023,surge days,snow_ice,7,raw,not in flood zone,24.104605263157893,in flood zone,29.792986425339368,2404,0.8090697897494619,False
-flood_zone,train 2015 to 2023,surge days,snow_ice,7,per capita,not in flood zone,0.6845365923752885,in flood zone,0.7660216024213745,2404,0.8936257022145147,False
-flood_zone,train 2015 to 2023,surge days,snow_ice,7,self-relative,not in flood zone,2.6197821284212077,in flood zone,2.6734747307075675,2404,0.9799165476787023,False
-flood_zone,train 2015 to 2023,surge days,snow_ice,28,raw,not in flood zone,51.080263157894734,in flood zone,63.380090497737555,2404,0.8059354721135672,False
-flood_zone,train 2015 to 2023,surge days,snow_ice,28,per capita,not in flood zone,1.450728343943926,in flood zone,1.5795817715853688,2404,0.9184256048282216,False
-flood_zone,train 2015 to 2023,surge days,snow_ice,28,self-relative,not in flood zone,1.8287970800447242,in flood zone,1.9746367291932072,2404,0.9261435549170253,False
-flood_zone,train 2015 to 2023,surge days,tree,last,raw,in flood zone,1.670814479638009,not in flood zone,1.7026315789473685,2404,0.9813129864952758,False
-flood_zone,train 2015 to 2023,surge days,tree,last,per capita,in flood zone,0.03187117162492223,not in flood zone,0.05064425472018386,2404,0.6293146537749371,True
-flood_zone,train 2015 to 2023,surge days,tree,last,self-relative,in flood zone,1.3206531970736313,not in flood zone,1.4800534232001172,2404,0.8923010320925872,False
-flood_zone,train 2015 to 2023,surge days,tree,3,raw,not in flood zone,4.186184210526315,in flood zone,4.501131221719457,2404,0.9300293646909431,False
-flood_zone,train 2015 to 2023,surge days,tree,3,per capita,in flood zone,0.08558613206655488,not in flood zone,0.1252637792230039,2404,0.6832472451129554,True
-flood_zone,train 2015 to 2023,surge days,tree,3,self-relative,in flood zone,1.4033807393458315,not in flood zone,1.5825107042477196,2404,0.8868064750392691,False
-flood_zone,train 2015 to 2023,surge days,tree,7,raw,not in flood zone,9.98092105263158,in flood zone,10.726244343891402,2404,0.9305140487794049,False
-flood_zone,train 2015 to 2023,surge days,tree,7,per capita,in flood zone,0.20444245037499453,not in flood zone,0.29550142739798485,2404,0.6918492819990646,True
-flood_zone,train 2015 to 2023,surge days,tree,7,self-relative,in flood zone,1.4957238068671328,not in flood zone,1.7258103489427146,2404,0.8666791271610232,False
-flood_zone,train 2015 to 2023,surge days,tree,28,raw,not in flood zone,32.67763157894737,in flood zone,36.45135746606335,2404,0.8964722811590936,False
-flood_zone,train 2015 to 2023,surge days,tree,28,per capita,in flood zone,0.7278556800977183,not in flood zone,0.9784781840990971,2404,0.7438650058078387,True
-flood_zone,train 2015 to 2023,surge days,tree,28,self-relative,in flood zone,1.4274299780602357,not in flood zone,1.5651790125986287,2404,0.9119915144340637,False
+flood_zone,train 2015 to 2023,surge days,snow_ice,last,raw,not in flood zone,6.73046357615894,in flood zone,8.17292377701934,2389,0.8235074448000708,False
+flood_zone,train 2015 to 2023,surge days,snow_ice,last,per capita,not in flood zone,0.19628895861572584,in flood zone,0.21690782504208958,2389,0.9049418045551709,False
+flood_zone,train 2015 to 2023,surge days,snow_ice,last,self-relative,not in flood zone,3.14402307414938,in flood zone,3.2027269811591,2389,0.9816706489953526,False
+flood_zone,train 2015 to 2023,surge days,snow_ice,3,raw,not in flood zone,15.293377483443708,in flood zone,18.050056882821387,2389,0.8472758608311496,False
+flood_zone,train 2015 to 2023,surge days,snow_ice,3,per capita,not in flood zone,0.4430735797961357,in flood zone,0.47740603054921393,2389,0.9280854271707005,False
+flood_zone,train 2015 to 2023,surge days,snow_ice,3,self-relative,in flood zone,3.3170265603771383,not in flood zone,3.3655920744611523,2389,0.98556999392394,False
+flood_zone,train 2015 to 2023,surge days,snow_ice,7,raw,not in flood zone,23.924503311258277,in flood zone,29.962457337883958,2389,0.7984826825605053,True
+flood_zone,train 2015 to 2023,surge days,snow_ice,7,per capita,not in flood zone,0.6791392523279847,in flood zone,0.7703789494203584,2389,0.8815651736576868,False
+flood_zone,train 2015 to 2023,surge days,snow_ice,7,self-relative,not in flood zone,2.6060208372003917,in flood zone,2.6842355931712247,2389,0.9708614414584869,False
+flood_zone,train 2015 to 2023,surge days,snow_ice,28,raw,not in flood zone,50.99470198675497,in flood zone,63.738339021615474,2389,0.8000632393238428,False
+flood_zone,train 2015 to 2023,surge days,snow_ice,28,per capita,not in flood zone,1.4481884193133208,in flood zone,1.5885483883031812,2389,0.9116426228981372,False
+flood_zone,train 2015 to 2023,surge days,snow_ice,28,self-relative,not in flood zone,1.8250619447539351,in flood zone,1.981507141080952,2389,0.921047371930402,False
+flood_zone,train 2015 to 2023,surge days,tree,last,raw,in flood zone,1.6268486916951082,not in flood zone,1.7066225165562914,2389,0.9532563152734239,False
+flood_zone,train 2015 to 2023,surge days,tree,last,per capita,in flood zone,0.03161794742507758,not in flood zone,0.05082808566739626,2389,0.6220566249922521,True
+flood_zone,train 2015 to 2023,surge days,tree,last,self-relative,in flood zone,1.3185093515686275,not in flood zone,1.4836007269796112,2389,0.8887225030233808,False
+flood_zone,train 2015 to 2023,surge days,tree,3,raw,not in flood zone,4.1841059602649,in flood zone,4.260523321956769,2389,0.9820638555601728,False
+flood_zone,train 2015 to 2023,surge days,tree,3,per capita,in flood zone,0.08390963308234248,not in flood zone,0.12550210560672206,2389,0.6685914365874046,True
+flood_zone,train 2015 to 2023,surge days,tree,3,self-relative,in flood zone,1.3953095483234625,not in flood zone,1.585724383774173,2389,0.8799193369294699,False
+flood_zone,train 2015 to 2023,surge days,tree,7,raw,not in flood zone,9.958278145695365,in flood zone,10.448236632536974,2389,0.9531061073678382,False
+flood_zone,train 2015 to 2023,surge days,tree,7,per capita,in flood zone,0.20285035773493645,not in flood zone,0.29560429726250553,2389,0.6862226280655156,True
+flood_zone,train 2015 to 2023,surge days,tree,7,self-relative,in flood zone,1.4948607033549828,not in flood zone,1.7260925153824882,2389,0.8660374169015695,False
+flood_zone,train 2015 to 2023,surge days,tree,28,raw,not in flood zone,32.609271523178805,in flood zone,35.73151308304892,2389,0.9126193857894221,False
+flood_zone,train 2015 to 2023,surge days,tree,28,per capita,in flood zone,0.7244612290059478,not in flood zone,0.9790031245545391,2389,0.7399988936047455,True
+flood_zone,train 2015 to 2023,surge days,tree,28,self-relative,in flood zone,1.4285220801740035,not in flood zone,1.565426526288196,2389,0.912544955757963,False
 flood_zone,validate 2024,all labeled days,snow_ice,last,raw,not in flood zone,0.5206869633099142,in flood zone,0.6205221615057681,8418,0.8391109868604976,False
 flood_zone,validate 2024,all labeled days,snow_ice,last,per capita,not in flood zone,0.016255312340133568,in flood zone,0.017615111278034726,8418,0.922804975998263,False
 flood_zone,validate 2024,all labeled days,snow_ice,last,self-relative,not in flood zone,1.2080241336247928,in flood zone,1.2597225590510137,8418,0.9589604670847787,False
@@ -503,30 +503,30 @@ flood_zone,validate 2024,all labeled days,tree,7,self-relative,not in flood zone
 flood_zone,validate 2024,all labeled days,tree,28,raw,in flood zone,31.93533697632058,not in flood zone,32.17993754879001,8418,0.9923989730527422,False
 flood_zone,validate 2024,all labeled days,tree,28,per capita,in flood zone,0.8372883043304541,not in flood zone,1.0689250997951127,8418,0.7832993204958347,True
 flood_zone,validate 2024,all labeled days,tree,28,self-relative,not in flood zone,1.4794662750268344,in flood zone,1.5109680461179633,8418,0.9791512658576305,False
-flood_zone,validate 2024,surge days,snow_ice,last,raw,not in flood zone,5.1640625,in flood zone,6.0119760479041915,423,0.8589625871513944,False
-flood_zone,validate 2024,surge days,snow_ice,last,per capita,in flood zone,0.13053145975981437,not in flood zone,0.1437186499216954,423,0.9082430139090089,False
-flood_zone,validate 2024,surge days,snow_ice,last,self-relative,not in flood zone,4.775695864407605,in flood zone,5.418437878763005,423,0.8813787241384533,False
-flood_zone,validate 2024,surge days,snow_ice,3,raw,not in flood zone,13.44140625,in flood zone,16.11377245508982,423,0.8341563893534003,False
-flood_zone,validate 2024,surge days,snow_ice,3,per capita,in flood zone,0.3404236134904688,not in flood zone,0.3739966723256454,423,0.910231664291537,False
-flood_zone,validate 2024,surge days,snow_ice,3,self-relative,not in flood zone,7.986222441629057,in flood zone,9.468489274566203,423,0.8434526575513225,False
-flood_zone,validate 2024,surge days,snow_ice,7,raw,in flood zone,21.50299401197605,not in flood zone,21.56640625,423,0.9970596752519233,False
-flood_zone,validate 2024,surge days,snow_ice,7,per capita,in flood zone,0.46517539709277395,not in flood zone,0.576937157813856,423,0.8062843427444119,False
-flood_zone,validate 2024,surge days,snow_ice,7,self-relative,not in flood zone,7.869327352788715,in flood zone,9.19208639271615,423,0.8560980626796987,False
-flood_zone,validate 2024,surge days,snow_ice,28,raw,not in flood zone,26.36328125,in flood zone,29.335329341317365,423,0.8986870726168605,False
-flood_zone,validate 2024,surge days,snow_ice,28,per capita,in flood zone,0.574080497234978,not in flood zone,0.697284655211117,423,0.8233086630325509,False
-flood_zone,validate 2024,surge days,snow_ice,28,self-relative,not in flood zone,4.660440665770256,in flood zone,6.402153490633808,423,0.7279489116573612,True
-flood_zone,validate 2024,surge days,tree,last,raw,not in flood zone,1.42578125,in flood zone,2.3233532934131738,423,0.6136738885309279,True
-flood_zone,validate 2024,surge days,tree,last,per capita,not in flood zone,0.04248572486546657,in flood zone,0.04840937938477041,423,0.8776341569632388,False
-flood_zone,validate 2024,surge days,tree,last,self-relative,not in flood zone,1.1406051395037937,in flood zone,1.5002683045754661,423,0.7602674375144871,True
-flood_zone,validate 2024,surge days,tree,3,raw,not in flood zone,4.17578125,in flood zone,5.37125748502994,423,0.7774308458751394,True
-flood_zone,validate 2024,surge days,tree,3,per capita,in flood zone,0.11019275734333085,not in flood zone,0.12384897719973736,423,0.8897348999953189,False
-flood_zone,validate 2024,surge days,tree,3,self-relative,not in flood zone,1.1859594394013826,in flood zone,1.3705245214641815,423,0.8653325211097855,False
-flood_zone,validate 2024,surge days,tree,7,raw,not in flood zone,10.953125,in flood zone,12.844311377245509,423,0.8527607808857809,False
-flood_zone,validate 2024,surge days,tree,7,per capita,in flood zone,0.2375895216528918,not in flood zone,0.32909804158040484,423,0.7219414631333934,True
-flood_zone,validate 2024,surge days,tree,7,self-relative,not in flood zone,1.4028381038124496,in flood zone,1.4190152566954908,423,0.9885997329438773,False
-flood_zone,validate 2024,surge days,tree,28,raw,not in flood zone,44.20703125,in flood zone,49.221556886227546,423,0.8981233842761557,False
-flood_zone,validate 2024,surge days,tree,28,per capita,in flood zone,0.9818429565167116,not in flood zone,1.2751785783905183,423,0.7699650646233066,True
-flood_zone,validate 2024,surge days,tree,28,self-relative,not in flood zone,1.5537443637228272,in flood zone,1.6150824835460325,423,0.9620216797296117,False
+flood_zone,validate 2024,surge days,snow_ice,last,raw,not in flood zone,5.1686274509803924,in flood zone,5.981927710843373,421,0.8640404399423416,False
+flood_zone,validate 2024,surge days,snow_ice,last,per capita,in flood zone,0.13077929869611823,not in flood zone,0.14400608566565784,421,0.9081511943859891,False
+flood_zone,validate 2024,surge days,snow_ice,last,self-relative,not in flood zone,4.780991938972365,in flood zone,5.421130705915623,421,0.8819178504136179,False
+flood_zone,validate 2024,surge days,snow_ice,3,raw,not in flood zone,13.466666666666667,in flood zone,16.13855421686747,421,0.834440711708349,False
+flood_zone,validate 2024,surge days,snow_ice,3,per capita,in flood zone,0.34188690888608475,not in flood zone,0.3749800340342961,421,0.9117469674527134,False
+flood_zone,validate 2024,surge days,snow_ice,3,self-relative,not in flood zone,8.005356087058415,in flood zone,9.512525975337295,421,0.8415594457049101,False
+flood_zone,validate 2024,surge days,snow_ice,7,raw,in flood zone,21.548192771084338,not in flood zone,21.623529411764707,421,0.9965159877813757,False
+flood_zone,validate 2024,surge days,snow_ice,7,per capita,in flood zone,0.46729230104641756,not in flood zone,0.578716364563637,421,0.8074634305507582,False
+flood_zone,validate 2024,surge days,snow_ice,7,self-relative,not in flood zone,7.8959160801410855,in flood zone,9.242761395902887,421,0.8542810683873298,False
+flood_zone,validate 2024,surge days,snow_ice,28,raw,not in flood zone,26.431372549019606,in flood zone,29.427710843373493,421,0.8981797017681177,False
+flood_zone,validate 2024,surge days,snow_ice,28,per capita,in flood zone,0.5768534560087554,not in flood zone,0.6993977295287083,421,0.824786000374165,False
+flood_zone,validate 2024,surge days,snow_ice,28,self-relative,not in flood zone,4.678158878698809,in flood zone,6.440091412283661,421,0.7264118751134202,True
+flood_zone,validate 2024,surge days,tree,last,raw,not in flood zone,1.419607843137255,in flood zone,2.3373493975903616,421,0.6073579947442894,True
+flood_zone,validate 2024,surge days,tree,last,per capita,not in flood zone,0.04244521044765095,in flood zone,0.04870100215214855,421,0.8715469614987869,False
+flood_zone,validate 2024,surge days,tree,last,self-relative,not in flood zone,1.1378190269928783,in flood zone,1.5067741988495806,421,0.7551357249557372,True
+flood_zone,validate 2024,surge days,tree,3,raw,not in flood zone,4.180392156862745,in flood zone,5.403614457831325,421,0.7736288718385906,True
+flood_zone,validate 2024,surge days,tree,3,per capita,in flood zone,0.11085656913455573,not in flood zone,0.12412753435970321,421,0.8930860482035341,False
+flood_zone,validate 2024,surge days,tree,3,self-relative,not in flood zone,1.1871727144292124,in flood zone,1.3776773324685632,421,0.8617204380520662,False
+flood_zone,validate 2024,surge days,tree,7,raw,not in flood zone,10.964705882352941,in flood zone,12.903614457831326,421,0.8497391113308068,False
+flood_zone,validate 2024,surge days,tree,7,per capita,in flood zone,0.23887392151553233,not in flood zone,0.32983628852612196,421,0.7242196502481391,True
+flood_zone,validate 2024,surge days,tree,7,self-relative,not in flood zone,1.4046175045760632,in flood zone,1.4254352311792842,421,0.9853955296264157,False
+flood_zone,validate 2024,surge days,tree,28,raw,not in flood zone,44.01960784313726,in flood zone,48.86746987951807,421,0.900795722628302,False
+flood_zone,validate 2024,surge days,tree,28,per capita,in flood zone,0.9824706297465469,not in flood zone,1.2738274421886804,421,0.7712745048563826,True
+flood_zone,validate 2024,surge days,tree,28,self-relative,not in flood zone,1.5481507710423774,in flood zone,1.6106681709120487,421,0.96118542540375,False
 flood_zone,2025 onward,all labeled days,snow_ice,last,raw,not in flood zone,1.9145658263305323,in flood zone,2.4268476621417796,15249,0.7889105922045637,True
 flood_zone,2025 onward,all labeled days,snow_ice,last,per capita,not in flood zone,0.05986744313383928,in flood zone,0.06594266722919774,15249,0.9078711197070217,False
 flood_zone,2025 onward,all labeled days,snow_ice,last,self-relative,not in flood zone,1.4672124934443154,in flood zone,1.4741667245526846,15249,0.9952826020337154,False
@@ -551,27 +551,27 @@ flood_zone,2025 onward,all labeled days,tree,7,self-relative,in flood zone,0.851
 flood_zone,2025 onward,all labeled days,tree,28,raw,in flood zone,22.208982738394504,not in flood zone,22.782913165266105,15249,0.9748087339530138,False
 flood_zone,2025 onward,all labeled days,tree,28,per capita,in flood zone,0.5383344214956146,not in flood zone,0.7772907329467044,15249,0.692577948864503,True
 flood_zone,2025 onward,all labeled days,tree,28,self-relative,in flood zone,0.8088493735198561,not in flood zone,0.9567591848855378,15249,0.8454053917617974,False
-flood_zone,2025 onward,surge days,snow_ice,last,raw,not in flood zone,25.401805869074494,in flood zone,33.70774647887324,727,0.7535895609335794,True
-flood_zone,2025 onward,surge days,snow_ice,last,per capita,not in flood zone,0.7703845738714581,in flood zone,0.889511959230573,727,0.8660755663564546,False
-flood_zone,2025 onward,surge days,snow_ice,last,self-relative,not in flood zone,8.667573750833641,in flood zone,8.7579743745155,727,0.9896779072630182,False
-flood_zone,2025 onward,surge days,snow_ice,3,raw,not in flood zone,66.75169300225734,in flood zone,88.60915492957747,727,0.7533272725070965,True
-flood_zone,2025 onward,surge days,snow_ice,3,per capita,not in flood zone,2.023252534542463,in flood zone,2.3436346479362644,727,0.8632969035186775,False
-flood_zone,2025 onward,surge days,snow_ice,3,self-relative,not in flood zone,10.205325939140534,in flood zone,10.407147096338829,727,0.9806074464663526,False
-flood_zone,2025 onward,surge days,snow_ice,7,raw,not in flood zone,129.01580135440182,in flood zone,182.19718309859155,727,0.7081108454052666,True
-flood_zone,2025 onward,surge days,snow_ice,7,per capita,not in flood zone,3.9201759246108105,in flood zone,4.675085187129829,727,0.8385250252557475,False
-flood_zone,2025 onward,surge days,snow_ice,7,self-relative,not in flood zone,9.513317379812639,in flood zone,10.36218792344664,727,0.9180799894862693,False
-flood_zone,2025 onward,surge days,snow_ice,28,raw,not in flood zone,270.24153498871334,in flood zone,427.6654929577465,727,0.6318993218735404,True
-flood_zone,2025 onward,surge days,snow_ice,28,per capita,not in flood zone,8.027591942094295,in flood zone,10.09701129033208,727,0.7950463470097077,True
-flood_zone,2025 onward,surge days,snow_ice,28,self-relative,not in flood zone,5.158552709993398,in flood zone,6.050678492581794,727,0.8525577282478067,False
-flood_zone,2025 onward,surge days,tree,last,raw,not in flood zone,0.6501128668171557,in flood zone,0.9084507042253521,727,0.7156281169615203,True
-flood_zone,2025 onward,surge days,tree,last,per capita,in flood zone,0.01274634562840645,not in flood zone,0.020299371661625275,727,0.6279182351492504,True
-flood_zone,2025 onward,surge days,tree,last,self-relative,not in flood zone,0.9450311833283912,in flood zone,0.9924147899897026,727,0.952254231658717,False
-flood_zone,2025 onward,surge days,tree,3,raw,not in flood zone,1.853273137697517,in flood zone,2.461267605633803,727,0.7529750659600783,True
-flood_zone,2025 onward,surge days,tree,3,per capita,in flood zone,0.036247593478999356,not in flood zone,0.058225869306076886,727,0.6225341744312315,True
-flood_zone,2025 onward,surge days,tree,3,self-relative,not in flood zone,0.8679219257263205,in flood zone,0.9179233723146677,727,0.9455276463194724,False
-flood_zone,2025 onward,surge days,tree,7,raw,not in flood zone,4.067720090293454,in flood zone,4.792253521126761,727,0.8488115397820285,False
-flood_zone,2025 onward,surge days,tree,7,per capita,in flood zone,0.07543710030353251,not in flood zone,0.12714815297812535,727,0.5933007954626818,True
-flood_zone,2025 onward,surge days,tree,7,self-relative,in flood zone,0.7701251344803178,not in flood zone,0.8138210963252575,727,0.9463076565079903,False
-flood_zone,2025 onward,surge days,tree,28,raw,not in flood zone,15.846501128668171,in flood zone,18.964788732394368,727,0.8355748831306647,False
-flood_zone,2025 onward,surge days,tree,28,per capita,in flood zone,0.32620692252383876,not in flood zone,0.4999377451515569,727,0.6524950870131813,True
-flood_zone,2025 onward,surge days,tree,28,self-relative,in flood zone,0.669443324490907,not in flood zone,0.7306808372007242,727,0.9161911609117585,False
+flood_zone,2025 onward,surge days,snow_ice,last,raw,not in flood zone,25.401805869074494,in flood zone,34.59782608695652,719,0.7342023688202493,True
+flood_zone,2025 onward,surge days,snow_ice,last,per capita,not in flood zone,0.7703845738714581,in flood zone,0.9145882727023416,719,0.8423293812801649,False
+flood_zone,2025 onward,surge days,snow_ice,last,self-relative,not in flood zone,8.667573750833641,in flood zone,8.97149537503093,719,0.9661236380901282,False
+flood_zone,2025 onward,surge days,snow_ice,3,raw,not in flood zone,66.75169300225734,in flood zone,90.79347826086956,719,0.7352036102247905,True
+flood_zone,2025 onward,surge days,snow_ice,3,per capita,not in flood zone,2.023252534542463,in flood zone,2.408445085422118,719,0.8400658776855009,False
+flood_zone,2025 onward,surge days,snow_ice,3,self-relative,not in flood zone,10.205325939140534,in flood zone,10.649166060828248,719,0.958321607612043,False
+flood_zone,2025 onward,surge days,snow_ice,7,raw,not in flood zone,129.01580135440182,in flood zone,186.9673913043478,719,0.690044400011916,True
+flood_zone,2025 onward,surge days,snow_ice,7,per capita,not in flood zone,3.9201759246108105,in flood zone,4.806443381722852,719,0.8156084683152218,False
+flood_zone,2025 onward,surge days,snow_ice,7,self-relative,not in flood zone,9.513317379812639,in flood zone,10.590345519232933,719,0.8983009442454618,False
+flood_zone,2025 onward,surge days,snow_ice,28,raw,not in flood zone,270.24153498871334,in flood zone,436.42753623188406,719,0.6192128418888944,True
+flood_zone,2025 onward,surge days,snow_ice,28,per capita,not in flood zone,8.027591942094295,in flood zone,10.360146542844218,719,0.7748531267290785,True
+flood_zone,2025 onward,surge days,snow_ice,28,self-relative,not in flood zone,5.158552709993398,in flood zone,6.11865302858744,719,0.8430863273161132,False
+flood_zone,2025 onward,surge days,tree,last,raw,not in flood zone,0.6501128668171557,in flood zone,0.822463768115942,719,0.7904456001829735,True
+flood_zone,2025 onward,surge days,tree,last,per capita,in flood zone,0.012155235922726522,not in flood zone,0.020299371661625275,719,0.5987986291075824,True
+flood_zone,2025 onward,surge days,tree,last,self-relative,not in flood zone,0.9450311833283912,in flood zone,0.9884590755732965,719,0.9560650579087278,False
+flood_zone,2025 onward,surge days,tree,3,raw,not in flood zone,1.853273137697517,in flood zone,2.2427536231884058,719,0.8263382649507507,False
+flood_zone,2025 onward,surge days,tree,3,per capita,in flood zone,0.03484712896274873,not in flood zone,0.058225869306076886,719,0.5984819012244756,True
+flood_zone,2025 onward,surge days,tree,3,self-relative,not in flood zone,0.8679219257263205,in flood zone,0.918201686876383,719,0.9452410490323662,False
+flood_zone,2025 onward,surge days,tree,7,raw,not in flood zone,4.067720090293454,in flood zone,4.311594202898551,719,0.943437600773944,False
+flood_zone,2025 onward,surge days,tree,7,per capita,in flood zone,0.07234974334590955,not in flood zone,0.12714815297812535,719,0.5690192240413956,True
+flood_zone,2025 onward,surge days,tree,7,self-relative,in flood zone,0.7658348578949038,not in flood zone,0.8138210963252575,719,0.9410358878050329,False
+flood_zone,2025 onward,surge days,tree,28,raw,not in flood zone,15.846501128668171,in flood zone,17.1268115942029,719,0.9252452531229988,False
+flood_zone,2025 onward,surge days,tree,28,per capita,in flood zone,0.31563728538881936,not in flood zone,0.4999377451515569,719,0.6313531803707548,True
+flood_zone,2025 onward,surge days,tree,28,self-relative,in flood zone,0.6632686511935962,not in flood zone,0.7306808372007242,719,0.9077405858002414,False
