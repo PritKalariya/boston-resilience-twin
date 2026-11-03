@@ -212,3 +212,4 @@ if" conditions below guard the case where #106's frozen rule leaves a group unde
 - the validation split changes (ADR-003)
 - #110 reports a neighborhood with at least 5 validation surges whose recall is more
   than 0.15 below its own group's while the gate passes
+- the higher group's two parts in #110's report (the 5 university neighborhoods and the other 6) differ in recall by more than 0.15 while the gate passes
