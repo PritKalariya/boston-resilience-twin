@@ -24,9 +24,9 @@ Working base for every later chat. Matches the scoping document submitted on Oct
 | Access | All public. Free NOAA CDO token and Census key; NWS needs an identifying user agent. Keys in Secret Manager |
 | Refresh | Daily forecast DAG every evening; event DAG every 10 to 15 minutes while an alert is active; static layers reloaded when the source updates |
 | Split | Time-based, never shuffled: train 2015 to 2023, validate 2024, test 2025 to mid-2026, live from deployment. 2020 to 2021 flagged and down-weighted. A feature is used only if its history covers the training years. Observed weather in training makes backtests upper bounds; Open-Meteo archived forecasts replace it for validation and test |
-| Target | Next-day surge flag, storm-related requests per neighborhood per day (working choice). Surge: more than k standard deviations above baseline (k 1.5 to 2) and at least m requests (m 3 to 5), compared with a top-10-percent rule. Frozen before Model Development |
-| Known issues | 311 migration through fall 2026: categories not one-to-one, new-system times in UTC, switch dates treated as change points. Sparse cells (77 percent empty in the first run). The first-run parser lost about a third of legacy rows; counts get re-measured in week 1 |
-| Week-1 decisions | Rerun the fixed check, lock the modeling unit, and decide how live baselines are built (for example post-switch data on broad groups) |
+| Target | Next-day surge flag, storm-related requests per neighborhood per day (working choice). Surge: more than k standard deviations above baseline (k 1.5 to 2) and at least m requests (m 3 to 5), compared with a top-10-percent rule. Frozen in #106 (M3) before training starts |
+| Known issues | 311 migration through fall 2026: categories not one-to-one, new-system times carry a +00 suffix but are Boston local time (ADR-020), switch dates treated as change points. Sparse cells (77 percent empty in the first run). The first-run parser lost about a third of legacy rows; fixed and counts re-measured in phase 1 |
+| Week-1 decisions | Done: modeling unit neighborhood x day (ADR-004, proposed until M7 accepts it), live baselines (ADR-005), alert history source (ADR-014) |
 
 Pre-scoping check (Oct 3): 833,700 rows from Jan 2024 to early Oct 2026, about 830 a day (the city reports over 1,000). Storm groups are about 15 percent of requests. Snow days brought 4.9x snow and ice requests; heavy rain 2.5x flooding and 1.7x tree requests; heat only 1.13x total. Surges were 1.3 to 2.9 percent of cells.
 
@@ -34,15 +34,15 @@ Pre-scoping check (Oct 3): 833,700 rows from Jan 2024 to early Oct 2026, about 8
 
 | Layer | Metric | Target | Baseline |
 |---|---|---|---|
-| ML | Surge-class F1, precision, recall | Beat the baseline by a margin frozen before Model Development | Seasonal baseline |
+| ML | Surge-class F1, precision, recall | Beat the baseline by at least 0.05 F1 on validation (frozen Oct 30) | Seasonal baseline |
 | ML | Same metrics on storm, freeze, and heat days | Reported as a separate slice | Seasonal baseline |
 | ML | Precision among each day's top-ranked neighborhoods | Reported daily, tracked over time | None set |
-| Fairness | Worst-group recall gap, 30-day windows | Below a threshold frozen before Model Development | Baseline analysis |
+| Fairness | Worst-group recall gap, 30-day windows | At most 0.15, groups under 5 surges merged (frozen Oct 30) | Baseline analysis |
 | Software | Forecast delivery | Every evening, no manual steps | None |
-| Software | Unattended run | 14 consecutive days without manual fixes | None |
+| Software | Live run | Length set at Deployment planning; monitoring and automatic retraining demonstrated | None |
 | Software | Agent briefs | 100 percent of numbers sourced; ready within minutes of an alert | None |
 | Outcome | Controller vs fixed schedules (accuracy, fairness gap, compute) | Compared on held-out history, reported either way | Never retrain, weekly retrain, drift-threshold rule |
-| Cost | Cloud spend | Within 50 dollars per member; VM near 35 dollars for the term | Course credits |
+| Cost | Cloud spend | Within 50 dollars per member; VM about 1 dollar a day while running, off except for tests and the live run | Course credits |
 
 Metric chain: higher surge recall means fewer surges found only after reports arrive; higher top-ranked precision means fewer wasted crew preparations; together they move crew time from reacting to preparing. The fairness gap keeps that gain from going only to neighborhoods that already report often.
 
@@ -50,25 +50,25 @@ Known gap: no latency or throughput metric.
 
 ## Architecture
 
-Airflow in Docker on an e2-medium VM runs the daily and event DAGs, saves raw pulls and versioned data to Cloud Storage (the DVC remote), and also hosts MLflow tracking, the grading job, and Evidently. On every push, GitHub Actions tests, trains, validates, applies the bias gate, registers the model in Vertex AI Model Registry, builds images into Artifact Registry, and deploys a Cloud Run revision (forecast API, agent service, dashboard), with rollback if health checks fail. Cloud Run calls Gemini on Vertex AI for the response agent and critic. Cloud Monitoring and Evidently feed Slack and email alerts and the retraining trigger.
+Airflow in Docker on an e2-medium VM runs the daily and event DAGs, saves raw pulls and versioned data to Cloud Storage (the DVC remote), and hosts the grading job and Evidently. MLflow tracking runs as a docker compose service on laptops and the VM. On every push, GitHub Actions tests, trains, validates, applies the bias gate, registers the model in Vertex AI Model Registry, builds images into Artifact Registry, and deploys a Cloud Run revision (forecast API, agent service, dashboard), with rollback if health checks fail. Cloud Run calls Gemini on Vertex AI for the response agent and critic. Cloud Monitoring and Evidently feed Slack and email alerts and the retraining trigger.
 
-Hosting is split because credits don't pool. Project 1 (first team member): the VM, Cloud Storage, monitoring, and Secret Manager. Project 2 (second team member, not yet chosen): Cloud Run, Artifact Registry, the Vertex registry, and Gemini. Diagram: Figure 3 in the scoping doc.
+Hosting is split because credits don't pool. Project 1 (Prit): the VM, Cloud Storage, monitoring, and Secret Manager. Project 2 (Kirtan): Cloud Run, Artifact Registry, the Vertex registry, and Gemini. Diagram: Figure 3 in the scoping doc.
 
 ## Stack
 
 | Component | Decided | Candidate or open |
 |---|---|---|
-| Orchestration | Airflow in Docker on an e2-medium VM | Executor and metadata DB setup |
+| Orchestration | Airflow in Docker on an e2-medium VM; LocalExecutor with a Postgres 16 container; UIs by SSH tunnel only (ADR-016) | None |
 | Data versioning and checks | DVC with a Cloud Storage remote, Great Expectations, Fairlearn slicing | None |
 | Models | Seasonal baseline, logistic regression, LightGBM, XGBoost, Optuna, SHAP | None |
-| Tracking and registry | MLflow for tracking; Vertex AI Model Registry as the only registry | None |
+| Tracking and registry | MLflow for tracking, as a compose service; Vertex AI Model Registry as the only registry | None |
 | Retraining controller | Contextual bandit trained on replayed history; drift-threshold rule until it wins | Q-learning (stretch) |
 | Serving | Cloud Run: forecast API, agent service, dashboard | API framework (FastAPI is the candidate: typed request validation, auto-generated API docs, a light container for Cloud Run); dashboard and map libraries |
 | Language model | Gemini on Vertex AI | Model tier; per-event cap value |
 | CI/CD and IaC | GitHub Actions; Terraform | None |
 | Monitoring | Cloud Monitoring and Evidently; MLflow tracing for the agents | Alert thresholds after week 1 |
 | Notifications | Slack and email | None |
-| Runtime | Python, Docker Compose for local development | Python version |
+| Runtime | Python 3.12 (ADR-013), Docker Compose for local development | None |
 
 ## Team and owners
 
@@ -79,9 +79,7 @@ Hosting is split because credits don't pool. Project 1 (first team member): the 
 | Forecast model, plus the response agent and critic | Piyush |
 | Retraining controller | Punith |
 | Deployment | Prit |
-| Monitoring, plus the map, dashboards, storm replay, and the 14-day run | Kirtan |
-
-Roles can be swapped as the work shifts. The project was proposed by Punith; Prit edited and submitted the final scoping document. The project 2 hosting member is still to be chosen.
+| Monitoring, plus the map, dashboards, storm replay, and the live run | Kirtan |
 
 ## Milestones
 
@@ -89,17 +87,15 @@ Roles can be swapped as the work shifts. The project was proposed by Punith; Pri
 |---|---|---|
 | Oct 5 to 11 | Setup and ingestion | Repo, environments, Airflow VM via Terraform, API access, 311 and weather ingestion, week-1 decisions |
 | Oct 12 to 18 | Processing | Format mapping, spatial joins, daily counts, surge labels, validation, DVC |
-| Oct 19 to 25 | Pipeline quality | Bias slicing, anomaly alerts, Gantt analysis, tests. **Data Pipeline due Oct 25** |
-| Oct 26 to Nov 1 | Baselines | Seasonal baseline and first models, controller replay environment, prototype of the agent's tools |
-| Nov 2 to 8 | Improvement | Tuning, SHAP, bias mitigation, controller training on replayed history |
-| Nov 9 to 15 | Model CI/CD and monitoring | Training CI/CD, registry, rollback, monitoring, alerts, drift-threshold retraining. **Model Development due Nov 15** |
-| Nov 16 to 18 | Early live run | Forecast live on Cloud Run with grading and monitoring; the 14-day unattended run starts |
-| Nov 19 to 25 | Controller release and response layer | Controller released through CI/CD if it beats the drift rule on replayed history; response layer |
-| Nov 26 to Dec 2 | Map and dashboards | Map, both dashboards, the one-storm replay, Thanksgiving buffer |
-| Dec 3 to 6 | Hardening | End-to-end tests, fresh-machine video. **Deployment due Dec 6** |
+| Oct 19 to 27 | Pipeline quality | Bias slicing, anomaly alerts, Gantt analysis, tests. **Data Pipeline due Oct 27 (moved from Oct 25), submitted** |
+| Oct 28 to Nov 1 | Phase 2 prep | Checkpoint CP1, workflow redesign, Model Development planning |
+| Nov 2 to 6 | Interfaces and first pieces | MLflow, training interface and seasonal baseline, data fixes, project 2 infra; VM startup script |
+| Nov 9 to 12 | Models and CI/CD | Training core, tuning, bias, registry and rollback, CI/CD, sensitivity; VM run, memory cap, VM secrets. Code freeze Nov 12 |
+| Nov 13 to 15 | Closing | Final README, fresh-clone test, submission. **Model Development due Nov 15** |
+| Nov 16 to Dec 6 | Deployment | Serving, monitoring and drift-triggered retraining, controller, response layer, map and dashboards, live run, fresh-machine video; detailed at Deployment planning. **Deployment due Dec 6** |
 | Dec 7 | Expo | Requirements due before noon |
 
-The VM is stopped when idle in October and runs around the clock from Nov 1.
+The VM is stopped when idle and runs for tests and the live run; the run's length is set at Deployment planning. Lab Assignments 4 and 6 fall on the same days as Model Development (Nov 15) and Deployment (Dec 6).
 
 ## Drift story
 
@@ -109,12 +105,12 @@ The VM is stopped when idle in October and runs around the clock from Nov 1.
 
 ## Open risks
 
-1. **Live labels:** live data is mostly the new 311 format while baselines come from legacy years, so live "surges" may be reclassification. Settled by the week-1 baseline decision.
-2. **Sparse target:** the modeling unit isn't locked, and the first-run sparsity and weather ratios came from undercounted rows.
+1. **Live labels:** live data is mostly the new 311 format while baselines come from legacy years, so live "surges" may be reclassification. Settled by ADR-005.
+2. **Sparse target:** settled in part: the unit is locked (ADR-004) and counts are re-measured; the surge rule is frozen in #106.
 3. **Controller:** it may never beat the drift-threshold rule, and its reward is noisy with 1 to 3 percent positives. The doc reports the result either way.
-4. **Feature history:** alert history for the 2015 to 2023 training years needs a source; archived forecasts only start in 2021.
-5. **Cost:** the e2-medium (about 24 dollars a month) plus Gemini calls must fit 50-dollar projects, and the second hosting member isn't chosen.
-6. **Workload:** Nov 9 to 15 is the heaviest week.
+4. **Feature history:** alert history is settled (ADR-014: Iowa Environmental Mesonet archive, 2015 onward). Archived forecasts still only start in 2021.
+5. **Cost:** the e2-medium (about 31 dollars a month running: VM 24.46, disk 3, IP 3.65) plus Gemini calls must fit 50-dollar projects, and the second hosting member is Kirtan.
+6. **Workload:** Nov 9 to 12 holds most Model Development code, with Lab 4 due Nov 15; monitoring moved to Deployment.
 7. **Expo event date** is still unverified in the course facts.
 
 ## Revision log
@@ -129,3 +125,16 @@ The VM is stopped when idle in October and runs around the clock from Nov 1.
 | 2026-10-04 | Monitoring moved before the 14-day run; controller given two weeks; drift-threshold rule retrains until the controller wins | Timeline gaps | Scope |
 | 2026-10-04 | Controller success reframed as a comparison reported either way; cost-aware retraining (Cara) cited as prior art | Removed an overclaim | Scope |
 | 2026-10-04 | Week-1 live-baseline decision, the no-history feature rule, and archived forecasts for validation and test added | Data validity | Scope |
+| 2026-10-18 | Project 2 hosting member set: Kirtan | Host needed before Cloud Run and CI/CD work | Scope |
+| 2026-10-20 | Modeling unit locked: neighborhood x day for the 24 tract-built neighborhoods (ADR-004, still proposed) | Week-1 decision | Scope |
+| 2026-10-20 | Live baselines for the new 311 format decided (ADR-005) | Week-1 decision | Scope |
+| 2026-10-22 | Known issues: new-system times are Boston local with a wrong +00 suffix, not UTC | ADR-020: resubmitted pairs differ by minutes, not 4 to 5 hours | Correction |
+| 2026-10-27 | Open risk 4: alert history now has a source | ADR-014: the IEM archive covers every training year | Correction |
+| 2026-10-27 | Data Pipeline deadline moved from Oct 25 to Oct 27 | Course change | Correction |
+| 2026-10-28 | Self-relative 311 lags become the default model inputs; raw lags kept for comparison (ADR-025) | Bias mitigation in the data | Scope |
+| 2026-10-30 | Retraining controller moved from Model Development to Deployment | Not in the Model Development rubric; Nov 9 to 15 was overloaded | Scope |
+| 2026-10-30 | 14-day unattended run dropped as a fixed target; the VM stays stopped when idle; run length set at Deployment planning | Our own design, not the rubric's; Deployment needs monitoring and automatic retraining demonstrated | Scope |
+| 2026-10-30 | MLflow runs as a docker compose service on laptops and the VM | Nobody waits on the VM; a grader's fresh clone can track runs | Scope |
+| 2026-10-30 | Monitoring and drift-threshold retraining moved to Deployment | Matches the Deployment rubric; lightens Nov 9 to 15 | Scope |
+| 2026-10-30 | Gates frozen: validation F1 at least 0.05 above the seasonal baseline; worst-group recall gap at most 0.15, groups under 5 surges merged | Fixed before training | Scope |
+| 2026-10-30 | Model Development owners set; milestone timeline replanned | Load balance; replaces the original Oct 26 to Dec 2 plan | Scope |
