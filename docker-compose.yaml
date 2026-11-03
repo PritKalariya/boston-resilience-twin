@@ -204,6 +204,7 @@ services:
       BRT_TEST_SERVICE: "1"  # the DAG tests fail instead of skipping when Airflow is missing
     volumes:
       - ./Data-Pipeline:/opt/airflow/repo/Data-Pipeline:ro
+      - ./Model-Development:/opt/airflow/repo/Model-Development:ro
       - ./docs/data:/opt/airflow/repo/docs/data:ro
       - ./.coveragerc:/opt/airflow/repo/.coveragerc:ro
       - ./.env.example:/opt/airflow/repo/.env.example:ro

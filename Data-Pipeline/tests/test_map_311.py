@@ -12,6 +12,7 @@ from map_311 import (
     clock_offset_hours,
     combine,
     load_category_map,
+    switch_day,
 )
 
 REPO_MAP = Path(__file__).resolve().parents[2] / "docs" / "data" / "category-map.csv"
@@ -47,6 +48,28 @@ def test_repo_map_is_valid():
     cmap = load_category_map(REPO_MAP)
     legacy_groups = cmap[(cmap["system"] == "legacy") & (cmap["storm_group"] != "")]
     assert set(legacy_groups["storm_group"]) == {"snow_ice", "flooding", "tree"}
+
+
+def test_repo_map_one_system_rows_match_the_other_system():
+    # A new-system category that also exists in legacy must not stay legacy_only
+    # on the legacy side, or its switch date never reaches change-points.csv.
+    cmap = load_category_map(REPO_MAP)
+    cmap = cmap[cmap["match"] != "excluded"]
+    categories = {system: set(cmap.loc[cmap["system"] == system, "category"]) for system in ("legacy", "new")}
+    for system, other in (("legacy", "new"), ("new", "legacy")):
+        rows = cmap[cmap["system"] == system]
+        one_sided = rows[rows["match"] == f"{system}_only"]
+        assert not one_sided["category"].isin(categories[other]).any(), one_sided["category"].tolist()
+        shared = rows[rows["match"].isin(["same", "renamed"])]
+        assert shared["category"].isin(categories[other]).all(), shared["category"].tolist()
+
+
+def test_repo_map_has_the_october_2026_transportation_categories():
+    cmap = load_category_map(REPO_MAP).set_index(["system", "source_category"])
+    added = ["Illegal Parking", "Abandoned Vehicles", "Parking Meter Repairs", "OPC Public Inquiry", "Moving Permits"]
+    rows = cmap.loc[[("new", name) for name in added]]
+    assert (rows["storm_group"] == "").all()
+    assert cmap.loc[("legacy", "Parking Enforcement"), "category"] == "Illegal Parking"
 
 
 @pytest.mark.parametrize(
@@ -151,6 +174,47 @@ def test_change_points(tmp_path):
     assert row["legacy_after_switch"] == 1
     assert ("storm_group", "tree") in cp.index
     assert ("category", "Parking Enforcement") not in cp.index
+
+
+def cases(*groups):
+    return pd.Series(pd.concat([pd.Series(pd.date_range(start, periods=n, freq=freq)) for start, n, freq in groups]))
+
+
+@pytest.mark.parametrize(
+    "groups, switch, strays",
+    [
+        ([("2026-01-09 12:04", 1, "D"), ("2026-03-10 13:00", 10, "D")], "2026-03-10", ["2026-01-09 12:04"]),
+        ([("2025-11-21 09:30", 1, "D"), ("2026-01-05 10:00", 1, "D"), ("2026-03-10", 40, "h")], "2026-03-10",
+         ["2025-11-21 09:30", "2026-01-05 10:00"]),
+        ([("2026-01-09 12:04", 1, "D"), ("2026-03-10 13:00", 9, "D")], "2026-01-09", []),
+        ([("2026-03-01", 1, "D"), ("2026-03-15", 30, "h")], "2026-03-01", []),
+        ([("2026-06-23", 3, "79D")], "2026-06-23", []),
+        ([("2026-06-23", 1, "D")], "2026-06-23", []),
+    ],
+    ids=["lone case", "two lone cases", "too few after", "gap of 14 days", "low volume", "one case"],
+)
+def test_switch_day(groups, switch, strays):
+    day, skipped = switch_day(cases(*groups).sample(frac=1, random_state=0))
+    assert day == pd.Timestamp(switch)
+    assert skipped == [pd.Timestamp(t) for t in strays]
+
+
+def test_change_points_skip_a_stray_new_case(tmp_path):
+    cmap = load_category_map(write_map(tmp_path))
+    legacy = legacy_rows([
+        ["1", "2025-09-15 09:00", None, "Tree Emergencies", None],
+        ["2", "2025-10-10 09:00", None, "Tree Emergencies", None],
+    ])
+    opened = cases(("2025-08-01 09:00", 1, "D"), ("2025-10-01 09:00", 12, "D"))
+    new = new_rows([[f"BCS-{i}", t, "Fallen Tree or Branches"] for i, t in enumerate(opened)])
+    combined, stats = combine(legacy, new, cmap)
+    cp = change_points(combined).set_index(["level", "name"])
+    for key in [("category", "Fallen Tree or Branches"), ("storm_group", "tree")]:
+        row = cp.loc[key]
+        assert str(row["switch_date"]) == "2025-10-01"
+        assert row["legacy_after_switch"] == 1
+        assert row["note"] == "1 earlier new-system case(s) skipped as stray: 2025-08-01"
+    assert stats["after_switch"] == 1
 
 
 def test_after_switch_flags_late_legacy_rows_only(tmp_path):

@@ -5,8 +5,7 @@ IE7374 MLOps team project (Northeastern, Fall 2026). Each evening, forecast per 
 ## Read first, every task
 1. The issue you were given (its acceptance criteria are your definition of done)
 2. `docs/project-spec.md`
-3. `docs/status.md`
-4. `docs/decisions/`: accepted ADRs bind you. If a task conflicts with one, stop and say so.
+3. `docs/decisions/`: accepted ADRs bind you. If a task conflicts with one, stop and say so.
 
 `docs/project-spec.md` is read-only context mirrored from project knowledge. Do not edit it; flag a needed change instead.
 
@@ -32,8 +31,11 @@ Airflow executor and metadata DB (the local stack in `docker-compose.yaml` uses 
 - The user creates the branch `<issue-number>-<slug>` and does every git write. Never run `git add`, `commit`, `push`, `merge`, `rebase`, `reset`, `stash`, or `tag`. Read-only git (`status`, `diff`, `log`) is fine. Leave all changes uncommitted.
 - Finish with a report: files changed, each acceptance-criteria command with its actual output, and anything skipped or uncertain. The user takes it to review before committing.
 - Out-of-scope findings: list them in your final report as “Maps to #n” or “Later”. Never propose or draft new issues.
-- Finish every task by updating `docs/status.md`. Update the runbook (`docs/runbook.md`, create if absent) when an operational step changes.
+- docs/status.md is retired. Never recreate or edit it. Status lives in GitHub issues and PRs.
+- Update the runbook (`docs/runbook.md`, create if absent) when an operational step changes.
 - Do not write ADRs unless the task says so. Owners author them in `docs/decisions/` from the template.
+- ADR numbers: the next free number in docs/decisions/ at merge; rename the file if it was taken.
+- After pushing fixes to a PR with requested changes: reply on each thread with the commit, then re-request review with `gh api -X POST repos/PritKalariya/boston-resilience-twin/pulls/<number>/requested_reviewers -f "reviewers[]=<login>"`.
 - `docs/` holds project docs only. No scoping PDF, no personal notes.
 - No em dashes in docs, comments, or commit messages.
 
@@ -82,8 +84,10 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `python Data-Pipeline/scripts/bias_mitigation.py`: before and after numbers for #33 (ADR-025): raw, per capita and self-relative 311 lags compared on the #32 groups; writes `mitigation.csv` and `mitigation.md` to `Data-Pipeline/data/interim/reports/bias/` (about 6 s)
 - `python Data-Pipeline/scripts/schema_stats.py [--located PATH] [--daily-counts PATH] [--no-docs]`: schema and summary statistics of `311_located` and `daily_counts` into `Data-Pipeline/data/processed/stats/`, compared with the previous run against `Data-Pipeline/config/stats_thresholds.csv` (`drift.json`), plus Great Expectations data docs (`data_docs/index.html`); writes nothing when the statistics are unchanged
 - `python Data-Pipeline/scripts/after_switch.py`: legacy rows opened after their category's switch date (`after_switch`) by category, the worst overlap windows and the storm surge labels under each policy (markdown for ADR-021); reads `after_switch_policy` from `Data-Pipeline/config/processing.csv`, needs the static layers (about 1.5 minutes)
-- `docker compose run --rm --build test [pytest arguments]`: the full test suite with coverage in the Airflow image (Python 3.12, ADR-013; no host Python needed). It prints the Python version and stops unless it is 3.12, runs every test including the DAG tests (`test_daily_pipeline.py`), and fails below the coverage bar in `.coveragerc` (70 percent). Arguments replace the suite, for example `Data-Pipeline/tests/test_dvc_push.py --no-cov`. CI runs it (#38)
-- `python -m pytest Data-Pipeline/tests`: the same suite on a host Python 3.12, without coverage; the DAG tests skip there
+- `python Model-Development/scripts/gates.py --validate-config`: validate `Model-Development/config/gates.csv` and its referenced `poverty_groups.csv` (ADR-026); prints the gate count and both sha256 values, exits 0 or 2
+- `python Model-Development/scripts/gates.py --metrics <file> [--out <file>]`: evaluate the promotion gates on a candidate's validation metrics JSON (ADR-026); prints the report JSON (or writes it to `--out`) and exits 0 (promote or keep champion), 1 (a gate failed) or 2 (cannot evaluate, or a bad config)
+- `docker compose run --rm --build test [pytest arguments]`: the full test suite with coverage in the Airflow image (Python 3.12, ADR-013; no host Python needed). It prints the Python version and stops unless it is 3.12, runs every test in `Data-Pipeline/tests` and `Model-Development/tests` including the DAG tests (`test_daily_pipeline.py`), and fails below the coverage bar in `.coveragerc` (70 percent). Arguments replace the suite, for example `Data-Pipeline/tests/test_dvc_push.py --no-cov`. CI runs it (#38)
+- `python -m pytest Data-Pipeline/tests Model-Development/tests`: the same suite on a host Python 3.12, without coverage; the DAG tests skip there
 - `python Data-Pipeline/scripts/ingest_311.py [--system legacy|new_system]`: refresh the legacy and new-system 311 files in `Data-Pipeline/data/raw/311/` (the downloads only) on the schedule in `Data-Pipeline/config/ingest_311_sources.csv`; schedule state and run log go to `Data-Pipeline/data/state/311/`, the new-system records as published to `Data-Pipeline/data/interim/new_system_as_published.parquet`; local folders only. `daily_pipeline` runs it as `ingest_legacy_311` then `ingest_new_311`
 - `python Data-Pipeline/scripts/ingest_311.py --dry-run`: check the catalog and print what would be downloaded; writes nothing
 - `ruff check .`: lint as CI runs it (errors only, `ruff.toml`); install with `pip install ruff==0.17.2`. CI (`.github/workflows/ci.yml`) runs it and the tests on every PR

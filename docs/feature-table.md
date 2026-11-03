@@ -18,7 +18,7 @@
   The alert-start limit and the surge rule trade-off are written up below. The real labels and features rebuild byte-identical.
 - **Not done:** the evening run (#39), listed separately below.
 
-Current numbers: `docs/status.md` (#16 row, W2-4 results). Commands: CLAUDE.md and the runbook ("Surge labels and features (#16)").
+Current numbers: issue #16 and its PRs on GitHub. Commands: CLAUDE.md and the runbook ("Surge labels and features (#16)").
 
 ## Columns
 
