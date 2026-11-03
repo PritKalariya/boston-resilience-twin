@@ -110,7 +110,7 @@ docker compose run --rm --build test       # the full suite with coverage, on Py
 pip install ruff==0.17.2 && ruff check .   # lint, as CI runs it
 ```
 
-The test command needs Docker only, no Python on the host. It builds the Airflow image (`brt-airflow:local`; cached after the first build), prints the Python version and stops unless it is 3.12 (ADR-013), then runs every test, the DAG tests included, and prints the line coverage of each module in `Data-Pipeline/scripts/`. It fails below 70 percent (`.coveragerc`). The test container gets no `.env`, no keys and no network, and an empty folder hides `Data-Pipeline/data`, so a run on a laptop sees what CI sees. Arguments replace the full suite and go to pytest, for example `docker compose run --rm test Data-Pipeline/tests/test_dvc_push.py --no-cov`.
+The test command needs Docker only, no Python on the host. It builds the Airflow image (`brt-airflow:local`; cached after the first build), prints the Python version and stops unless it is 3.12 (ADR-013), then runs every test in `Data-Pipeline/tests` and `Model-Development/tests`, the DAG tests included, and prints the line coverage of each module in `Data-Pipeline/scripts/`. It fails below 70 percent (`.coveragerc`). The test container gets no `.env`, no keys and no network, and an empty folder hides `Data-Pipeline/data`, so a run on a laptop sees what CI sees. Arguments replace the full suite and go to pytest, for example `docker compose run --rm test Data-Pipeline/tests/test_dvc_push.py --no-cov`.
 
 CI (`.github/workflows/ci.yml`) runs the same lint and test command for every pull request and every push to main. Tests may not reach the network: `Data-Pipeline/tests/conftest.py` fails any test that tries, so use fixture files or fakes.
 
