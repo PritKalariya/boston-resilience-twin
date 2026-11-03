@@ -184,8 +184,12 @@ if" conditions below guard the case where #106's frozen rule leaves a group unde
 - #106 implements `threshold_rule = shared` and emits tp, fp and fn on the validation
   split.
 - #110 reads the groups from `poverty_groups.csv` and emits per-group and excluded
-  counts in the `evaluate()` input shape. It reports neighborhoods and the other ACS
-  families without gating on them.
+  counts in the `evaluate()` input shape. Each gated group carries `positives` and
+  `true_positives`; each excluded row carries `positives`, `true_positives` and a
+  `reason`. Group plus excluded `positives` must equal the candidate's `tp + fn`, and
+  group plus excluded `true_positives` must equal the candidate's `tp`, or the gate
+  returns `error`. It reports neighborhoods and the other ACS families without gating
+  on them.
 - #111 stores `gates_sha256` with each registered model and re-scores the champion on
   the challenger's data version. `gates.csv` carries the groups file's hash, so
   `gates_sha256` covers both files.

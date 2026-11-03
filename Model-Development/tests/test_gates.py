@@ -128,11 +128,11 @@ def test_f1_margin_exactly_threshold_passes(committed):
     report = G.evaluate(
         committed,
         metrics(
-            candidate={"tp": 9, "fp": 11, "fn": 11},  # F1 0.45
+            candidate={"tp": 9, "fp": 11, "fn": 11},  # F1 0.45, tp 9
             baseline={"tp": 6, "fp": 4, "fn": 14},  # F1 0.40, margin exactly 0.05
-            groups={
-                "lower": {"positives": 10, "true_positives": 8},
-                "higher": {"positives": 10, "true_positives": 8},
+            groups={  # tp 5 + 4 = 9 reconciles to candidate tp; recalls 0.5/0.4 pass
+                "lower": {"positives": 10, "true_positives": 5},
+                "higher": {"positives": 10, "true_positives": 4},
             },
         ),
     )
@@ -144,11 +144,11 @@ def test_f1_margin_just_under_threshold_blocked(committed):
     report = G.evaluate(
         committed,
         metrics(
-            candidate={"tp": 9, "fp": 11, "fn": 11},  # F1 0.45
+            candidate={"tp": 9, "fp": 11, "fn": 11},  # F1 0.45, tp 9
             baseline={"tp": 7, "fp": 5, "fn": 13},  # F1 0.4375, margin 0.0125
-            groups={
-                "lower": {"positives": 10, "true_positives": 8},
-                "higher": {"positives": 10, "true_positives": 8},
+            groups={  # tp 5 + 4 = 9 reconciles; fairness passes so only F1 blocks
+                "lower": {"positives": 10, "true_positives": 5},
+                "higher": {"positives": 10, "true_positives": 4},
             },
         ),
     )
@@ -163,7 +163,7 @@ def test_gap_exactly_threshold_passes(committed):
     report = G.evaluate(
         committed,
         metrics(
-            candidate={"tp": 36, "fp": 2, "fn": 4},  # 40 positives
+            candidate={"tp": 31, "fp": 2, "fn": 9},  # 40 positives, tp 31 = 17 + 14
             baseline={"tp": 12, "fp": 8, "fn": 28},  # 40 positives, F1 0.40
             groups={
                 "lower": {"positives": 20, "true_positives": 17},  # recall 0.85
@@ -180,7 +180,7 @@ def test_gap_over_threshold_blocked_names_best_and_worst(committed):
     report = G.evaluate(
         committed,
         metrics(
-            candidate={"tp": 36, "fp": 2, "fn": 4},
+            candidate={"tp": 33, "fp": 2, "fn": 7},  # 40 positives, tp 33 = 20 + 13
             baseline={"tp": 12, "fp": 8, "fn": 28},
             groups={
                 "lower": {"positives": 20, "true_positives": 20},  # recall 1.00
@@ -231,7 +231,7 @@ def test_pool_one_small_group_excluded_two_remain(tmp_path):
         gates,
         {
             "data_version": "v1",
-            "candidate": {"tp": 40, "fp": 0, "fn": 4},  # 44 positives
+            "candidate": {"tp": 39, "fp": 0, "fn": 5},  # 44 positives, tp 39 = 3 + 18 + 18
             "baseline": {"tp": 22, "fp": 0, "fn": 22},
             "champion": None,
             "groups": {
@@ -254,7 +254,7 @@ def test_pool_two_small_groups_pooled_two_remain(tmp_path):
         gates,
         {
             "data_version": "v1",
-            "candidate": {"tp": 24, "fp": 0, "fn": 2},  # 26 positives
+            "candidate": {"tp": 22, "fp": 0, "fn": 4},  # 26 positives, tp 22 = 2 + 2 + 18
             "baseline": {"tp": 13, "fp": 0, "fn": 13},
             "champion": None,
             "groups": {
@@ -298,17 +298,21 @@ def test_ungrouped_reported_never_pooled(committed):
     report = G.evaluate(
         committed,
         metrics(
-            groups={
+            groups={  # group tp 17 + excluded tp 1 = 18 reconciles to candidate tp
                 "lower": {"positives": 10, "true_positives": 9},
                 "higher": {"positives": 9, "true_positives": 8},
             },
-            excluded={"Harbor Islands": {"positives": 1, "reason": "ungrouped"}},
+            excluded={
+                "Harbor Islands": {"positives": 1, "true_positives": 1, "reason": "ungrouped"}
+            },
         ),
     )
     assert report["decision"] == "promote"
     assert report["pooled"] is None
     names = [row.get("neighborhood") for row in report["excluded"]]
     assert "Harbor Islands" in names
+    row = next(r for r in report["excluded"] if r["neighborhood"] == "Harbor Islands")
+    assert row["group"] is None and row["true_positives"] == 1
 
 
 # --- 9. champion cases -----------------------------------------------------
@@ -335,6 +339,62 @@ def test_champion_different_data_version_errors(committed):
         committed,
         metrics(champion={"tp": 18, "fp": 5, "fn": 2, "data_version": "v0", "model_version": "m1"}),
     )
+    assert report["decision"] == "error"
+    assert "data_version" in report["reason"]
+
+
+# --- 9b. reconcile true_positives (group + excluded == candidate tp) ------
+
+
+def test_true_positives_sum_too_low_errors(committed):
+    # group tp 8 + 9 = 17, below the candidate's tp of 18; positives still reconcile.
+    report = G.evaluate(
+        committed,
+        metrics(
+            groups={
+                "lower": {"positives": 10, "true_positives": 8},
+                "higher": {"positives": 10, "true_positives": 9},
+            }
+        ),
+    )
+    assert report["decision"] == "error"
+    assert "true_positives" in report["reason"]
+
+
+def test_true_positives_sum_too_high_errors(committed):
+    # group tp 10 + 9 = 19, above the candidate's tp of 18; positives still reconcile.
+    report = G.evaluate(
+        committed,
+        metrics(
+            groups={
+                "lower": {"positives": 10, "true_positives": 10},
+                "higher": {"positives": 10, "true_positives": 9},
+            }
+        ),
+    )
+    assert report["decision"] == "error"
+    assert "true_positives" in report["reason"]
+
+
+def test_excluded_true_positives_over_positives_errors(committed):
+    report = G.evaluate(
+        committed,
+        metrics(
+            groups={
+                "lower": {"positives": 10, "true_positives": 9},
+                "higher": {"positives": 9, "true_positives": 8},
+            },
+            excluded={
+                "Harbor Islands": {"positives": 1, "true_positives": 2, "reason": "ungrouped"}
+            },
+        ),
+    )
+    assert report["decision"] == "error"
+    assert "true_positives" in report["reason"]
+
+
+def test_data_version_non_string_errors(committed):
+    report = G.evaluate(committed, metrics(data_version=123))
     assert report["decision"] == "error"
     assert "data_version" in report["reason"]
 

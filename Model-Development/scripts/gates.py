@@ -349,8 +349,8 @@ def evaluate(gates: Gates, metrics: dict) -> dict:
 
 
 def _evaluate(gates: Gates, metrics: dict, data_version: object) -> dict:
-    if data_version is None or (isinstance(data_version, str) and not data_version.strip()):
-        raise Undefined("missing or empty top-level data_version")
+    if not isinstance(data_version, str) or not data_version.strip():
+        raise Undefined("top-level data_version must be a non-empty string")
     ctp, cfp, cfn = _tally("candidate", metrics.get("candidate"))
     btp, bfp, bfn = _tally("baseline", metrics.get("baseline"))
     candidate_positives = ctp + cfn
@@ -388,6 +388,7 @@ def _evaluate(gates: Gates, metrics: dict, data_version: object) -> dict:
         raise Undefined("excluded is not a mapping")
 
     group_positives = 0
+    group_true_positives = 0
     tallies: dict[str, tuple[int, int]] = {}
     for name in gates.fairness_groups:
         block = groups_in[name]
@@ -399,21 +400,39 @@ def _evaluate(gates: Gates, metrics: dict, data_version: object) -> dict:
             raise Undefined(f"group {name!r} true_positives exceed positives")
         tallies[name] = (pos, tp)
         group_positives += pos
+        group_true_positives += tp
 
+    # Every excluded row shares one schema: a neighborhood or a group (one null),
+    # positives, true_positives and a reason.
     excluded_report = []
     excluded_positives = 0
+    excluded_true_positives = 0
     for hood, block in excluded_in.items():
         if not isinstance(block, dict):
             raise Undefined(f"excluded {hood!r} is not a mapping")
         pos = _as_count(f"excluded {hood}.positives", block.get("positives"))
+        tp = _as_count(f"excluded {hood}.true_positives", block.get("true_positives"))
+        if tp > pos:
+            raise Undefined(f"excluded {hood!r} true_positives exceed positives")
         excluded_positives += pos
+        excluded_true_positives += tp
         excluded_report.append(
-            {"neighborhood": hood, "positives": pos, "reason": block.get("reason", UNGROUPED)}
+            {
+                "neighborhood": hood,
+                "group": None,
+                "positives": pos,
+                "true_positives": tp,
+                "reason": block.get("reason", UNGROUPED),
+            }
         )
 
     if group_positives + excluded_positives != candidate_positives:
         raise Undefined(
             "group positives plus excluded positives do not equal the candidate's tp + fn"
+        )
+    if group_true_positives + excluded_true_positives != ctp:
+        raise Undefined(
+            "group true_positives plus excluded true_positives do not equal the candidate's tp"
         )
 
     floor = gates.fairness_min_group_surges
@@ -448,7 +467,13 @@ def _evaluate(gates: Gates, metrics: dict, data_version: object) -> dict:
             }
             for member in members:
                 excluded_report.append(
-                    {"group": member, "positives": tallies[member][0], "reason": "pooled_below_floor"}
+                    {
+                        "neighborhood": None,
+                        "group": member,
+                        "positives": tallies[member][0],
+                        "true_positives": tallies[member][1],
+                        "reason": "pooled_below_floor",
+                    }
                 )
 
     if len(evaluable) < gates.fairness_min_groups:

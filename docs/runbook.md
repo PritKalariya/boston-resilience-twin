@@ -361,8 +361,9 @@ build, so `--build` costs seconds unless `Data-Pipeline/requirements.txt`
 changed), then runs `Data-Pipeline/tests/run_tests.sh` in it:
 
 1. prints the Python and Airflow versions and stops unless Python is 3.12 (ADR-013);
-2. runs every test in `Data-Pipeline/tests`, the DAG tests included
-   (`test_daily_pipeline.py` parses `Data-Pipeline/dags` with Airflow's DagBag);
+2. runs every test in `Data-Pipeline/tests` and `Model-Development/tests`, the DAG
+   tests included (`test_daily_pipeline.py` parses `Data-Pipeline/dags` with Airflow's
+   DagBag);
 3. prints the line coverage of each module in `Data-Pipeline/scripts/` and fails
    below the bar in `.coveragerc` (70 percent).
 

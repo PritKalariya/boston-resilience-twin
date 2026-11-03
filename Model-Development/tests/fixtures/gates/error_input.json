@@ -8,6 +8,6 @@
     "higher": {"positives": 10, "true_positives": 9}
   },
   "excluded": {
-    "Harbor Islands": {"positives": 0, "reason": "ungrouped"}
+    "Harbor Islands": {"positives": 0, "true_positives": 0, "reason": "ungrouped"}
   }
 }
