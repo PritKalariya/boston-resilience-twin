@@ -37,7 +37,7 @@ Pre-scoping check (Oct 3): 833,700 rows from Jan 2024 to early Oct 2026, about 8
 | ML | Surge-class F1, precision, recall | Beat the baseline by at least 0.05 F1 on validation (frozen Oct 30) | Seasonal baseline |
 | ML | Same metrics on storm, freeze, and heat days | Reported as a separate slice | Seasonal baseline |
 | ML | Precision among each day's top-ranked neighborhoods | Reported daily, tracked over time | None set |
-| Fairness | Worst-group recall gap, 30-day windows | At most 0.15, groups under 5 surges merged (frozen Oct 30) | Baseline analysis |
+| Fairness | Worst-group recall gap (best minus worst recall) | Gate: at most 0.15 over the 2024 validation year between the 2 ACS poverty groups (median split, frozen), groups under 5 surges pooled (frozen Oct 30, groups set Nov 2). Live: 30-day windows, groups set at Deployment planning | Baseline analysis |
 | Software | Forecast delivery | Every evening, no manual steps | None |
 | Software | Live run | Length set at Deployment planning; monitoring and automatic retraining demonstrated | None |
 | Software | Agent briefs | 100 percent of numbers sourced; ready within minutes of an alert | None |
@@ -138,3 +138,4 @@ The VM is stopped when idle and runs for tests and the live run; the run's lengt
 | 2026-10-30 | Monitoring and drift-threshold retraining moved to Deployment | Matches the Deployment rubric; lightens Nov 9 to 15 | Scope |
 | 2026-10-30 | Gates frozen: validation F1 at least 0.05 above the seasonal baseline; worst-group recall gap at most 0.15, groups under 5 surges merged | Fixed before training | Scope |
 | 2026-10-30 | Model Development owners set; milestone timeline replanned | Load balance; replaces the original Oct 26 to Dec 2 plan | Scope |
+| 2026-11-02 | Training fairness gate measured over the whole 2024 validation year between the 2 ACS poverty groups (the data pipeline's median split, frozen in `Model-Development/config/poverty_groups.csv`); neighborhoods and the other ACS families reported by #110, not gated; 30-day windows stay the live metric, groups set at Deployment planning. Champion replaced only on strictly greater validation F1, re-scored on the challenger's data version | 30-day windows give about 1 surge per neighborhood, neighborhood groups let one missed surge move recall by 0.20, and the pipeline has no 3-tier poverty definition | Scope |

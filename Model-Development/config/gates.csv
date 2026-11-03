@@ -1,0 +1,19 @@
+key,value,description
+f1_split,validation,ADR-003 validation split (2024)
+f1_metric,surge_class_f1,2tp / (2tp + fp + fn) for the surge class
+f1_baseline,seasonal,the seasonal baseline from #106
+f1_min_margin,0.05,candidate F1 minus baseline F1 in absolute points inclusive; frozen by ADR-026-promotion-gates.md
+threshold_rule,shared,candidate and baseline thresholded by the same rule on the validation split; #106 implements it
+fairness_metric,worst_group_recall_gap,best group recall minus worst over the whole validation split
+fairness_max_gap,0.15,inclusive maximum worst-group recall gap; frozen by ADR-026-promotion-gates.md
+fairness_groups,lower;higher,ACS poverty groups lowest poverty first
+fairness_group_source,Model-Development/config/poverty_groups.csv,the pipeline median split frozen; see ADR-026-promotion-gates.md
+fairness_group_sha256,d9aa025ed79908c28e1aa4c4a3d2a001b13b59d895f10bcfb862d3dac8f5c02f,sha256 of poverty_groups.csv; the load fails if the file does not match
+fairness_min_group_surges,5,groups with fewer positives are pooled
+fairness_small_group_policy,pool,groups under the floor form one pool; a pool still under the floor is excluded and reported
+fairness_ungrouped_policy,exclude_and_report,neighborhoods with no group never join a pool
+fairness_min_groups,2,fewer evaluable groups means the gate cannot be evaluated
+champion_metric,surge_class_f1,the metric the champion is compared on
+champion_min_delta,0,the challenger replaces the champion only if its F1 is strictly greater; a tie keeps the champion
+champion_rescore,challenger_data_version,the champion is re-scored on the challenger data version and validation rows
+on_undefined,fail,anything that cannot be evaluated blocks promotion
