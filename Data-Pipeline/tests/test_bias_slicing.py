@@ -172,6 +172,7 @@ def test_college_share_counts_undergraduates_and_graduate_students(tmp_path):
     units = unit_attributes(static_dir(tmp_path)).set_index("unit")
     assert units.loc["Poor", "college_share"] == pytest.approx(0.6)
     assert units.loc["Rich", "college_share"] == pytest.approx(0.05)
+    assert units.loc["Poor", "poverty_covered"] == pytest.approx(1.0)  # the fixture's poverty universe is everyone
     table = population_table("name", {u: u for u in UNITS})
     table.loc[0, COLLEGE[2]] = np.nan  # one missing count leaves the share missing, not too low
     assert pd.isna(acs_shares(table, "name").loc[0, "college_share"])
@@ -439,6 +440,8 @@ def test_main_writes_the_report_and_both_tables(tmp_path, monkeypatch, capsys):
     assert {p.name for p in out.iterdir()} == {"slices.csv", "gaps.csv", "report.md"}
     report = (out / "report.md").read_text()
     assert "## Significant gaps" in report and "| poverty_share | requests per 1,000 residents a year |" in report
+    assert "a cutoff of 28.33%" in report  # twice the pooled 8,500 / 60,000
+    assert "Student areas, college share: Poor 60.0% (poverty counts 100% of residents)" in report
     assert "significant gaps; wrote" in capsys.readouterr().out
     gaps = pd.read_csv(out / "gaps.csv")
     assert {"slice", "metric", "period", "group", "ratio", "p_value", "significant"} <= set(gaps.columns)

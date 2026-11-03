@@ -121,6 +121,8 @@ def acs_shares(table: pd.DataFrame, key: str) -> pd.DataFrame:
         "college_enrolled": college.to_numpy(),
         "school_base": n[SCHOOL_TOTAL].to_numpy(),
         "college_share": _share(college, n[SCHOOL_TOTAL]).to_numpy(),
+        # The poverty universe leaves out people in college dorms and other group quarters (#127).
+        "poverty_covered": _share(n[POVERTY[1]], n[POPULATION]).to_numpy(),
     })
 
 
@@ -462,6 +464,8 @@ def bias_tables(labels: pd.DataFrame, located: pd.DataFrame, units: pd.DataFrame
                    for name, g in groups_of.items() if name != "neighborhood"},
         "no_population": sorted(units.loc[units["population"].isna(), "unit"]),
         "city_college": city_college, "student_factor": settings["student_area_factor"],
+        "student_areas": units.set_index("unit").loc[students["student_area"] == "student area",
+                                                     ["college_share", "poverty_covered"]].sort_values("college_share", ascending=False),
     }
     return pd.DataFrame(rates), pd.DataFrame(gaps), info
 
@@ -503,10 +507,18 @@ def report(rates: pd.DataFrame, gaps: pd.DataFrame, info: dict, settings: dict) 
         lines.append(f"- **{name}:** " + "; ".join(f"{group} ({len(units)}): {', '.join(units)}" for group, units in groups.items()))
     if info["eras"]:
         lines.append("- **system:** " + "; ".join(f"{name} {a.date()} to {b.date()}" for name, (a, b) in info["eras"].items()))
+    cutoff = info["student_factor"] * info["city_college"]
     lines.append(f"- A **student area** has at least {info['student_factor']:g} times the city's share of residents enrolled "
-                 f"in college or graduate school ({info['city_college']:.1%}, ACS B14002). ACS poverty counts off-campus "
-                 "students, so `poverty_share_without_student_areas` shows the poverty split with those neighborhoods "
-                 "left out (#126).")
+                 f"in college or graduate school ({info['city_college']:.1%}, so a cutoff of {cutoff:.2%}; ACS B14002). ACS "
+                 "poverty counts off-campus students, so `poverty_share_without_student_areas` shows the poverty split with "
+                 "those neighborhoods left out (#126).")
+    if len(info["student_areas"]):
+        areas = "; ".join(f"{unit} {row.college_share:.1%} (poverty counts {row.poverty_covered:.0%} of residents)"
+                          for unit, row in info["student_areas"].iterrows())
+        lines.append(f"  - Student areas, college share: {areas}. The poverty count leaves out people in college dorms, so "
+                     "where most students live in dorms the college share overstates how much of the poverty count is "
+                     "students; B14006 (poverty by school enrollment) would measure it, but the city's tables do not "
+                     "carry it. An area within 1 point of the cutoff can move with the factor's second decimal.")
     lines += ["", "## Significant gaps", ""]
     found = gaps[gaps["significant"]] if len(gaps) else gaps
     if found.empty:
