@@ -35,3 +35,8 @@ Review rules:
 - No secrets, keys, or data files. Data goes through DVC.
 - The ADR, if the issue has the ADR box.
 - For Terraform changes, the `terraform plan` output.
+
+### Changing an accepted ADR
+- In place: only the status line, and dated notes (`Note (YYYY-MM-DD): ...`) that correct a fact, clarify, or point elsewhere, changing no decision and adding no duty. The original text stays.
+- Anything else (a changed decision, or a new or changed duty or consequence) is a new ADR that amends or supersedes it, and the old ADR's status line points to it.
+- Applies from 2026-11-03; earlier in-place edits stand.
