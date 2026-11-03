@@ -6,6 +6,10 @@ slice is a set of groups of the 24 ADR-004 neighborhoods:
 - poverty_share, poc_share, limited_english_share: the 2025 ACS share of each neighborhood (#9),
   above the median of the neighborhoods ("higher") or at or below it ("lower");
 - flood_zone: any land in the 9-inch sea level rise 1% yearly chance flood zone, or none;
+- student_area and poverty_share_without_student_areas (diagnostics, #126): neighborhoods where
+  the share of residents enrolled in college or graduate school (ACS B14002) is at least
+  student_area_factor times the city's, against the rest; and the poverty split with them left
+  out. ACS poverty counts off-campus students, so part of the poverty gap is student share;
 - system: the legacy era against the migration era (the first year of the new 311 system), and for
   missing locations the legacy against the new system in the migration era.
 
@@ -49,12 +53,17 @@ from scipy import stats
 from feature_table import AREA_CRS, FLOOD_LAYERS, POPULATION, POVERTY
 from surge_labels import PERIODS, period_of
 
-SETTINGS = ("ratio_min", "alpha", "name_unit_min_share", "name_min_placed", "per_capita_scale", "system_era_days")
+SETTINGS = ("ratio_min", "alpha", "name_unit_min_share", "name_min_placed", "per_capita_scale", "system_era_days",
+            "student_area_factor")
 POC = ("population_b03002_003e", "population_b03002_001e")  # non-Hispanic white alone, everyone
 # C16001 lists each language as its speakers, then "very well", then "less than very well".
 LIMITED_ENGLISH = [f"population_c16001_{i:03d}e" for i in range(5, 39, 3)]
 LANGUAGE_TOTAL = "population_c16001_001e"  # everyone aged 5 and over
 MEASURES = ["poverty_share", "poc_share", "limited_english_share"]
+# B14002 lists, for men then women, college undergraduates and graduate students by public and private.
+COLLEGE = [f"education_b14002_{i:03d}e" for i in (20, 21, 23, 24, 44, 45, 47, 48)]
+SCHOOL_TOTAL = "education_b14002_001e"  # everyone aged 3 and over
+STUDENT_SLICES = ["student_area", "poverty_share_without_student_areas"]
 FLOOD = "flood_1pct"
 LABEL_COLUMNS = {"unit", "date", "surge"}
 LOCATED_COLUMNS = {"source_system", "open_dt", "storm_group", "location", "neighborhood", "unit", "geoid20"}
@@ -92,9 +101,9 @@ def _share(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
 
 
 def acs_shares(table: pd.DataFrame, key: str) -> pd.DataFrame:
-    """Population and the three ACS shares of each row of a 2025 population table, keyed by key.
-    A share whose numbers are missing stays missing."""
-    needed = {key, POPULATION, *POVERTY, *POC, LANGUAGE_TOTAL, *LIMITED_ENGLISH}
+    """Population, the three ACS shares and the college enrollment (count, base and share) of each row
+    of a 2025 population table, keyed by key. A share whose numbers are missing stays missing."""
+    needed = {key, POPULATION, *POVERTY, *POC, LANGUAGE_TOTAL, *LIMITED_ENGLISH, *COLLEGE, SCHOOL_TOTAL}
     missing = needed - set(table.columns)
     if missing:
         raise ValueError(f"population table is missing columns: {sorted(missing)}")
@@ -102,12 +111,16 @@ def acs_shares(table: pd.DataFrame, key: str) -> pd.DataFrame:
         raise ValueError(f"population table repeats a {key}")
     n = table[sorted(needed - {key})].apply(pd.to_numeric, errors="coerce")
     limited = n[LIMITED_ENGLISH].sum(axis=1, min_count=len(LIMITED_ENGLISH))  # one gap leaves it missing
+    college = n[COLLEGE].sum(axis=1, min_count=len(COLLEGE))
     return pd.DataFrame({
         key: table[key].astype(str).to_numpy(),
         "population": n[POPULATION].to_numpy(),
         "poverty_share": _share(n[POVERTY[0]], n[POVERTY[1]]).to_numpy(),
         "poc_share": (1 - _share(n[POC[0]], n[POC[1]])).to_numpy(),
         "limited_english_share": _share(limited, n[LANGUAGE_TOTAL]).to_numpy(),
+        "college_enrolled": college.to_numpy(),
+        "school_base": n[SCHOOL_TOTAL].to_numpy(),
+        "college_share": _share(college, n[SCHOOL_TOTAL]).to_numpy(),
     })
 
 
@@ -161,6 +174,21 @@ def slice_groups(attrs: pd.DataFrame, key: str) -> dict[str, pd.Series]:
     groups["flood_zone"] = pd.Series(np.where(flood > 0, "in flood zone", "not in flood zone"),
                                      index=attrs.index, dtype="string").mask(flood.isna())
     return groups
+
+
+def student_slices(units: pd.DataFrame, factor: float) -> tuple[dict[str, pd.Series], float]:
+    """The two student-area diagnostics (#126) and the city's college share they use.
+
+    A student area has a college share at least factor times the city's (all neighborhoods pooled).
+    poverty_share_without_student_areas keeps #32's median split unchanged and only leaves the
+    student areas out, so its groups are the poverty groups minus those neighborhoods."""
+    attrs = units.set_index("unit")
+    known = attrs["college_share"].notna()
+    city = float(attrs.loc[known, "college_enrolled"].sum() / attrs.loc[known, "school_base"].sum()) if known.any() else float("nan")
+    student = attrs["college_share"] >= factor * city
+    area = pd.Series(np.where(student, "student area", "other"), index=attrs.index, dtype="string").mask(~known)
+    poverty = median_groups(attrs["poverty_share"]).mask(student.to_numpy())
+    return {"student_area": area, "poverty_share_without_student_areas": poverty}, city
 
 
 def name_units(storm: pd.DataFrame, min_share: float, min_placed: float) -> dict[str, tuple[str, ...]]:
@@ -411,6 +439,8 @@ def bias_tables(labels: pd.DataFrame, located: pd.DataFrame, units: pd.DataFrame
 
     slices = {"neighborhood": pd.Series(units["unit"].to_numpy(), index=units["unit"], dtype="string")}
     slices.update(slice_groups(units, "unit"))
+    students, city_college = student_slices(units, settings["student_area_factor"])
+    slices.update(students)
     rates, gaps = [], []
     for name, groups in slices.items():
         r, g = slice_metrics(name, groups, cells, storm, periods, settings,
@@ -431,6 +461,7 @@ def bias_tables(labels: pd.DataFrame, located: pd.DataFrame, units: pd.DataFrame
         "groups": {name: g.dropna().groupby(g.dropna()).apply(lambda s: sorted(s.index)).to_dict()
                    for name, g in groups_of.items() if name != "neighborhood"},
         "no_population": sorted(units.loc[units["population"].isna(), "unit"]),
+        "city_college": city_college, "student_factor": settings["student_area_factor"],
     }
     return pd.DataFrame(rates), pd.DataFrame(gaps), info
 
@@ -472,6 +503,10 @@ def report(rates: pd.DataFrame, gaps: pd.DataFrame, info: dict, settings: dict) 
         lines.append(f"- **{name}:** " + "; ".join(f"{group} ({len(units)}): {', '.join(units)}" for group, units in groups.items()))
     if info["eras"]:
         lines.append("- **system:** " + "; ".join(f"{name} {a.date()} to {b.date()}" for name, (a, b) in info["eras"].items()))
+    lines.append(f"- A **student area** has at least {info['student_factor']:g} times the city's share of residents enrolled "
+                 f"in college or graduate school ({info['city_college']:.1%}, ACS B14002). ACS poverty counts off-campus "
+                 "students, so `poverty_share_without_student_areas` shows the poverty split with those neighborhoods "
+                 "left out (#126).")
     lines += ["", "## Significant gaps", ""]
     found = gaps[gaps["significant"]] if len(gaps) else gaps
     if found.empty:
