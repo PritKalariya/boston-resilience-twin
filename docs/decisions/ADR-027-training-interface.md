@@ -81,7 +81,7 @@ So a candidate passes the ADR-026 accuracy gate with a validation F1 of 0.1767 o
 
 **Effect on the gates and the bias reports.**
 - **Gate groups.** The frozen label leaves the ADR-026 groups well above the 5-surge floor in 2024: lower 223, higher 198 (ADR-026 measured 223 and 200 with flooding). The same four neighborhoods stay under 5: Chinatown 0, Longwood 2, South Boston Waterfront 4 and Harbor Islands 0.
-- **#32 report.** 104 of 314 tests are now significant (105 before).
+- **#32 report**, with #127's student-area tests. 114 of 338 tests are now significant (115 with flooding in the label). The one that changed is the surge rate from 2025 on in the neighborhoods with the lower people-of-color share.
 - **ADR-025's before and after comparison.**
   - All labeled days are unchanged: 52, 45 and 0 gaps of 96.
   - Surge days now show 47, 63 and 7 gaps, against 53, 64 and 7 before, on 3,529 surge days (3,554 before).
