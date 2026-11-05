@@ -16,6 +16,7 @@ The gaps fall into five kinds:
    - Tracts with more people of color or limited English file 21 to 29% fewer.
    - 311 counts reported demand, not need, so these areas look calmer than they are.
    - 8 of the 31 model inputs in `feature_catalog.csv` were raw 311 lag counts (`snow_ice_last` to `tree_sum28`), so the model saw this gap directly.
+   - Note (2026-11-03): part of the poverty gap is student share (#126). ACS poverty counts off-campus students (it leaves out people in college dorms), and 5 neighborhoods have at least twice the city's college share (16.6%, ACS B14002): Allston, Downtown, Fenway, Longwood, Mission Hill. They file the fewest storm requests per resident (11.2 against 26.6 a year per 1,000 residents, 2015 to 2023). Without them the poverty reporting gap is 24.0 against 29.2 (0.82, within the four-fifths rule) in training, 0.72 in 2024 and 0.87 from 2025, and the remaining higher-poverty neighborhoods surge more often, not less (4.68% against 3.76% in training). So the poverty gap mixes lower reporting in low-income neighborhoods with students, who report little wherever they live. #32's report shows both as diagnostic slices (`student_area`, `poverty_share_without_student_areas`). No decision here changes.
 2. **Labels.** Surge rates are not lower where reporting is: 3.40% against 3.76% by poverty, within the rule. They are higher in neighborhoods with more people of color or limited English (4.16% against 3.06% by limited English in training). Each label compares a neighborhood with its own ADR-005 baseline, which absorbs its usual reporting level.
 3. **Small neighborhoods.**
    - 36 neighborhood surge rates differ from the rest of the city.
@@ -96,6 +97,7 @@ The 7 remaining gaps are all surge days in 2024. That is the smallest sample, 42
 
   The inputs chosen there are recorded in its ADR.
 - **Grading keeps watching** the same #32 groups' recall in the 30-day windows (ADR-008), not only the worst neighborhood.
+- Note (2026-11-03): the higher-poverty group's recall in two parts, the student areas and the other higher-poverty neighborhoods, is reported by #110 beside the ADR-026 gate, and ADR-026's "Reopen if" names the trigger (#126).
 - **Pipeline:** the `feature_table` and `bias_slicing` stages reran (ADR-024). `dvc.lock` and the pushed data include the new columns, and the #32 report is byte-identical.
 - **Evening run:** the live run (#39) builds the same features from the same baselines, so they pass ADR-003's live rule.
 

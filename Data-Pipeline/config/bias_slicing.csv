@@ -5,3 +5,4 @@ name_unit_min_share,0.05,a recorded neighborhood name covers every unit holding 
 name_min_placed,20,a recorded name with fewer placed storm requests covers no unit
 per_capita_scale,1000,requests per capita are per this many residents per year
 system_era_days,365,the migration era starts on the first new-system day; the legacy era is the same days one year earlier
+student_area_factor,2,a student area has at least this many times the city's share of residents enrolled in college or graduate school (ACS B14002; #126)

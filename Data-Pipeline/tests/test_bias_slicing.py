@@ -9,9 +9,11 @@ from shapely.geometry import box
 
 import bias_slicing
 from bias_slicing import (
+    COLLEGE,
     LANGUAGE_TOTAL,
     LIMITED_ENGLISH,
     POC,
+    SCHOOL_TOTAL,
     acs_shares,
     bias_tables,
     gap_rows,
@@ -23,6 +25,7 @@ from bias_slicing import (
     proportion_p,
     rate_p,
     request_group,
+    student_slices,
     storm_requests,
     system_eras,
     tract_attributes,
@@ -35,23 +38,25 @@ SETTINGS = load_settings(CONFIG)
 
 # Four neighborhoods side by side in Boston, one tract each. Poor and Crowded are poorer, more
 # people of color and more limited English than Rich and Quiet; only Poor touches the flood zone.
+# Poor is the student area: 60% of its residents are in college, against 5% elsewhere.
 UNITS = ["Crowded", "Poor", "Quiet", "Rich"]
 SHAPES = {unit: box(-71.10 + 0.01 * i, 42.30, -71.09 + 0.01 * i, 42.31) for i, unit in enumerate(UNITS)}
 TRACT_IDS = {unit: f"2502500{i}00" for i, unit in enumerate(UNITS)}
-ACS = {  # population, below poverty, non-Hispanic white, limited English (per language column)
-    "Crowded": (20000, 6000, 4000, 300),
-    "Poor": (10000, 4000, 2000, 200),
-    "Quiet": (10000, 500, 8000, 10),
-    "Rich": (20000, 1000, 15000, 20),
+ACS = {  # population, below poverty, non-Hispanic white, limited English (per language column), in college
+    "Crowded": (20000, 6000, 4000, 300, 1000),
+    "Poor": (10000, 4000, 2000, 200, 6000),
+    "Quiet": (10000, 500, 8000, 10, 500),
+    "Rich": (20000, 1000, 15000, 20, 1000),
 }
 
 
 def population_table(key: str, ids: dict) -> pd.DataFrame:
     rows = []
-    for unit, (people, poor, white, limited) in ACS.items():
+    for unit, (people, poor, white, limited, college) in ACS.items():
         row = {key: ids[unit], POPULATION: people, POVERTY[0]: poor, POVERTY[1]: people,
                POC[0]: white, POC[1]: people, LANGUAGE_TOTAL: people}
         row.update({column: limited for column in LIMITED_ENGLISH})
+        row.update({column: college / len(COLLEGE) for column in COLLEGE}, **{SCHOOL_TOTAL: people})
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -161,6 +166,39 @@ def test_a_neighborhood_without_a_population_row_is_rejected(tmp_path):
     population_table("name", {u: u for u in UNITS}).iloc[1:].to_parquet(static / "population_2025_neighborhood.parquet")
     with pytest.raises(ValueError, match="no 2025 population row for neighborhoods"):
         unit_attributes(static)
+
+
+def test_college_share_counts_undergraduates_and_graduate_students(tmp_path):
+    units = unit_attributes(static_dir(tmp_path)).set_index("unit")
+    assert units.loc["Poor", "college_share"] == pytest.approx(0.6)
+    assert units.loc["Rich", "college_share"] == pytest.approx(0.05)
+    assert units.loc["Poor", "poverty_covered"] == pytest.approx(1.0)  # the fixture's poverty universe is everyone
+    table = population_table("name", {u: u for u in UNITS})
+    table.loc[0, COLLEGE[2]] = np.nan  # one missing count leaves the share missing, not too low
+    assert pd.isna(acs_shares(table, "name").loc[0, "college_share"])
+    with pytest.raises(ValueError, match="missing columns"):
+        acs_shares(table.drop(columns=SCHOOL_TOTAL), "name")
+
+
+def test_a_student_area_is_at_least_twice_the_city_college_share(tmp_path):
+    units = unit_attributes(static_dir(tmp_path))
+    slices, city = student_slices(units, 2.0)
+    assert city == pytest.approx((1000 + 6000 + 500 + 1000) / 60000)  # pooled, not a mean of shares
+    assert slices["student_area"].to_dict() == {"Crowded": "other", "Poor": "student area", "Quiet": "other", "Rich": "other"}
+    # The poverty split is #32's, unchanged; only the student area leaves it.
+    without = slices["poverty_share_without_student_areas"]
+    assert pd.isna(without["Poor"])
+    assert without.drop("Poor").to_dict() == {"Crowded": "higher", "Quiet": "lower", "Rich": "lower"}
+    looser, _ = student_slices(units, 0.1)  # every neighborhood a student area
+    assert set(looser["student_area"]) == {"student area"} and looser["poverty_share_without_student_areas"].isna().all()
+
+
+def test_a_neighborhood_without_enrollment_counts_is_in_neither_student_group(tmp_path):
+    units = unit_attributes(static_dir(tmp_path))
+    units.loc[units["unit"] == "Quiet", ["college_share", "college_enrolled", "school_base"]] = np.nan
+    slices, city = student_slices(units, 2.0)
+    assert pd.isna(slices["student_area"]["Quiet"])
+    assert city == pytest.approx((1000 + 6000 + 1000) / 50000)
 
 
 def test_median_split_puts_the_median_itself_in_lower_and_keeps_missing_missing():
@@ -349,6 +387,17 @@ def test_equal_neighborhoods_give_no_significant_gap(tmp_path):
     assert info["groups"]["flood_zone"] == {"in flood zone": ["Crowded", "Poor"], "not in flood zone": ["Quiet", "Rich"]}
 
 
+def test_the_student_slices_are_tested_like_the_others(tmp_path):
+    # Poor (the student area) files 1 request a day per 10,000 residents; every other neighborhood 3.
+    _, gaps, info = world(tmp_path, requests={"Crowded": 6, "Poor": 1, "Quiet": 3, "Rich": 6})
+    train = gaps[(gaps["period"] == "train 2015 to 2023") & (gaps["metric"] == "requests_per_capita")].set_index("slice")
+    assert train.loc["student_area", "group"] == "student area" and train.loc["student_area", "significant"]
+    assert train.loc["poverty_share", "significant"]  # the student area pulls the higher group down
+    assert not train.loc["poverty_share_without_student_areas", "significant"]  # without it, no gap
+    assert info["groups"]["poverty_share_without_student_areas"] == {"higher": ["Crowded"], "lower": ["Quiet", "Rich"]}
+    assert info["city_college"] == pytest.approx(8500 / 60000)
+
+
 def test_a_planted_surge_gap_is_found(tmp_path):
     rare = lambda day: day % 50 == 0  # noqa: E731
     often = lambda day: day % 10 == 0  # noqa: E731
@@ -391,6 +440,8 @@ def test_main_writes_the_report_and_both_tables(tmp_path, monkeypatch, capsys):
     assert {p.name for p in out.iterdir()} == {"slices.csv", "gaps.csv", "report.md"}
     report = (out / "report.md").read_text()
     assert "## Significant gaps" in report and "| poverty_share | requests per 1,000 residents a year |" in report
+    assert "a cutoff of 28.33%" in report  # twice the pooled 8,500 / 60,000
+    assert "Student areas, college share: Poor 60.0% (poverty counts 100% of residents)" in report
     assert "significant gaps; wrote" in capsys.readouterr().out
     gaps = pd.read_csv(out / "gaps.csv")
     assert {"slice", "metric", "period", "group", "ratio", "p_value", "significant"} <= set(gaps.columns)
