@@ -1,4 +1,4 @@
-"""Step: register the model (#112, ADR-027). STUB. Main only. No network.
+"""Step: register the model (#112, ADR-028). STUB. Main only. No network.
 
 PR 3 replaces the body with #111's Vertex AI Model Registry push, storing the gate
 hashes with the model. The stub writes `registry.json` with a stub model version.

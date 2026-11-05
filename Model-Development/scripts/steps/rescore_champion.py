@@ -1,4 +1,4 @@
-"""Step: re-score the champion on the challenger's data version (#112, ADR-027). STUB. Main only.
+"""Step: re-score the champion on the challenger's data version (#112, ADR-028). STUB. Main only.
 
 PR 3 replaces the body with #111's champion lookup and re-score; it fills the
 `champion` block of `metrics.json` (tp, fp, fn, data_version, model_version). The

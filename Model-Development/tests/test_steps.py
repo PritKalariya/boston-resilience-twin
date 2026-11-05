@@ -1,4 +1,4 @@
-"""Tests for the model workflow's stub steps and the Slack notifier (#112, ADR-027).
+"""Tests for the model workflow's stub steps and the Slack notifier (#112, ADR-028).
 
 Steps run in process through their main(); the notify tests replace the network post.
 Nothing here reaches a network.

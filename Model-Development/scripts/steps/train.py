@@ -1,4 +1,4 @@
-"""Step: train the candidate model (#112, ADR-027). STUB.
+"""Step: train the candidate model (#112, ADR-028). STUB.
 
 PR 3 replaces the body with a call into the trainer (#108 or M4). Outputs:
 `model/model.json` (here a constant-score model) and `train_scores.json`, the

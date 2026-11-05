@@ -1,4 +1,4 @@
-"""Step: score the candidate and the baseline on the validation split (#112, ADR-027). STUB.
+"""Step: score the candidate and the baseline on the validation split (#112, ADR-028). STUB.
 
 Writes `metrics.json` in the input shape of gates.evaluate(): tp, fp and fn for the
 candidate and the seasonal baseline, per-group and excluded counts that reconcile with

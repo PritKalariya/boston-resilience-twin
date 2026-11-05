@@ -1,4 +1,4 @@
-"""Shared plumbing for the model workflow's step adapters (#112, ADR-027).
+"""Shared plumbing for the model workflow's step adapters (#112, ADR-028).
 
 Each step file is an adapter: PR 3 replaces its body with a call into the owner's
 code and keeps the command line (`--artifacts DIR`) and the exit codes. Every step

@@ -1,4 +1,4 @@
-"""Step: post one Slack message about the run (#112, ADR-027).
+"""Step: post one Slack message about the run (#112, ADR-028).
 
 Runs on the runner, not in the image: it needs the webhook, and nothing else does.
 The webhook is read from the SLACK_ALERT_WEBHOOK environment variable, the name the

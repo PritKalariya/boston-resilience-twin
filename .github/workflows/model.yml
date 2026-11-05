@@ -1,4 +1,4 @@
-# Model CI/CD (#112, ADR-027): train, evaluate, gate, and on main register and set the
+# Model CI/CD (#112, ADR-028): train, evaluate, gate, and on main register and set the
 # champion. PR 2 runs it on stub steps (Model-Development/scripts/steps); PR 3 swaps the
 # step contents without changing this file's shape. No GCP, no secret except the Slack
 # webhook, which only the notify step sees.

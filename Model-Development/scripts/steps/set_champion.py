@@ -1,4 +1,4 @@
-"""Step: set the champion from the gate decision (#112, ADR-027). STUB. Main only.
+"""Step: set the champion from the gate decision (#112, ADR-028). STUB. Main only.
 
 Reads `gate_report.json`. `promote` writes `champion.json` saying "would set champion"
 (PR 3 calls #111's registry alias change). `keep_champion` changes nothing. Any other

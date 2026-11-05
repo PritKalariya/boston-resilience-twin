@@ -1,4 +1,4 @@
-# ADR-027: Model CI/CD workflow shape: stub steps, one required aggregator, Slack routing
+# ADR-028: Model CI/CD workflow shape: stub steps, one required aggregator, Slack routing
 
 - Status: accepted
 - Date: 2026-11-05

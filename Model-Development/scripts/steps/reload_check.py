@@ -1,4 +1,4 @@
-"""Step: reload the saved model and check it scores like the trained one (#112, ADR-027). STUB. Main only.
+"""Step: reload the saved model and check it scores like the trained one (#112, ADR-028). STUB. Main only.
 
 Reloads `model/model.json`, scores the fixture row (`config/reload_fixture_row.json`)
 and compares with `train_scores.json` at an absolute tolerance of 1e-9. A mismatch

@@ -1,4 +1,4 @@
-"""Step: pull the data version the run trains on (#112, ADR-027). STUB.
+"""Step: pull the data version the run trains on (#112, ADR-028). STUB.
 
 PR 3 replaces the body with the DVC pull of the Data-Pipeline outputs and writes the
 real data version. Output: `data_version.txt`.

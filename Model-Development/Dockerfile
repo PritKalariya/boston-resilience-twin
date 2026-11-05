@@ -1,4 +1,4 @@
-# Training image for the model CI/CD workflow (#112, ADR-027). Build from the repo root:
+# Training image for the model CI/CD workflow (#112, ADR-028). Build from the repo root:
 #   docker build -f Model-Development/Dockerfile -t brt-train:local .
 # Every workflow step except Slack runs in it. Pinned requirements arrive with PR 3.
 FROM python:3.12.13-slim
