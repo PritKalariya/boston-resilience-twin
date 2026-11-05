@@ -803,12 +803,12 @@ stages:
     deps:
     - path: config/labels_features.csv
       hash: md5
-      md5: 78f96591d198c2e1b23887c08b8c16ec
-      size: 1644
+      md5: b6c15c80c75c076806c67c2fed17ccc8
+      size: 1734
     - path: config/surge_rules.csv
       hash: md5
-      md5: 33752a62c4cccd8c799f6aa7de9bedc1
-      size: 881
+      md5: 617373fc135c9c01b132360f23856985
+      size: 870
     - path: data/processed/daily_counts.parquet
       hash: md5
       md5: 358b312c4b3d36772c3f54631af5ea9e
@@ -852,15 +852,15 @@ stages:
     outs:
     - path: data/processed/labels.parquet
       hash: md5
-      md5: dc63b9af60e72e1c864dd1e30a3dce72
-      size: 1458513
+      md5: e7e3f01f6b3c1e344345d893af55f9b3
+      size: 1457584
   feature_table:
     cmd: python scripts/pipeline_steps.py feature_table
     deps:
     - path: config/labels_features.csv
       hash: md5
-      md5: 78f96591d198c2e1b23887c08b8c16ec
-      size: 1644
+      md5: b6c15c80c75c076806c67c2fed17ccc8
+      size: 1734
     - path: data/interim/nws_alerts.parquet
       hash: md5
       md5: e1cfce427ab37dbd69577a288300d71c
@@ -1053,8 +1053,8 @@ stages:
       nfiles: 8
     - path: data/processed/labels.parquet
       hash: md5
-      md5: dc63b9af60e72e1c864dd1e30a3dce72
-      size: 1458513
+      md5: e7e3f01f6b3c1e344345d893af55f9b3
+      size: 1457584
     - path: scripts/after_switch.py
       hash: md5
       md5: 9ef4450097f032d5c146017a6cb22c17
@@ -1126,13 +1126,13 @@ stages:
     outs:
     - path: data/interim/reports/bias/gaps.csv
       hash: md5
-      md5: bf677ebd6a156cc7d90f3a85c8dc5071
-      size: 51801
+      md5: 556ac259463993f3187eb33a83a11b20
+      size: 51830
     - path: data/interim/reports/bias/report.md
       hash: md5
-      md5: 312ddd80db6f9eb1031f41c0fb301ac8
-      size: 31411
+      md5: 95e1efe7966a7b981e112fdd64f1b231
+      size: 31305
     - path: data/interim/reports/bias/slices.csv
       hash: md5
-      md5: 0753304abc28b56387f90ffa45a6b8c7
-      size: 46670
+      md5: 25f2508f5e4033070f0ce48c2a81ef22
+      size: 46669
