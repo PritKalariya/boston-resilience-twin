@@ -24,6 +24,9 @@ crash.*.log
 Data-Pipeline/data/*
 !Data-Pipeline/data/.gitkeep
 
+# Training runs (#106): predictions and metrics written per run, never committed
+Model-Development/runs/
+
 # Airflow logs (bind-mounted into the containers by docker-compose.yaml)
 Data-Pipeline/logs/*
 !Data-Pipeline/logs/.gitkeep

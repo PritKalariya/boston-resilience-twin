@@ -299,7 +299,7 @@ def test_rules_file_without_a_column_is_rejected(tmp_path):
 def test_repo_settings():
     settings = load_settings(CONFIG / "labels_features.csv")
     assert settings == {
-        "label_groups": ["snow_ice", "tree", "flooding"],
+        "label_groups": ["snow_ice", "tree"],  # flooding left the label with the freeze (ADR-027)
         "feature_groups": ["snow_ice", "tree"],
         "feature_min_lag_days": 2,
         "forecast_cutoff_local": "18:00",
