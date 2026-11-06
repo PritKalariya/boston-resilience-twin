@@ -204,6 +204,8 @@ if" conditions below guard the case where #106's frozen rule leaves a group unde
     neighborhood report, not this group-level gate, is the check on whether any of them
     masks a recall problem.
 
+  Note (2026-11-05): the five names above were picked by hand; the student areas are defined by the #32 report's rule (ACS B14002, at least twice the city's share of residents in college or graduate school, #127), so read the current set from that report. The set sits close to the cutoff (Mission Hill clears it by 0.25 points), so an ACS update can change it.
+
 ## Reopen if
 
 - the ACS vintage or the poverty share computation changes, or the pipeline's run-time
