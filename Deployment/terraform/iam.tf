@@ -87,6 +87,13 @@ resource "google_compute_instance_iam_member" "vm_admins" {
   instance_name = google_compute_instance.airflow.name
   role          = "roles/compute.osAdminLogin"
   member        = each.value
+
+  # Deleting an instance deletes its instance-level grants, but state still
+  # lists them. instance_id is the numeric id and changes only when the VM is
+  # recreated, so in-place updates such as metadata leave the grants alone.
+  lifecycle {
+    replace_triggered_by = [google_compute_instance.airflow.instance_id]
+  }
 }
 
 # --- Secret writers ---------------------------------------------------------

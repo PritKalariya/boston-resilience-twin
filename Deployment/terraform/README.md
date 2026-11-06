@@ -17,7 +17,9 @@ after they become noncurrent. The live version of an object is never touched.
 | VM running | about $31 (e2-medium $24.46 + 30 GB pd-balanced disk $3 + ephemeral IP $3.65) |
 | VM stopped | about $3 (disk only; the ephemeral IP is released on stop) |
 
-The VM is stopped when idle in October and runs 24/7 from Nov 1. Budget is $50
+The VM runs 24/7 only for the live run and for tests, and is stopped otherwise
+(ADR-029). Its startup script (`startup.sh`) installs Docker and clones the repo on
+every boot. Budget is $50
 credits per member, not pooled.
 
 ## Teardown

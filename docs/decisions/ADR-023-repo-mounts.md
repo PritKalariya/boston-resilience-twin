@@ -1,6 +1,6 @@
 # ADR-023: Pipeline code, config and data mount under /opt/airflow/repo at host paths
 
-- Status: accepted
+- Status: accepted; the mount layout is amended by ADR-029 (`Data-Pipeline/` is one read-only directory mount with a nested read-write `data` mount)
 - Date: 2026-10-27
 - Owner: PritKalariya
 - Phase: data

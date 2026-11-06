@@ -1,5 +1,5 @@
-# Airflow in Docker (ADR-010). Stopped when idle in October, on 24/7 from Nov 1.
-# Running cost is about $31 a month (VM, disk, and ephemeral IP).
+# Airflow in Docker (ADR-010). Stopped when idle; 24/7 only for the live run and
+# tests (#60). Running cost is about $31 a month (VM, disk, and ephemeral IP).
 resource "google_compute_instance" "airflow" {
   project      = var.project_id
   name         = "airflow-vm"
@@ -27,8 +27,13 @@ resource "google_compute_instance" "airflow" {
     scopes = ["cloud-platform"]
   }
 
+  # startup-script, not metadata_startup_script: the latter forces a replacement
+  # when it changes. The script installs Docker and clones the repo on every boot
+  # and is safe to repeat (#60). Editing startup.sh is an in-place update that
+  # takes effect at the next boot, or `sudo google_metadata_script_runner startup`.
   metadata = {
     enable-oslogin = "TRUE"
+    startup-script = file("${path.module}/startup.sh")
   }
 
   # Attributes that move on their own, so a stopped VM still plans clean:

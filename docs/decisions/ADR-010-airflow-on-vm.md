@@ -1,6 +1,6 @@
 # ADR-010: Airflow in Docker on one e2-medium VM
 
-- Status: accepted; details amended by ADR-015 (infrastructure) and ADR-016 (executor, database, access)
+- Status: accepted; details amended by ADR-015 (infrastructure) and ADR-016 (executor, database, access); the "runs 24/7 from Nov 1" line is superseded by ADR-029
 - Date: 2026-10-04
 - Owner: kalariya.p
 - Phase: deploy
