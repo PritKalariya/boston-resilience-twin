@@ -1084,7 +1084,7 @@ gcloud storage rm -r --all-versions gs://boston-resilience-twin-tfstate
 
 How Airflow runs on `airflow-vm`, and why: ADR-016, with the boot provisioning and the checkout owner in ADR-029. The VM runs the same `docker-compose.yaml` as the local stack, checked out from `main` at `/opt/boston-resilience-twin` and owned by the host user `airflow` (UID 50000). Run docker commands on the VM with `sudo` and git commands as `sudo -u airflow`. Nobody joins the `docker` group: it is root-equivalent, and `sudo` keeps the operator list equal to ADR-018's.
 
-The VM runs 24/7 only for the live run and for tests, and is stopped otherwise (ADR-029). Days it was stopped are backfilled with the DAG's date range ("Run the data pipeline DAG" above).
+The VM runs 24/7 only for the live run and for tests, and is stopped otherwise (ADR-029). Days it was stopped are caught up by the next full build (the DAG's default range): every download refetches what is new and every later step rebuilds from 2015. A date range writes a slice to data/slices/ and does not backfill. After a stop, run one full build with no `-c` ("Run the data pipeline DAG" above): `sudo docker compose exec airflow-scheduler airflow dags trigger daily_pipeline`.
 
 ### First-time setup (new or rebuilt VM only)
 
