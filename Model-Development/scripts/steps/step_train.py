@@ -2,14 +2,14 @@
 
 PR 3 replaces the body with a call into the trainer (#108 or M4). Outputs:
 `model/model.json` (here a constant-score model) and `train_scores.json`, the
-model's score on the reload fixture row, which `reload_check.py` compares against.
+model's score on the reload fixture row, which `step_reload_check.py` compares against.
 """
 
 from __future__ import annotations
 
 import sys
 
-import _common as C
+import step_common as C
 
 CONSTANT_SCORE = 0.3721
 

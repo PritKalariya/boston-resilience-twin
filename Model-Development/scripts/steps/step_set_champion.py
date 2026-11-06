@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sys
 
-import _common as C
+import step_common as C
 
 
 def step(argv: list[str] | None) -> None:

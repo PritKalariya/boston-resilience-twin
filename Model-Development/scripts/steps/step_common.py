@@ -22,8 +22,17 @@ PIPELINE_FAILED = 2
 OUTCOMES = ("pass", "fail_gate", "fail_pipeline")
 
 # The step scripts sit in Model-Development/scripts/steps: parents[2] is Model-Development.
+SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 FIXTURE_ROW = CONFIG_DIR / "reload_fixture_row.json"
+
+
+# Run as `python .../steps/step_x.py`, sys.path starts with the steps folder only. Put the
+# scripts folder after it, so a step can `import train` or `import evaluate` and get #106's
+# modules (ADR-027). Every file in steps/ starts with `step_` so no name collides with them;
+# appended, never first, so nothing in scripts/ can shadow a step module either.
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.append(str(SCRIPTS_DIR))
 
 
 class StepError(Exception):

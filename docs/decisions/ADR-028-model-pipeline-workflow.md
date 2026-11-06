@@ -19,15 +19,22 @@ used yet: the data pull, champion re-score and registry push are stubs.
   (main: re-score the champion), gates, then on main the reload check, registry push
   and champion step. A PR never pushes to the registry or touches the champion.
 - **Step adapter contract.** One file per step in `Model-Development/scripts/steps/`,
-  run as `python <step>.py --artifacts DIR`. A step reads and writes only under the
+  named `step_<name>.py` (the prefix keeps them from shadowing #128's `train.py` and
+  `evaluate.py`, which Python would otherwise resolve first from the steps folder), run
+  as `python step_<name>.py --artifacts DIR`. A step reads and writes only under the
   artifacts directory. Exit 0 is ok, 2 is a pipeline failure, and only the gates step
   (`gates.py`) exits 1, a gate failed (it also exits 2 when it cannot evaluate). PR 3
   replaces a step's body with a call into the owner's code (#108 or M4, #110, #111) and
-  keeps the command line. `STUB_OUTCOME` (`pass`, `fail_gate`, `fail_pipeline`) steers
+  keeps the command line. `step_common.py` puts `Model-Development/scripts` on the path
+  after the steps folder, so a step imports #128's modules by their own names.
+  `STUB_OUTCOME` (`pass`, `fail_gate`, `fail_pipeline`) steers
   the stubs only.
 - **Everything runs in the image except Slack.** `Model-Development/Dockerfile` (pinned
   `python:3.12` patch tag, non-root, builds only if the gates load) runs every step with
-  `artifacts/` mounted. The notify step runs on the runner, the only place the webhook
+  `artifacts/` mounted. The artifacts directory also holds `image_digest.txt`, which the
+  workflow writes right after the build for #111's registry record (`step_registry_push.py`
+  copies it into `registry.json`): the local image ID until PR 3 pushes the image to
+  Artifact Registry, after which it holds the registry digest. The notify step runs on the runner, the only place the webhook
   secret is exposed.
 - **`model-ci` is the required check.** The workflow triggers on every PR. `changes`
   decides whether `Model-Development/`, the workflow file or `Data-Pipeline/dvc.lock`

@@ -7,7 +7,9 @@ Nothing here reaches a network.
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,16 +22,18 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "pipeline"
 
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(STEPS))
-import _common as C  # noqa: E402
-import evaluate  # noqa: E402
+import evaluate as model_evaluate  # noqa: E402  #128's evaluate.py, not a step
 import gates as G  # noqa: E402
-import notify  # noqa: E402
-import pull_data  # noqa: E402
-import registry_push  # noqa: E402
-import reload_check  # noqa: E402
-import rescore_champion  # noqa: E402
-import set_champion  # noqa: E402
-import train  # noqa: E402
+import step_common as C  # noqa: E402
+import step_evaluate as evaluate  # noqa: E402
+import step_notify as notify  # noqa: E402
+import step_pull_data as pull_data  # noqa: E402
+import step_registry_push as registry_push  # noqa: E402
+import step_reload_check as reload_check  # noqa: E402
+import step_rescore_champion as rescore_champion  # noqa: E402
+import step_set_champion as set_champion  # noqa: E402
+import step_train as train  # noqa: E402
+import train as model_train  # noqa: E402  #128's train.py, not a step
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +58,55 @@ def run_to_gates(art: Path, outcome: str = "pass", main_only: bool = False) -> i
     if main_only:
         assert rescore_champion.main(args(art)) == 0
     return G.main(["--metrics", str(art / "metrics.json"), "--out", str(art / "gate_report.json")])
+
+
+# --- names: the steps never shadow #128's train.py and evaluate.py -------------
+
+
+def test_step_files_do_not_shadow_the_model_modules():
+    # Both sets are imported at the top of this file, in one session.
+    for module in (model_train, model_evaluate):
+        path = Path(module.__file__).resolve()
+        assert path.parent == SCRIPTS.resolve()
+        assert STEPS.resolve() not in path.parents
+    for step in (C, evaluate, notify, pull_data, registry_push, reload_check, rescore_champion,
+                 set_champion, train):
+        assert Path(step.__file__).resolve().parent == STEPS.resolve()
+    assert sorted(p.stem for p in STEPS.glob("*.py")) == sorted(
+        p.stem for p in STEPS.glob("step_*.py")
+    )
+
+
+def test_a_step_run_as_a_script_imports_the_model_modules(tmp_path):
+    """Run from outside the repo, as `python .../steps/step_x.py`: sys.path starts at steps/."""
+    snippet = (
+        "import runpy, sys\n"
+        f"sys.path[0] = {str(STEPS)!r}\n"  # what `python steps/step_train.py` sets up
+        "import step_common\n"
+        "import train, evaluate\n"
+        "print(train.__file__)\n"
+        "print(evaluate.__file__)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", snippet], cwd=tmp_path, capture_output=True, text=True, check=False,
+        env={k: v for k, v in os.environ.items() if k != "PYTHONPATH"},
+    )
+    assert result.returncode == 0, result.stderr
+    train_file, evaluate_file = (Path(line).resolve() for line in result.stdout.splitlines())
+    assert train_file == (SCRIPTS / "train.py").resolve()
+    assert evaluate_file == (SCRIPTS / "evaluate.py").resolve()
+
+
+def test_a_real_step_script_run_keeps_the_scripts_folder_on_the_path(tmp_path):
+    """The workflow's own call shape, with the step's exit code and its output."""
+    art = tmp_path / "a"
+    for name in ("pull_data", "train"):
+        result = subprocess.run(
+            [sys.executable, str(STEPS / f"step_{name}.py"), "--artifacts", str(art)],
+            cwd=tmp_path, capture_output=True, text=True, check=False,
+        )
+        assert result.returncode == 0, result.stderr
+    assert (art / "model" / "model.json").exists()
 
 
 # --- pull_data -------------------------------------------------------------
@@ -200,6 +253,24 @@ def test_registry_push_writes_stub_version(tmp_path):
     assert registry["model_version"] == "stub-model-stub-local"
     assert registry["pushed"] is False
     assert registry["gates_sha256"] == read(tmp_path / "gate_report.json")["gates_sha256"]
+
+
+def test_registry_push_records_the_image_digest(tmp_path, capsys):
+    run_to_gates(tmp_path)
+    (tmp_path / "image_digest.txt").write_text("sha256:abc123\n")
+    assert registry_push.main(args(tmp_path)) == 0
+    assert read(tmp_path / "registry.json")["image_digest"] == "sha256:abc123"
+    assert "::warning::" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("content", [None, "  \n"])
+def test_registry_push_warns_without_an_image_digest(tmp_path, capsys, content):
+    run_to_gates(tmp_path)
+    if content is not None:
+        (tmp_path / "image_digest.txt").write_text(content)
+    assert registry_push.main(args(tmp_path)) == 0
+    assert read(tmp_path / "registry.json")["image_digest"] is None
+    assert "::warning::" in capsys.readouterr().out
 
 
 def test_registry_push_needs_a_gate_report(tmp_path):

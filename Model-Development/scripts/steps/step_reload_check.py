@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 
-import _common as C
+import step_common as C
 
 TOLERANCE = 1e-9
 FORCED_DRIFT = 0.01

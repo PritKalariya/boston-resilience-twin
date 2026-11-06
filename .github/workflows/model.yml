@@ -105,6 +105,9 @@ jobs:
         run: |
           docker build -f Model-Development/Dockerfile -t "$IMAGE" .
           mkdir artifacts
+          # For #111's registry record: the local image ID until PR 3 pushes to Artifact
+          # Registry, then the registry digest.
+          docker image inspect --format '{{.Id}}' "$IMAGE" > artifacts/image_digest.txt
 
       # Every step below runs in the image with artifacts/ mounted, as the runner user so
       # the files are the runner's to upload. A step stops the job at its first failure.
@@ -112,26 +115,26 @@ jobs:
         run: >
           docker run --rm --user "$(id -u):$(id -g)" -e STUB_OUTCOME -e GITHUB_SHA
           -v "$PWD/artifacts:/app/artifacts" "$IMAGE"
-          python Model-Development/scripts/steps/pull_data.py --artifacts artifacts
+          python Model-Development/scripts/steps/step_pull_data.py --artifacts artifacts
 
       - name: Train
         run: >
           docker run --rm --user "$(id -u):$(id -g)" -e STUB_OUTCOME
           -v "$PWD/artifacts:/app/artifacts" "$IMAGE"
-          python Model-Development/scripts/steps/train.py --artifacts artifacts
+          python Model-Development/scripts/steps/step_train.py --artifacts artifacts
 
       - name: Evaluate
         run: >
           docker run --rm --user "$(id -u):$(id -g)" -e STUB_OUTCOME
           -v "$PWD/artifacts:/app/artifacts" "$IMAGE"
-          python Model-Development/scripts/steps/evaluate.py --artifacts artifacts
+          python Model-Development/scripts/steps/step_evaluate.py --artifacts artifacts
 
       - name: Re-score the champion (main only)
         if: env.MAIN_RUN == 'true'
         run: >
           docker run --rm --user "$(id -u):$(id -g)" -e STUB_OUTCOME
           -v "$PWD/artifacts:/app/artifacts" "$IMAGE"
-          python Model-Development/scripts/steps/rescore_champion.py --artifacts artifacts
+          python Model-Development/scripts/steps/step_rescore_champion.py --artifacts artifacts
 
       # gates.py exits 0 (promote or keep the champion), 1 (a gate failed) or 2 (cannot
       # evaluate). The exit code is kept as a step output for the Slack message.
@@ -153,21 +156,21 @@ jobs:
         run: >
           docker run --rm --user "$(id -u):$(id -g)" -e STUB_OUTCOME
           -v "$PWD/artifacts:/app/artifacts" "$IMAGE"
-          python Model-Development/scripts/steps/reload_check.py --artifacts artifacts
+          python Model-Development/scripts/steps/step_reload_check.py --artifacts artifacts
 
       - name: Registry push (main only)
         if: env.MAIN_RUN == 'true'
         run: >
           docker run --rm --user "$(id -u):$(id -g)" -e STUB_OUTCOME
           -v "$PWD/artifacts:/app/artifacts" "$IMAGE"
-          python Model-Development/scripts/steps/registry_push.py --artifacts artifacts
+          python Model-Development/scripts/steps/step_registry_push.py --artifacts artifacts
 
       - name: Set champion (main only)
         if: env.MAIN_RUN == 'true'
         run: >
           docker run --rm --user "$(id -u):$(id -g)" -e STUB_OUTCOME
           -v "$PWD/artifacts:/app/artifacts" "$IMAGE"
-          python Model-Development/scripts/steps/set_champion.py --artifacts artifacts
+          python Model-Development/scripts/steps/step_set_champion.py --artifacts artifacts
 
       - name: Upload artifacts
         if: always()
@@ -190,7 +193,7 @@ jobs:
         run: |
           args=()
           if [ "$MAIN_RUN" = "true" ]; then args+=(--main); fi
-          python3 Model-Development/scripts/steps/notify.py \
+          python3 Model-Development/scripts/steps/step_notify.py \
             --artifacts artifacts --repo "$GITHUB_REPOSITORY" --ref "$REF_NAME" \
             --run-url "$RUN_URL" --job-status "$JOB_STATUS" --gates-exit "$GATES_EXIT" \
             "${args[@]}"
