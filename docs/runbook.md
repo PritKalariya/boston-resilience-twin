@@ -1131,7 +1131,7 @@ The VM's startup script (`Deployment/terraform/startup.sh`, set as the `startup-
 
    Editing `startup.sh` is an in-place Terraform update that takes effect at the next boot or with this command.
 
-The script never pulls, never changes ownership of an existing checkout, and exits with an error rather than touch a `/opt/boston-resilience-twin` that is not a git repository. A VM made before #60 has a root-owned checkout: replace it with `terraform apply -replace=google_compute_instance.airflow` instead of repairing it by hand. DVC inside a container works only from the repo root (`/opt/airflow/repo`): from inside `Data-Pipeline/` it reports "not inside of a DVC repository", because that directory is a mount point.
+The script never pulls, never changes ownership of an existing checkout, and exits with an error rather than touch a `/opt/boston-resilience-twin` that is not a git repository. A VM made before #60 has a root-owned checkout: replace it with `terraform apply -replace=google_compute_instance.airflow` instead of repairing it by hand. The `vm_admins` sudo grants are recreated in the same apply. DVC inside a container works only from the repo root (`/opt/airflow/repo`): from inside `Data-Pipeline/` it reports "not inside of a DVC repository", because that directory is a mount point.
 
 ### After a VM start
 

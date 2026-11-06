@@ -61,7 +61,7 @@ C, how `dvc.yaml` and `dvc.lock` reach the containers:
 ## Consequences
 
 - A VM from `terraform apply` reaches a healthy stack after only the runbook's `.env` and `up` steps. The first boot spends a few minutes in apt, and the script waits up to 10 minutes for apt's lock.
-- Adding the key to the existing instance is an in-place update (`0 to add, 1 to change, 0 to destroy`) that does not run until the next boot. The VM made on 2026-10-18 has a root-owned checkout, so it is replaced (`terraform apply -replace`) when #60 is tested. Replacing loses Postgres run history, not data in GCS (ADR-016).
+- Adding the key to the existing instance is an in-place update (`0 to add, 1 to change, 0 to destroy`) that does not run until the next boot. The VM made on 2026-10-18 has a root-owned checkout, so it is replaced (`terraform apply -replace`) when #60 is tested. Replacing loses Postgres run history, not data in GCS (ADR-016). The `vm_admins` sudo grants are recreated in the same apply.
 - Editing `startup.sh` later is also an in-place update. Rerun it with `sudo google_metadata_script_runner startup`.
 - ADR-016's "root-owned `.env`" is now an `.env` owned by `airflow`, mode 600. ADR-016 gets a status-line note only. Its note that Docker was installed by hand is also no longer true.
 - A failed script does not stop the VM or the containers (`restart: unless-stopped`). It logs to the journal with a `brt-startup:` prefix, and the runbook says how to read that log.
