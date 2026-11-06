@@ -1,0 +1,9 @@
+# Build context for Model-Development/Dockerfile: the component folder minus its tests
+# and caches. BuildKit uses this file in place of any root .dockerignore, so the
+# Airflow image's context is unaffected.
+*
+!Model-Development
+Model-Development/tests
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
