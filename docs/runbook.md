@@ -292,7 +292,7 @@ environment block in `docker-compose.yaml` passes one value to all of them.
 
 Pipeline tasks read `NOAA_CDO_TOKEN`, `CENSUS_API_KEY` and `NWS_USER_AGENT`
 from the environment (docs/data-access.md). Locally they come from `.env`.
-This section is for a laptop; on airflow-vm the keys reach `.env` with #64.
+This section is for a laptop; on airflow-vm see "Airflow on the VM", "First-time setup", step 2.
 A team member fills them from Secret Manager (needs `gcloud auth login`; the
 command names project 1, so another default gcloud project does not matter).
 Run it in the repo root. It replaces any existing lines for the three keys,
@@ -1107,6 +1107,14 @@ The VM's startup script (`Deployment/terraform/startup.sh`, set as the `startup-
 
    `AIRFLOW_UID=50000` is deliberate. The `.env` quick start above says `id -u`, but under `sudo` that returns 0, which would run Airflow as root. 50000 is the owner of the checkout, so `dvc push` and the task logs work from the containers.
 
+   Then add the API keys (human only, as for a laptop: "API keys in .env"). `gcloud` on the VM runs as `airflow-vm-sa`, which can read the three secrets, so no login is needed. It keeps `AIRFLOW_UID`, leaves `.env` owned by `airflow` with mode 600, and prints no values:
+
+   ```bash
+   cd /opt/boston-resilience-twin && { sudo -u airflow grep -vE '^(NOAA_CDO_TOKEN|CENSUS_API_KEY|NWS_USER_AGENT)=' .env; for s in noaa-cdo-token census-api-key nws-user-agent; do printf "%s='%s'\n" "$(echo "$s" | tr a-z- A-Z_)" "$(gcloud secrets versions access latest --secret="$s" --project=boston-resilience-twin)"; done; } | sudo -u airflow sh -c 'umask 077 && cat > .env.tmp && mv .env.tmp .env'
+   ```
+
+   Without them the full build fails at `ingest_noaa_logan` and the NWS downloads. On a running stack, follow it with `sudo docker compose up -d --wait`, then check with the `printenv` loop from "API keys in .env" (with `sudo`).
+
 3. Start the stack:
 
    ```bash
@@ -1174,6 +1182,8 @@ sudo docker compose exec airflow-scheduler airflow dags list-runs <dag_id>
 ```
 
 New DAGs start paused (`DAGS_ARE_PAUSED_AT_CREATION`), and a run triggered on a paused DAG stays `queued`.
+
+A full build of `daily_pipeline` on a fresh VM (empty `Data-Pipeline/data/`) takes about 34 minutes: about 4 to download everything (1.7 GB of 311 files), 7 for `validate_raw`, 6 for the 12 legacy years, then 15 for labels, features, validation, statistics and bias slicing. A second full build right after takes about 26 minutes, since the downloads skip what is settled, and writes byte-identical outputs to `interim/` and `processed/` (#39). Memory is tightest while `schema_and_statistics` and `bias_slicing` run together: 42 MB available at the low point of the first build, with no task killed.
 
 ### Troubleshooting
 
