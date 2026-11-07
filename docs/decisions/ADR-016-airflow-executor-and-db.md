@@ -1,6 +1,6 @@
 # ADR-016: Airflow on airflow-vm runs LocalExecutor with a Postgres container, reached only by SSH tunnel
 
-- Status: accepted
+- Status: accepted; item 3 (the root-owned `.env` and checkout) is amended by ADR-029
 - Date: 2026-10-18
 - Owner: PritKalariya
 - Phase: setup

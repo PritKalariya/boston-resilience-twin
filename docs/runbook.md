@@ -929,8 +929,8 @@ gcloud storage buckets describe gs://boston-resilience-twin-data \
 | Service account, secret slots, IAM, API enablement | $0 | $0 |
 | **Total** | **about $31.11 a month** | **about $3 a month** |
 
-Budget is $50 of credits per member and is not pooled. The VM stays stopped
-when idle in October and runs 24/7 from Nov 1.
+Budget is $50 of credits per member and is not pooled. The VM runs 24/7 only
+for the live run and for tests, and is stopped otherwise (ADR-029).
 
 ### Apply
 
@@ -1082,50 +1082,56 @@ gcloud storage rm -r --all-versions gs://boston-resilience-twin-tfstate
 
 ## Airflow on the VM
 
-How Airflow runs on `airflow-vm`, and why: ADR-016. The VM runs the same `docker-compose.yaml` as the local stack, checked out from `main` at `/opt/boston-resilience-twin` and owned by root. Run every command on the VM with `sudo` unless it says laptop. Starting, stopping, and SSH are under "Stop the VM when idle" above. Nobody joins the `docker` group: it is root-equivalent, and `sudo` keeps the operator list equal to ADR-018's.
+How Airflow runs on `airflow-vm`, and why: ADR-016, with the boot provisioning and the checkout owner in ADR-029. The VM runs the same `docker-compose.yaml` as the local stack, checked out from `main` at `/opt/boston-resilience-twin` and owned by the host user `airflow` (UID 50000). Run docker commands on the VM with `sudo` and git commands as `sudo -u airflow`. Nobody joins the `docker` group: it is root-equivalent, and `sudo` keeps the operator list equal to ADR-018's.
+
+The VM runs 24/7 only for the live run and for tests, and is stopped otherwise (ADR-029). Days it was stopped are caught up by the next full build (the DAG's default range): every download refetches what is new and every later step rebuilds from 2015. A date range writes a slice to data/slices/ and does not backfill. After a stop, run one full build with no `-c` ("Run the data pipeline DAG" above): `sudo docker compose exec airflow-scheduler airflow dags trigger daily_pipeline`.
 
 ### First-time setup (new or rebuilt VM only)
 
-Done on 2026-10-18 on the current VM. Docker is not in Terraform yet, so a rebuilt VM needs these steps again.
+The VM's startup script (`Deployment/terraform/startup.sh`, set as the `startup-script` metadata key) installs Docker Engine and the compose plugin, creates the `airflow` user and clones `main` into `/opt/boston-resilience-twin`. It runs on every boot and does nothing for a part that is already done. It does not write `.env` or start the stack.
 
-Install Docker Engine and the compose plugin from Docker's apt repo:
+1. After `terraform apply`, check the startup log. Every line starts with `brt-startup:` and the last one is `brt-startup: done`:
 
-```bash
-sudo bash -euo pipefail <<'EOF'
-apt-get update -q
-apt-get install -y -q ca-certificates curl
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-chmod a+r /etc/apt/keyrings/docker.asc
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
-apt-get update -q
-apt-get install -y -q docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-systemctl is-enabled docker
-EOF
-```
+   ```bash
+   sudo journalctl -u google-startup-scripts.service --no-pager | grep brt-startup
+   ```
 
-If apt reports `Could not get lock`, automatic updates are still running from boot. Wait two minutes and rerun; every line is safe to repeat.
+   The script waits up to 10 minutes for apt's lock, because automatic updates hold it on first boot. A line starting `brt-startup: error:` names the problem; fix it, then rerun the script (step 5).
 
-Clone `main` and write the VM's `.env`:
+2. Create `.env` as `airflow`:
 
-```bash
-sudo bash -euo pipefail <<'EOF'
-git clone -q https://github.com/PritKalariya/boston-resilience-twin.git /opt/boston-resilience-twin
-cd /opt/boston-resilience-twin
-printf 'AIRFLOW_UID=50000\n' > .env
-chmod 600 .env
-EOF
-```
+   ```bash
+   sudo -u airflow sh -c 'umask 077 && printf "AIRFLOW_UID=50000\n" > /opt/boston-resilience-twin/.env'
+   sudo -u airflow chmod 600 /opt/boston-resilience-twin/.env
+   ```
 
-`AIRFLOW_UID=50000` is deliberate. The compose file's comment says to use `id -u` on Linux, but under `sudo` that returns 0, which would run Airflow as root.
+   `AIRFLOW_UID=50000` is deliberate. The `.env` quick start above says `id -u`, but under `sudo` that returns 0, which would run Airflow as root. 50000 is the owner of the checkout, so `dvc push` and the task logs work from the containers.
 
-Start the stack:
+3. Start the stack:
 
-```bash
-cd /opt/boston-resilience-twin && sudo docker compose up -d --build --wait
-```
+   ```bash
+   cd /opt/boston-resilience-twin && sudo docker compose up -d --build --wait
+   ```
 
-The first start takes about 10 minutes on an e2-medium, half of it pulling the Airflow image. It is not hung.
+   The first start takes about 10 minutes on an e2-medium, half of it pulling the Airflow image. It is not hung.
+
+4. To update after a merge to `main`:
+
+   ```bash
+   sudo -u airflow git -C /opt/boston-resilience-twin pull --ff-only
+   ```
+
+   `Data-Pipeline/` is mounted as a directory (ADR-029), so the containers see the pulled files at once. Recreate the containers only when `docker-compose.yaml`, the image inputs (`airflow.Dockerfile`, `Data-Pipeline/requirements.txt`) or `.dvcignore` changed, because `.dvcignore` is still a single-file mount: `cd /opt/boston-resilience-twin && sudo docker compose up -d --build --wait`.
+
+5. To rerun the startup script without a reboot:
+
+   ```bash
+   sudo google_metadata_script_runner startup
+   ```
+
+   Editing `startup.sh` is an in-place Terraform update that takes effect at the next boot or with this command.
+
+The script never pulls, never changes ownership of an existing checkout, and exits with an error rather than touch a `/opt/boston-resilience-twin` that is not a git repository. A VM made before #60 has a root-owned checkout: replace it with `terraform apply -replace=google_compute_instance.airflow` instead of repairing it by hand. The `vm_admins` sudo grants are recreated in the same apply. DVC inside a container works only from the repo root (`/opt/airflow/repo`): from inside `Data-Pipeline/` it reports "not inside of a DVC repository", because that directory is a mount point.
 
 ### After a VM start
 
@@ -1152,10 +1158,11 @@ Then browse to `http://localhost:18080` and log in with the compose defaults, `a
 ### Update after a merge to main
 
 ```bash
-cd /opt/boston-resilience-twin && sudo git pull --ff-only && sudo docker compose up -d --build --wait
+sudo -u airflow git -C /opt/boston-resilience-twin pull --ff-only
+cd /opt/boston-resilience-twin && sudo docker compose up -d --build --wait
 ```
 
-The VM runs `main` only. Test branches on your laptop.
+The second line is needed only when `docker-compose.yaml`, `airflow.Dockerfile`, `Data-Pipeline/requirements.txt` or `.dvcignore` changed (see "First-time setup", step 4). The VM runs `main` only. Test branches on your laptop.
 
 ### Run a DAG from the CLI
 

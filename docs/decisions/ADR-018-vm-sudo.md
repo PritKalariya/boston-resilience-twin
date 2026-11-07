@@ -34,3 +34,5 @@ ADR-015 gives every member roles/compute.osLogin (SSH without sudo) and says ope
 - The VM moves to 24/7 on Nov 1 and a mistake on it costs more.
 - A third person needs to operate Airflow on the VM.
 - Project 2 gets compute that needs operators.
+
+Note (2026-11-06): any compute.instanceAdmin.v1 holder can set a root startup-script, so this sudo limit is not a hard boundary. Accepted: root on the VM only reaches what the VM service account reaches, which teammates already hold (ADR-015). A custom role without setMetadata is a Deployment planning item.

@@ -1,0 +1,7 @@
+{
+  "decision": "error",
+  "reason": "groups is missing",
+  "data_version": "stub-abc123",
+  "gates_sha256": "0000",
+  "fairness_group_sha256": "1111"
+}
