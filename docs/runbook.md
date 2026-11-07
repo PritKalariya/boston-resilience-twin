@@ -283,8 +283,11 @@ needs `AIRFLOW_UID` (above). Other local overrides use the names in
 `.env.example`. Postgres and the admin user keep their first password until
 `docker compose down -v`.
 
-The VM does not use `.env` for secrets: they come from Secret Manager
-(ADR-015), set up in #20. However they are supplied, the JWT secret, API
+On the VM, `.env` holds `AIRFLOW_UID` and the three API keys, copied from
+Secret Manager by hand ("Airflow on the VM", "First-time setup", step 2). That
+is temporary: #64 has the startup script write `.env` at boot (ADR-029), with
+the Airflow secrets that still run on the compose dev defaults until then
+(ADR-016). However they are supplied, the JWT secret, API
 secret key and Fernet key must be identical in every container; the shared
 environment block in `docker-compose.yaml` passes one value to all of them.
 
@@ -292,7 +295,7 @@ environment block in `docker-compose.yaml` passes one value to all of them.
 
 Pipeline tasks read `NOAA_CDO_TOKEN`, `CENSUS_API_KEY` and `NWS_USER_AGENT`
 from the environment (docs/data-access.md). Locally they come from `.env`.
-This section is for a laptop; on airflow-vm see "Airflow on the VM", "First-time setup", step 2.
+This section is for a laptop; on airflow-vm see "Airflow on the VM", "First-time setup", step 2, until #64 has the startup script write them at boot.
 A team member fills them from Secret Manager (needs `gcloud auth login`; the
 command names project 1, so another default gcloud project does not matter).
 Run it in the repo root. It replaces any existing lines for the three keys,
@@ -771,8 +774,8 @@ changed (response metadata), so `dvc.lock` changes while `features.parquet`
 stays byte-identical. That is noise, not a version. Checked 2026-10-27.
 
 The DAG writes the same files but does not update `dvc.lock`, so a DAG run is
-not a version until someone runs the steps above. Committing versions from the
-VM would need git write access there; that is for #39 or the team.
+not a version until someone runs the steps above. That holds on airflow-vm
+too: a run there does not create a data version.
 
 **Listing and comparing.**
 
@@ -843,7 +846,9 @@ runs past 30 minutes, fails the run.
 helper. DVC refuses to run outside a git repository, so `docker-compose.yaml`
 mounts `.git` (read-only), `.dvc` and `.dvcignore` at `/opt/airflow/repo`, and
 `Data-Pipeline/dvc.yaml` and `dvc.lock` (read-only, #18), so the push sends the
-outputs the committed `dvc.lock` names that are in the local cache.
+outputs the committed `dvc.lock` names that are in the local cache. A DAG run
+adds nothing to that cache, so on airflow-vm, which has none, `push_data`
+uploads nothing and logs `Everything is up to date.`
 After pulling a change to those mounts, run `docker compose down`, then
 `docker compose up -d --build --wait`. DVC is in the Airflow image (ADR-022),
 so a change to its pins in `Data-Pipeline/requirements.txt` also needs that
@@ -1107,10 +1112,16 @@ The VM's startup script (`Deployment/terraform/startup.sh`, set as the `startup-
 
    `AIRFLOW_UID=50000` is deliberate. The `.env` quick start above says `id -u`, but under `sudo` that returns 0, which would run Airflow as root. 50000 is the owner of the checkout, so `dvc push` and the task logs work from the containers.
 
-   Then add the API keys (human only, as for a laptop: "API keys in .env"). `gcloud` on the VM runs as `airflow-vm-sa`, which can read the three secrets, so no login is needed. It keeps `AIRFLOW_UID`, leaves `.env` owned by `airflow` with mode 600, and prints no values:
+   Then add the API keys (human only, as for a laptop: "API keys in .env"). This step is temporary: #64 has the startup script write `.env` at boot (ADR-029). `gcloud` on the VM runs as `airflow-vm-sa`, which can read the three secrets, so no login is needed. The command fetches all three first and writes nothing if a fetch fails, a value is empty or a value contains `'` (compose cannot escape it inside single quotes). It keeps `AIRFLOW_UID`, leaves `.env` owned by `airflow` with mode 600, and prints no values:
 
    ```bash
-   cd /opt/boston-resilience-twin && { sudo -u airflow grep -vE '^(NOAA_CDO_TOKEN|CENSUS_API_KEY|NWS_USER_AGENT)=' .env; for s in noaa-cdo-token census-api-key nws-user-agent; do printf "%s='%s'\n" "$(echo "$s" | tr a-z- A-Z_)" "$(gcloud secrets versions access latest --secret="$s" --project=boston-resilience-twin)"; done; } | sudo -u airflow sh -c 'umask 077 && cat > .env.tmp && mv .env.tmp .env'
+   cd /opt/boston-resilience-twin
+   keys=$(for s in noaa-cdo-token census-api-key nws-user-agent; do
+     v=$(gcloud secrets versions access latest --secret="$s" --project=boston-resilience-twin) || exit 1
+     case "$v" in (''|*"'"*) echo "$s is empty or contains a single quote; .env not changed" >&2; exit 1;; esac
+     printf "%s='%s'\n" "$(echo "$s" | tr a-z- A-Z_)" "$v"
+   done) && { sudo -u airflow grep -vE '^(NOAA_CDO_TOKEN|CENSUS_API_KEY|NWS_USER_AGENT)=' .env; printf '%s\n' "$keys"; } | sudo -u airflow sh -c 'umask 077 && cat > .env.tmp && mv .env.tmp .env'
+   unset keys
    ```
 
    Without them the full build fails at `ingest_noaa_logan` and the NWS downloads. On a running stack, follow it with `sudo docker compose up -d --wait`, then check with the `printenv` loop from "API keys in .env" (with `sudo`).
@@ -1183,7 +1194,7 @@ sudo docker compose exec airflow-scheduler airflow dags list-runs <dag_id>
 
 New DAGs start paused (`DAGS_ARE_PAUSED_AT_CREATION`), and a run triggered on a paused DAG stays `queued`.
 
-A full build of `daily_pipeline` on a fresh VM (empty `Data-Pipeline/data/`) takes about 34 minutes: about 4 to download everything (1.7 GB of 311 files), 7 for `validate_raw`, 6 for the 12 legacy years, then 15 for labels, features, validation, statistics and bias slicing. A second full build right after takes about 26 minutes, since the downloads skip what is settled, and writes byte-identical outputs to `interim/` and `processed/` (#39). Memory is tightest while `schema_and_statistics` and `bias_slicing` run together: 42 MB available at the low point of the first build, with no task killed.
+A full build of `daily_pipeline` on a fresh airflow-vm (e2-medium, empty `Data-Pipeline/data/`, `main` at `1a46550`, 2026-11-07) takes about 34 minutes: 4.5 to download everything (1.7 GB of 311 files), 7 for `validate_raw`, 5.5 for the 12 legacy years, 2 for merging, combining, `spatial_join` and `daily_counts`, 7 for labels, features and `validate_processed`, 7.5 for statistics and bias slicing, and under 1 for `push_data`. A second full build right after takes about 26 minutes, since the downloads skip what is settled, and writes byte-identical outputs to `interim/` and `processed/` (#39). Memory is tightest while `schema_and_statistics` and `bias_slicing` run together: 42 MB available at the low point of the first build, with no task killed.
 
 ### Troubleshooting
 
