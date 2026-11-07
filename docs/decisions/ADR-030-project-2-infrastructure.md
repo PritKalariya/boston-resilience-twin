@@ -4,6 +4,7 @@
 - Date: 2026-11-06
 - Owner: Kirtan10
 - Phase: model
+- Amends ADR-009: Cloud Storage for model files is in project 2, not project 1
 
 ## Context
 
@@ -39,13 +40,13 @@ gcloud storage buckets update gs://boston-resilience-twin-p2-tfstate --versionin
 | Model files | Bucket `boston-resilience-twin-p2-models`: us-east1, versioned, uniform access, public access prevention enforced, `force_destroy` off |
 | Images | One Docker repository, `brt-images`, in us-east1 |
 | Registry | Nothing to create: model versions and aliases are data #111 writes through the API (ADR-006). No endpoint is created (endpoints bill by the hour) |
-| Budget | $50 with email alerts at 25, 50 and 80 percent, measured on usage before credits |
+| Budget | $50 with email alerts at 25, 50 and 80 percent of actual spend and at 80 percent of forecast spend, measured on usage before credits |
 
-**CI identities.** One Workload Identity pool (`github`) with one OIDC provider for GitHub Actions, whose condition accepts only tokens from `PritKalariya/boston-resilience-twin`. Two service accounts, no keys:
+**CI identities.** One Workload Identity pool (`github`) with one OIDC provider for GitHub Actions, whose condition accepts only tokens from `PritKalariya/boston-resilience-twin`, matched on its numeric `repository_id` and `repository_owner_id` (a name can be reclaimed after a rename, an id cannot). Two service accounts, no keys:
 
 | Account | Who can use it | Roles in project 2 |
 |---|---|---|
-| `ci-reader` | Any run of the repository, pull requests included (bound on `attribute.repository`) | None. Prit grants `storage.objectViewer` on the project 1 data bucket, for `dvc pull` |
+| `ci-reader` | Any run of the repository, pull requests included (bound on `attribute.repository_id`) | None. Prit grants `storage.objectViewer` on the project 1 data bucket, for `dvc pull` |
 | `ci-writer` | Runs on `refs/heads/main` only (bound on `attribute.ref`; PR runs carry `refs/pull/<n>/merge`) | Custom role `modelRegistrar`; `artifactregistry.writer` on `brt-images` only; `storage.objectCreator` and `storage.objectViewer` on the model bucket. Prit grants the same project 1 read |
 
 `modelRegistrar` holds `aiplatform.models.upload`, `.get`, `.list`, `.update` (aliases) and `aiplatform.operations.list`. `objectCreator` cannot delete, so it cannot overwrite an object: each registered version keeps its files, which a rollback needs (ADR-006). Fork pull requests get no OIDC token, so they cannot use either account.
@@ -76,6 +77,6 @@ gcloud storage buckets update gs://boston-resilience-twin-p2-tfstate --versionin
 ## Revisit when
 
 - Deployment adds Cloud Run, Gemini or a runtime service account: each gets its own grants here.
-- The repository is renamed or moves owner (the provider condition and the reader binding name it).
+- The repository moves to another owner or is recreated (the provider condition and the reader binding use its ids; a rename alone changes nothing).
 - A Vertex AI endpoint is proposed (hourly cost).
 - Project 2 joins an organization that Prit's account belongs to, which would allow a direct `roles/owner` grant.

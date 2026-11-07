@@ -11,9 +11,23 @@ variable "region" {
 }
 
 variable "github_repository" {
-  description = "The only GitHub repository whose Actions runs may authenticate, as owner/name."
+  description = "The GitHub repository whose Actions runs may authenticate, as owner/name. Used in descriptions; access is decided by the numeric ids below."
   type        = string
   default     = "PritKalariya/boston-resilience-twin"
+}
+
+# Names can be reclaimed after a rename or deletion; ids cannot.
+# gh api repos/PritKalariya/boston-resilience-twin -q '.id, .owner.id'
+variable "github_repository_id" {
+  description = "Numeric id of the GitHub repository (the OIDC token's repository_id claim)."
+  type        = string
+  default     = "1404951557"
+}
+
+variable "github_repository_owner_id" {
+  description = "Numeric id of the repository's owner (the OIDC token's repository_owner_id claim)."
+  type        = string
+  default     = "71484962"
 }
 
 variable "billing_account" {

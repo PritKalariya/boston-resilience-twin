@@ -18,13 +18,16 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   display_name                       = "GitHub OIDC"
 
   attribute_mapping = {
-    "google.subject"       = "assertion.sub"
-    "attribute.repository" = "assertion.repository"
-    "attribute.ref"        = "assertion.ref"
+    "google.subject"                = "assertion.sub"
+    "attribute.repository"          = "assertion.repository"
+    "attribute.repository_id"       = "assertion.repository_id"
+    "attribute.repository_owner_id" = "assertion.repository_owner_id"
+    "attribute.ref"                 = "assertion.ref"
   }
 
   # Tokens from any other repository are rejected before any binding is read.
-  attribute_condition = "assertion.repository == '${var.github_repository}'"
+  # Matched on numeric ids, which a renamed or recreated repository cannot reuse.
+  attribute_condition = "assertion.repository_id == '${var.github_repository_id}' && assertion.repository_owner_id == '${var.github_repository_owner_id}'"
 
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
@@ -51,7 +54,7 @@ resource "google_service_account" "ci_reader" {
 resource "google_service_account_iam_member" "ci_reader_wif" {
   service_account_id = google_service_account.ci_reader.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "${local.pool_principal_set}/attribute.repository/${var.github_repository}"
+  member             = "${local.pool_principal_set}/attribute.repository_id/${var.github_repository_id}"
 }
 
 # --- Writer: runs on main only ---------------------------------------------

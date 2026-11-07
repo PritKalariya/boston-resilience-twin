@@ -29,6 +29,11 @@ resource "google_billing_budget" "project_2" {
   threshold_rules {
     threshold_percent = 0.8
   }
+  # A warning before the spend happens: Google's forecast for the month crosses 80%.
+  threshold_rules {
+    threshold_percent = 0.8
+    spend_basis       = "FORECASTED_SPEND"
+  }
 
   depends_on = [google_project_service.project_2]
 }
