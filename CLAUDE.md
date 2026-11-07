@@ -51,7 +51,7 @@ The repo is public. Never commit keys, tokens, `.env`, Terraform state, raw or v
 
 ## Cloud and cost
 - GCP resources come from Terraform only. No console click-ops.
-- Two projects (ADR-009). Project 1: VM, Cloud Storage, monitoring, Secret Manager. Project 2: Cloud Run, Artifact Registry, Vertex registry, Gemini. Never put a resource in the wrong project.
+- Two projects (ADR-009). Project 1: VM, Cloud Storage (data and the DVC remote), monitoring, Secret Manager. Project 2: Cloud Run, Artifact Registry, Vertex registry and its model files bucket (ADR-030), Gemini. Never put a resource in the wrong project.
 - Budget is $50 credits per member, not pooled. The VM (about $31 a month running, about $3 stopped) runs 24/7 only for the live run and for tests, and is stopped otherwise (ADR-029).
 - Never run `terraform apply` or `terraform destroy`. Before any change that creates a resource, print its running cost and the command that tears it down.
 
@@ -110,6 +110,9 @@ Add each command here, in the PR that introduces it. Do not guess commands that 
 - `terraform plan -var-file=terraform.tfvars`: read-only dry run against project 1 (`terraform.tfvars` is gitignored; copy from `terraform.tfvars.example`)
 - `terraform apply -var-file=terraform.tfvars`: human only, never run by Claude Code
 - `gcloud compute instances start|stop airflow-vm --zone=us-east1-b`: VM power; Terraform does not manage run state
+- ADR-030 "Bootstrap": create project 2, link its billing account and create its state bucket, once, before the first `terraform init` in `Deployment/terraform-project2`. Human only, never run by Claude Code
+- `cd Deployment/terraform-project2 && terraform init`: the same for project 2 (state in `gs://boston-resilience-twin-p2-tfstate`); `fmt`, `validate`, `plan -var-file=terraform.tfvars` and the human-only `apply` work as for project 1, against project 2
+- `cd Deployment/terraform-project2 && terraform output`: the Workload Identity provider, both CI service account emails, the image repository and the model bucket (after apply)
 - `read -rs VALUE && printf '%s' "$VALUE" | gcloud secrets versions add <secret> --data-file=-; unset VALUE`: add a secret value with no trailing newline and nothing in shell history (see runbook). Human only, never run by Claude Code
 - runbook "API keys in .env": fill `NOAA_CDO_TOKEN`, `CENSUS_API_KEY` and `NWS_USER_AGENT` in `.env` from Secret Manager. Human only (writes secret values), never run by Claude Code
 - `docker compose exec airflow-scheduler sh -c 'for k in NOAA_CDO_TOKEN CENSUS_API_KEY NWS_USER_AGENT; do [ -n "$(printenv $k)" ] && echo "$k set" || echo "$k empty"; done'`: check the API keys reached the containers without printing them
