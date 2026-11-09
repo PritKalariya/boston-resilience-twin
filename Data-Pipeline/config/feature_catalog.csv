@@ -26,12 +26,12 @@ flooding_last,311,daily_counts.parquet (#15),2015-01-03,pass,fail,excluded,not i
 flooding_sum3,311,daily_counts.parquet (#15),2015-01-05,pass,fail,excluded,as flooding_last
 flooding_sum7,311,daily_counts.parquet (#15),2015-01-09,pass,fail,excluded,as flooding_last
 flooding_sum28,311,daily_counts.parquet (#15),2015-01-30,pass,fail,excluded,as flooding_last
-alert_snow_ice_count,alerts,IEM VTEC archive (ADR-014 A+),2015-01-01,pass,depends,yes,live: evening IEM pull after the cutoff checked against #7's NWS snapshot (alert_history.py --check-nws); #39 schedules it
-alert_snow_ice_warning,alerts,IEM VTEC archive (ADR-014 A+),2015-01-01,pass,depends,yes,as alert_snow_ice_count
-alert_tree_count,alerts,IEM VTEC archive (ADR-014 A+),2015-01-01,pass,depends,yes,as alert_snow_ice_count
-alert_tree_warning,alerts,IEM VTEC archive (ADR-014 A+),2015-01-01,pass,depends,yes,as alert_snow_ice_count
-alert_flooding_count,alerts,IEM VTEC archive (ADR-014 A+),2015-01-01,pass,depends,yes,as alert_snow_ice_count; flooding alerts exist live though flooding 311 counts do not
-alert_flooding_warning,alerts,IEM VTEC archive (ADR-014 A+),2015-01-01,pass,depends,yes,as alert_flooding_count
+alert_snow_ice_count,alerts,IEM VTEC archive and first bulletins (ADR-014 A+; #107),2015-01-01,pass,depends,yes,alerts first sent before the cutoff that as first announced run during D (begin before D ends and end after D begins; #107); live: evening IEM pull after the cutoff checked against #7's NWS snapshot (alert_history.py --check-nws); #39 schedules it
+alert_snow_ice_warning,alerts,IEM VTEC archive and first bulletins (ADR-014 A+; #107),2015-01-01,pass,depends,yes,as alert_snow_ice_count
+alert_tree_count,alerts,IEM VTEC archive and first bulletins (ADR-014 A+; #107),2015-01-01,pass,depends,yes,as alert_snow_ice_count
+alert_tree_warning,alerts,IEM VTEC archive and first bulletins (ADR-014 A+; #107),2015-01-01,pass,depends,yes,as alert_snow_ice_count
+alert_flooding_count,alerts,IEM VTEC archive and first bulletins (ADR-014 A+; #107),2015-01-01,pass,depends,yes,as alert_snow_ice_count; flooding alerts exist live though flooding 311 counts do not
+alert_flooding_warning,alerts,IEM VTEC archive and first bulletins (ADR-014 A+; #107),2015-01-01,pass,depends,yes,as alert_flooding_count
 static_population,static,population_2025_neighborhood (#9),fixed,pass,pass,yes,fixed descriptor (ADR-003); 2025 population is after the training years so a little look-ahead
 static_land_sqmi,static,population_2025_neighborhood (#9),fixed,pass,pass,yes,fixed descriptor (ADR-003)
 static_density,static,population_2025_neighborhood (#9),fixed,pass,pass,yes,fixed descriptor (ADR-003); 2025 population

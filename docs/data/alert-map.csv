@@ -28,7 +28,7 @@ SS,W,storm surge warning,flooding,not in Boston rows 2015 to 2026; listed so a f
 FA,A,flood watch,flooding,flash flood watches became flood watches after 2021 (ADR-014)
 FA,W,flood warning,flooding,areal flood warning (county)
 FA,Y,flood advisory,flooding,areal flood advisory (county)
-FF,A,flash flood watch,flooding,up to 2021 in zone MAZ015 (ADR-014)
+FF,A,flash flood watch,flooding,up to 2021 in zone MAZ015 (ADR-014); 4 in county MAC025 in 2018
 FF,W,flash flood warning,flooding,county warning; starts when first sent so never known the evening before (ADR-014)
 FL,W,flood warning (river),flooding,county river flood warning
 HT,Y,heat advisory,none,heat is not a storm group
