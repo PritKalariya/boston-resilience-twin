@@ -89,7 +89,8 @@ Every feature for day D uses only what is known at the cutoff, 18:00 Boston time
 - **How hours become days:**
   - forecast hours are combined over Logan's station day, midnight to midnight EST, the day GHCN-D values follow;
   - a day with a missing hour is blank;
-  - GFS has no values before 2024-01-21 and no snowfall before 2024-12-07 (first full day), and those gaps stay blank.
+  - GFS has no values before 2024-01-21, and that gap stays blank;
+  - GFS stored no snowfall before 2024-12-06. From 2024-01-21 those hours are estimated from the same forecast's precipitation and temperature, the GFS formula of 0.7 cm per mm when at or below 1 °C (#107, `open_meteo_forecast.fill_snowfall`). On 698 days with stored snowfall the estimate follows it with r = 0.978.
 - **Lags:** `obs_*_lag2` take Logan's day D-2 and stay out of the model.
 
 **Tides (`tide_features.py`).** `tide_pred_max_m` is the highest hourly prediction of the Boston local day (23, 24 or 25 hours with daylight saving), blank unless every hour is present. Observed water levels are never read.
@@ -133,12 +134,12 @@ Every feature for day D uses only what is known at the cutoff, 18:00 Boston time
 
 ## Missing values on the real build (2026-10-26)
 
-Kept missing, never filled (ADR-003). Counts are days, except for the 311 lags:
+Kept missing, never filled (ADR-003). The one exception is GFS snowfall from 2024-01-21 to 2024-12-06, which #107 estimates from the same forecast's precipitation and temperature; its 2024 count was rechecked on the stored GFS files on 2026-11-09. Counts are days, except for the 311 lags:
 
 | columns | train 2015 to 2023 (3,287 days) | validate 2024 (366) | 2025 onward (657) | why |
 |---|---|---|---|---|
 | `wx_precip_mm`, `wx_tmax_c`, `wx_tmin_c` | 0 | 20 | 0 | GFS has no values before 2024-01-21 |
-| `wx_snowfall_mm` | 0 | 341 | 0 | GFS snowfall starts 2024-12-06 (first full day 2024-12-07) |
+| `wx_snowfall_mm` | 0 | 20 (341 before #107) | 0 | GFS has no values before 2024-01-21; its missing snowfall from then to 2024-12-06 is estimated (#107) |
 | `wx_gust_max_ms` | 8 | 20 | 0 | Logan's WSF5 misses 8 training days; GFS as above |
 | `wx_known_by_utc` | 3,287 | 20 | 0 | set only when a row keeps a forecast |
 | `obs_*_lag2` (not model inputs) | 2 (WSF5 10) | 0 (WSF5 3) | snow 1, WSF5 5 | 2015-01-01 and 2015-01-02 have no day D-2 in the files; gaps in Logan's record |
