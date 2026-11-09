@@ -1,6 +1,6 @@
 # ADR-009: Hosting split across two GCP projects
 
-- Status: accepted
+- Status: accepted, amended by ADR-030 (the model files bucket lives in project 2)
 - Date: 2026-10-04
 - Owner: kalariya.p
 - Phase: deploy
