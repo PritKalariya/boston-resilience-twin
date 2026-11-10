@@ -11,6 +11,7 @@ test_start,2025-01-01,YYYY-MM-DD,ADR-003 test window
 test_end,2026-06-30,YYYY-MM-DD,ADR-003 says mid-2026; ADR-027 fixes it to June 30; later days are live and not used here
 down_weight_years,2020;2021,whole years separated by ;,train years flagged and down-weighted (ADR-003 and the spec); empty for none
 down_weight,0.5,number above 0 and at most 1,sample weight of a train row in a down-weighted year; every other row weighs 1; a starting value M6 may tune
+inner_fold_years,2019;2022;2023,increasing train years separated by ; with none down-weighted and the first after train_start,the inner time folds (inner_folds.py; #107): fold Y fits on every train day before Y and is checked on Y; a candidate picks its own settings such as its number of trees on them so validation 2024 only picks the threshold and the winner
 threshold_rule,validation_f1_max,validation_f1_max,the shared threshold rule (ADR-026 threshold_rule = shared): the threshold with the highest F1 on validation and the higher one on a tie; reused unchanged on test
 seasonal_years,3,whole number of 1 or more,the seasonal baseline window: the same days in this many previous years (ADR-005)
 seasonal_half_width_days,14,whole number of 0 or more,the seasonal baseline window: D plus or minus this many days in each previous year (ADR-005)

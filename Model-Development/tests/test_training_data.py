@@ -24,6 +24,7 @@ def test_the_committed_settings_load_with_the_adr_003_splits():
         "test": ("2025-01-01", "2026-06-30"),
     }
     assert settings.down_weight_years == (2020, 2021) and settings.down_weight == 0.5
+    assert settings.inner_fold_years == (2019, 2022, 2023)
     assert settings.threshold_rule == "validation_f1_max"
     assert (settings.seasonal_years, settings.seasonal_half_width_days, settings.seasonal_min_days) == (3, 14, 20)
     assert settings.labels == D.ROOT / "Data-Pipeline" / "data" / "processed" / "labels.parquet"
@@ -39,6 +40,13 @@ def test_the_committed_settings_load_with_the_adr_003_splits():
     ({"down_weight": "half"}, "down_weight must be above 0"),
     ({"down_weight_years": "2020;2024"}, "2024 is outside the train window"),
     ({"down_weight_years": "2020;x"}, "down_weight_years must be a whole number"),
+    ({"inner_fold_years": ""}, "inner_fold_years needs at least one year"),
+    ({"inner_fold_years": "2019;x"}, "inner_fold_years must be a whole number"),
+    ({"inner_fold_years": "2019;2024"}, "inner_fold_years: 2024 is outside the train window"),
+    ({"inner_fold_years": "2015;2019"}, "inner_fold_years: 2015 has no train day before it"),
+    ({"inner_fold_years": "2019;2020"}, "inner_fold_years: 2020 is down-weighted"),
+    ({"inner_fold_years": "2023;2019"}, "inner_fold_years must increase with no year twice"),
+    ({"inner_fold_years": "2019;2019"}, "inner_fold_years must increase with no year twice"),
     ({"threshold_rule": "fixed_half"}, "threshold_rule must be one of"),
     ({"seasonal_years": "0"}, "seasonal_years must be a whole number of 1 or more"),
     ({"seasonal_min_days": "88"}, "more than the window's 87 days"),

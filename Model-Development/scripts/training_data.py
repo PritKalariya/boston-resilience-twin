@@ -30,8 +30,8 @@ THRESHOLD_RULES = ("validation_f1_max",)
 SETTINGS_HEADER = ["setting", "value"]
 PATH_SETTINGS = ("labels", "features", "feature_catalog", "dvc_lock", "runs_dir")
 DATE_SETTINGS = tuple(f"{split}_{end}" for split in SPLITS for end in ("start", "end"))
-SETTING_NAMES = (*PATH_SETTINGS, *DATE_SETTINGS, "down_weight_years", "down_weight", "threshold_rule",
-                 "seasonal_years", "seasonal_half_width_days", "seasonal_min_days")
+SETTING_NAMES = (*PATH_SETTINGS, *DATE_SETTINGS, "down_weight_years", "down_weight", "inner_fold_years",
+                 "threshold_rule", "seasonal_years", "seasonal_half_width_days", "seasonal_min_days")
 
 
 class SettingsError(ValueError):
@@ -48,6 +48,7 @@ class Settings:
     splits: dict[str, tuple[pd.Timestamp, pd.Timestamp]]  # split -> (first day, last day), both inclusive
     down_weight_years: tuple[int, ...]
     down_weight: float
+    inner_fold_years: tuple[int, ...]  # inner_folds.py: the train years a candidate picks its own settings on
     threshold_rule: str
     seasonal_years: int
     seasonal_half_width_days: int
@@ -89,11 +90,25 @@ def _whole(name: str, value: str, minimum: int) -> int:
     return number
 
 
+def _train_years(name: str, value: str, train: tuple[pd.Timestamp, pd.Timestamp]) -> tuple[int, ...]:
+    """Whole years separated by ;, each inside the train window; fails naming the setting."""
+    years = []
+    for part in value.split(";"):
+        if not part.strip():
+            continue
+        year = _whole(name, part.strip(), 1)
+        if not train[0].year <= year <= train[1].year:
+            raise SettingsError(f"{name}: {year} is outside the train window")
+        years.append(year)
+    return tuple(years)
+
+
 def load_settings(path: str | Path = DEFAULT_CONFIG, root: str | Path = ROOT) -> Settings:
     """Load and check training.csv. Relative paths are read from the repo root (root).
 
     Fails, naming the setting, on a missing, unknown or duplicate setting, a bad value, split windows
-    out of order or overlapping, or a down-weighted year outside the train window.
+    out of order or overlapping, a down-weighted year outside the train window, or inner fold years
+    that are missing, out of order, outside the train window, down-weighted or with no train day before.
     """
     path, root = Path(path), Path(root)
     pairs = _read_pairs(path)
@@ -121,20 +136,25 @@ def load_settings(path: str | Path = DEFAULT_CONFIG, root: str | Path = ROOT) ->
             raise SettingsError(f"{after}_start {splits[after][0].date()} must come after {before}_end "
                                 f"{splits[before][1].date()}: a day belongs to one split only (ADR-003)")
 
-    years = []
-    for part in pairs["down_weight_years"].split(";"):
-        if not part.strip():
-            continue
-        year = _whole("down_weight_years", part.strip(), 1)
-        if not splits["train"][0].year <= year <= splits["train"][1].year:
-            raise SettingsError(f"down_weight_years: {year} is outside the train window")
-        years.append(year)
+    years = _train_years("down_weight_years", pairs["down_weight_years"], splits["train"])
     try:
         weight = float(pairs["down_weight"])
     except ValueError:
         weight = -1.0
     if not 0 < weight <= 1:
         raise SettingsError(f"down_weight must be above 0 and at most 1, got {pairs['down_weight']!r}")
+
+    fold_years = _train_years("inner_fold_years", pairs["inner_fold_years"], splits["train"])
+    if not fold_years:
+        raise SettingsError("inner_fold_years needs at least one year")
+    if list(fold_years) != sorted(set(fold_years)):
+        raise SettingsError(f"inner_fold_years must increase with no year twice, got {pairs['inner_fold_years']!r}")
+    if fold_years[0] <= splits["train"][0].year:
+        raise SettingsError(f"inner_fold_years: {fold_years[0]} has no train day before it to fit on")
+    down = sorted(set(fold_years) & set(years))
+    if down:
+        raise SettingsError(f"inner_fold_years: {down[0]} is down-weighted; "
+                            "such a year is only fit on, never checked on")
 
     rule = pairs["threshold_rule"]
     if rule not in THRESHOLD_RULES:
@@ -146,8 +166,8 @@ def load_settings(path: str | Path = DEFAULT_CONFIG, root: str | Path = ROOT) ->
         raise SettingsError(f"seasonal_min_days {min_days} is more than the window's "
                             f"{seasonal_years * (2 * half_width + 1)} days")
 
-    return Settings(splits=splits, down_weight_years=tuple(years), down_weight=weight, threshold_rule=rule,
-                    seasonal_years=seasonal_years, seasonal_half_width_days=half_width,
+    return Settings(splits=splits, down_weight_years=years, down_weight=weight, inner_fold_years=fold_years,
+                    threshold_rule=rule, seasonal_years=seasonal_years, seasonal_half_width_days=half_width,
                     seasonal_min_days=min_days, **paths)
 
 
