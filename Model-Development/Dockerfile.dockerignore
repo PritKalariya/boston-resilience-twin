@@ -4,6 +4,9 @@
 *
 !Model-Development
 Model-Development/tests
+# MLflow's stores (#104): run data from local use, never part of the image
+Model-Development/mlflow
+Model-Development/mlruns
 **/__pycache__
 **/*.pyc
 **/.pytest_cache

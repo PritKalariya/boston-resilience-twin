@@ -21,7 +21,7 @@
      where MLflow holds the run;
    - model.joblib, for a candidate: the fitted model with its threshold (with_threshold), which loads
      with scikit-learn and the model's library alone, no code from this repo.
-5. Logs the run to MLflow (tracking.py): tags, params, metrics, the run's files and, for a
+5. Logs the run to MLflow (mlflow_runs.py): tags, params, metrics, the run's files and, for a
    candidate, the model. A failure on the way marks the MLflow run FAILED.
 
 Every setting comes from the config file; nothing needs a code edit. Exits 0 when the run is written
@@ -48,7 +48,7 @@ from sklearn.model_selection import FixedThresholdClassifier
 import models
 import predictions
 import threshold
-import tracking
+import mlflow_runs
 import training_data
 
 PREDICTED_SPLITS = ("validation", "test")
@@ -124,7 +124,7 @@ def train(model_name: str, settings: training_data.Settings, run_id: str | None 
             "git_uncommitted_changes": git["uncommitted_changes"], "run_folder": run_id,
             **{f"{split}_days": f"{first.date()} to {last.date()}" for split, (first, last) in settings.splits.items()}}
 
-    with tracking.tracked_run(settings, run_id, tags) as mlflow_run:  # a failure marks the MLflow run FAILED
+    with mlflow_runs.tracked_run(settings, run_id, tags) as mlflow_run:  # a failure marks the MLflow run FAILED
         train_rows = table[table["split"] == "train"]
         start = time.perf_counter()
         model.fit(train_rows, train_rows["label"].to_numpy(), train_rows["weight"].to_numpy())
@@ -163,16 +163,16 @@ def train(model_name: str, settings: training_data.Settings, run_id: str | None 
             saved = with_threshold(model.estimator, cut, rows["validation"][model.inputs], rows["validation"]["label"])
             joblib.dump(saved, run_dir / "model.joblib")
             costs["model_size_bytes"] = (run_dir / "model.joblib").stat().st_size
-            model_uri = tracking.log_model(saved, rows["validation"][model.inputs].head(5), model_name)
+            model_uri = mlflow_runs.log_model(saved, rows["validation"][model.inputs].head(5), model_name)
 
         run = {"run_id": run_id, "model": model_name, "created_utc": created.isoformat(timespec="seconds"),
                "threshold_rule": settings.threshold_rule, "threshold": cut, "data_version": version, "git": git,
                "rows": counts, "inputs": training_data.input_columns(table), "settings": _settings_record(settings),
                "parameters": getattr(model, "parameters", {}), "model_details": getattr(model, "details", {}),
                "costs": costs, "mlflow": {"run_id": mlflow_run.info.run_id, "experiment": settings.mlflow_experiment,
-                                          "where": tracking.where(settings), "model_uri": model_uri}}
+                                          "where": mlflow_runs.where(settings), "model_uri": model_uri}}
         _write_json(run_dir / "run.json", run)
-        tracking.log_run(run_dir, run, scores)
+        mlflow_runs.log_run(run_dir, run, scores)
     return run_dir
 
 

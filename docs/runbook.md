@@ -756,7 +756,11 @@ The selection is also a DVC stage, `select` in `Model-Development/dvc.yaml`. It 
 
 Every `train.py` run is also an MLflow run in the experiment `model-training` (`mlflow_experiment` in `training.csv`).
 
-- **Where runs go.** The server that `MLFLOW_TRACKING_URI` names (M1, #104), or else the local store `Model-Development/mlruns/` (gitignored): `mlflow.db` (SQLite) with `artifacts/` beside it. `run.json` says which under `mlflow.where`; it never writes a server's address, which can hold a token.
+- **Where runs go** is M1's `tracking.setup` (#104).
+  - When `MLFLOW_TRACKING_URI` names a server, runs go there, once it answers `/health`. From the host that is `http://127.0.0.1:5000` after `docker compose up -d --wait mlflow`.
+  - Otherwise they go to the local store `Model-Development/mlruns/` (gitignored): `mlflow.db` (SQLite) with the artifacts beside it.
+  - `run.json` says which under `mlflow.where`. It never writes a server's address, which can hold a token.
+  - What a run logs is `Model-Development/scripts/mlflow_runs.py`.
 - **What a run logs.**
   - Tags: model, data version, git commit, split days.
   - Params: the threshold, what the model chose on the inner folds, every parameter used and the training settings.
@@ -764,13 +768,13 @@ Every `train.py` run is also an MLflow run in the experiment `model-training` (`
   - Files: the run folder's files and `inputs.json` (the feature list).
   - For a candidate, the model with its threshold.
   - A run that fails partway stays in MLflow as `FAILED`. A metric that cannot be computed is left out and named in the tag `undefined_metrics`.
-- **Browse the local store.** The image and `requirements.txt` carry only `mlflow-skinny`, the client, so install the full package once with `pip install mlflow==3.18.0`. Then, from the repo root:
+- **Browse the runs.** Runs on the server show in its UI at http://127.0.0.1:5000. To browse the local store, run this from the repo root, with `mlflow` from `requirements.txt` (3.17.2, the server's version) installed:
 
   ```bash
   mlflow ui --backend-store-uri sqlite:///Model-Development/mlruns/mlflow.db   # http://localhost:5000
   ```
 
-  On macOS, port 5000 may be taken by AirPlay Receiver; add `--port 5001`.
+  When the compose server already holds port 5000, or on macOS, where AirPlay Receiver may hold it, add `--port 5001`.
 - **Load a saved model.** Use `mlflow.sklearn.load_model("models:/<id>")` (the id is in `run.json` under `mlflow.model_uri`), or `joblib.load("Model-Development/runs/<run id>/model.joblib")`. `predict` gives the surge flag at the run's threshold and `predict_proba` the probability. Both need scikit-learn and the model's own library, not this repo's code. Load models only from this project's own store: cloudpickle and joblib can run code while loading.
 
 ## Versioned data (DVC)

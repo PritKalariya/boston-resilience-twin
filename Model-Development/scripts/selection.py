@@ -43,7 +43,7 @@ from matplotlib.patches import Rectangle
 
 import predictions
 import slices
-import tracking
+import mlflow_runs
 import train
 import training_data
 
@@ -281,7 +281,7 @@ def run_selection(settings: training_data.Settings, selection_id: str | None = N
     selection_id = selection_id or f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-selection"
     out = Path(reports_dir or settings.reports_dir)
     tags = {"purpose": "model selection (#107)", "data_version": training_data.data_version(settings.dvc_lock)}
-    with tracking.tracked_run(settings, selection_id, tags):
+    with mlflow_runs.tracked_run(settings, selection_id, tags):
         entries = {}
         for name in (baseline_name, *settings.candidates):
             entries[name] = Entry.read(name, train.train(name, settings, f"{selection_id}-{name}"))
@@ -313,7 +313,7 @@ def run_selection(settings: training_data.Settings, selection_id: str | None = N
                                                                     record["f1_gain_ci95"] or ())):
                 if value is not None:
                     metrics[f"test_{record['slice']}_{name}"] = value
-        tracking.log_summary(params={"baseline": baseline_name, "candidates": list(settings.candidates),
+        mlflow_runs.log_summary(params={"baseline": baseline_name, "candidates": list(settings.candidates),
                                      "f1_min_margin": str(margin)},
                              metrics=metrics, tags={"winner": content["winner"] or "none"}, files=files)
     return content, out

@@ -26,10 +26,16 @@ Data-Pipeline/data/*
 
 # Training runs (#106): predictions and metrics written per run, never committed
 Model-Development/runs/
-# The local MLflow store (#107): the SQLite database and the logged artifacts and models
-Model-Development/mlruns/
 # Selection reports (#107): written by selection.py and logged to MLflow, never committed
 Model-Development/reports/
+
+# MLflow (#104): the compose server's store (its folder kept by .gitkeep for the mount),
+# and local stores, which MLflow names mlruns/, mlartifacts/ or mlflow.db
+Model-Development/mlflow/*
+!Model-Development/mlflow/.gitkeep
+mlruns/
+mlartifacts/
+mlflow.db
 
 # Airflow logs (bind-mounted into the containers by docker-compose.yaml)
 Data-Pipeline/logs/*

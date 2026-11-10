@@ -21,13 +21,17 @@ stages:
       size: 33073
     - path: config
       hash: md5
-      md5: f769ed130ad9a80798e4625b97dd2313.dir
-      size: 10240
+      md5: f7140c6864462df4921bb26cef89414b.dir
+      size: 10246
       nfiles: 6
     - path: scripts/inner_folds.py
       hash: md5
       md5: 0494e04b926b8c482dbdd5a1327bf5c5
       size: 5995
+    - path: scripts/mlflow_runs.py
+      hash: md5
+      md5: 3e0da7b507122d602c7f9dccf90c3056
+      size: 9419
     - path: scripts/model_params.py
       hash: md5
       md5: 2ef54a2e75773916584fdebe09ac0930
@@ -46,8 +50,8 @@ stages:
       size: 4061
     - path: scripts/selection.py
       hash: md5
-      md5: 9d1439e4390fb4c23f9e8a466b93e6bc
-      size: 21542
+      md5: 01ac0008a3883737cbbacf28881bda08
+      size: 21551
     - path: scripts/slices.py
       hash: md5
       md5: c269ac8e8b9524e00403af8a1ff494d7
@@ -58,19 +62,19 @@ stages:
       size: 7117
     - path: scripts/tracking.py
       hash: md5
-      md5: b58ab37d3df56ddf862dba9107f323f4
-      size: 9778
+      md5: 4ae920cc56a55f62bd9020ef25ce84ee
+      size: 4032
     - path: scripts/train.py
       hash: md5
-      md5: a141a29f622bd0ff748f4e58db80c063
-      size: 13551
+      md5: 06bd1c7dbcfc329c6b92b4d2b81d3999
+      size: 13569
     - path: scripts/training_data.py
       hash: md5
-      md5: a5c58bb8135c83460f219083b1d03922
-      size: 17479
+      md5: 512e7f9d336a4906ac2b891c62a207fb
+      size: 17485
     outs:
     - path: reports
       hash: md5
-      md5: 8194fdb11b89453f522f1d19eb142ab2.dir
-      size: 143136
+      md5: 7b47f19dc3169c8efc4e205536a4bf17.dir
+      size: 141434
       nfiles: 5

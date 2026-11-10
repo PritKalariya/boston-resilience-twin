@@ -14,7 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import training_helpers as H  # noqa: E402  (also puts Model-Development/scripts on sys.path)
 from training_helpers import no_mlflow_server, shared_mlflow_store  # noqa: E402,F401  (autouse: MLflow stays in temp folders)
-import tracking  # noqa: E402
+import mlflow_runs  # noqa: E402
 import mlflow  # noqa: E402
 import selection as S  # noqa: E402
 import training_data as D  # noqa: E402
@@ -150,7 +150,7 @@ def test_a_selection_trains_every_model_logs_them_and_writes_the_reports(tmp_pat
     heat = records["heat"]  # July days without a surge: recall is undefined, never 0
     assert heat["days"] > 0 and heat["surges"] == 0 and heat["model"]["recall"] is None
     assert heat["model"]["f1"] in (None, 0.0) and "test window by kind of day" in printed
-    client = mlflow.MlflowClient(tracking.tracking_uri(D.load_settings(config)))
+    client = mlflow.MlflowClient(mlflow_runs.tracking_uri(D.load_settings(config)))
     experiment = client.get_experiment_by_name("model-training").experiment_id
     (parent,) = client.search_runs([experiment], filter_string="attributes.run_name = 'sel-e2e'")
     assert parent.data.tags["winner"] == content["winner"] and parent.data.params["f1_min_margin"] == "1/20"

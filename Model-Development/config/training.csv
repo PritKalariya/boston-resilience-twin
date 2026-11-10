@@ -20,8 +20,8 @@ seasonal_years,3,whole number of 1 or more,the seasonal baseline window: the sam
 seasonal_half_width_days,14,whole number of 0 or more,the seasonal baseline window: D plus or minus this many days in each previous year (ADR-005)
 seasonal_min_days,20,whole number of 1 or more,a day with fewer labeled days in its window has no seasonal probability (ADR-005's 20 history days)
 runs_dir,Model-Development/runs,path from the repo root,where train.py writes each run; gitignored
-mlflow_store,Model-Development/mlruns,path from the repo root,the local MLflow store when MLFLOW_TRACKING_URI is unset (tracking.py; #107): mlflow.db (SQLite) and artifacts/; gitignored
-mlflow_experiment,model-training,a name,the MLflow experiment every training run is logged to (tracking.py; #107)
+mlflow_store,Model-Development/mlruns,path from the repo root,the local MLflow store when MLFLOW_TRACKING_URI is unset (mlflow_runs.py; #107): mlflow.db (SQLite) and artifacts/; gitignored
+mlflow_experiment,model-training,a name,the MLflow experiment every training run is logged to (mlflow_runs.py; #107)
 reports_dir,Model-Development/reports,path from the repo root,where selection.py writes selection.json and the charts (#107)
 candidates,logreg;xgboost;lightgbm,model names separated by ;,the models selection.py trains and ranks against the f1_baseline of gates.csv (#107)
 slices,Model-Development/config/slices.csv,path from the repo root,the kinds of test day (storm; freeze; heat) selection.py also scores the selected model on (slices.py; #107)

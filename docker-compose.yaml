@@ -1,4 +1,5 @@
-# Local Airflow stack: Airflow 3.3.2 with LocalExecutor and a Postgres 16 metadata DB.
+# Local Airflow stack: Airflow 3.3.2 with LocalExecutor and a Postgres 16 metadata DB,
+# and the MLflow tracking server (#104).
 # macOS and Windows: works on a clean clone with no .env. Linux: put AIRFLOW_UID in
 # .env first (README). Defaults are for local use only. The VM runs on them until
 # W4-3 (#64) moves its secrets to Secret Manager (ADR-016).
@@ -51,6 +52,9 @@ x-airflow-common:
     SLACK_ALERT_WEBHOOK: ${SLACK_ALERT_WEBHOOK:-}
     # Legacy 311 years parsed at once (#37). Put LEGACY_PARALLEL=2 in .env if memory is tight.
     LEGACY_PARALLEL: ${LEGACY_PARALLEL:-4}
+    # The MLflow server for runs logged from a task (#104), from .env: http://mlflow:5000.
+    # Empty: runs go to a local store instead (Model-Development/scripts/tracking.py).
+    MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-}
     # Docker creates /opt/airflow/repo as root, so git run as AIRFLOW_UID inside a
     # container calls the repo "dubious ownership". git reads this as `safe.directory`.
     GIT_CONFIG_COUNT: '1'
@@ -182,6 +186,85 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
+  # MLflow tracking server (#104, ADR-006): parameters, metrics and artifacts of every
+  # training and tuning run, and later the agents' traces; MLflow's model registry is not
+  # used. The same service on laptops and the VM (spec, 2026-10-30). Nothing depends on it:
+  # with MLFLOW_TRACKING_URI unset, runs go to Model-Development/mlruns/ instead
+  # (Model-Development/scripts/tracking.py).
+  mlflow:
+    # The official image, the same version as the mlflow client in
+    # Data-Pipeline/requirements.txt (Model-Development/tests/test_mlflow_service.py keeps them
+    # equal). Its Python is 3.11; it runs no project code, so ADR-013 does not apply, as for Postgres.
+    image: ghcr.io/mlflow/mlflow:v3.17.2
+    command:
+      - mlflow
+      - server
+      - --host=0.0.0.0
+      - --port=5000
+      # One worker process; the default 4 would each take about 240 MiB.
+      - --workers=1
+      # Runs in SQLite and artifacts on disk, both in the mount below. Clients send artifacts
+      # through the server, so they need no access to the folder.
+      - --backend-store-uri=sqlite:////mlflow/mlflow.db
+      - --artifacts-destination=/mlflow/artifacts
+      - --serve-artifacts
+      # Host headers the server answers (DNS rebinding protection): the compose name for other
+      # containers and localhost on any port for the UI. Without "mlflow" every API call from
+      # another container gets 403 while /health still answers.
+      - --allowed-hosts=mlflow,mlflow:5000,localhost,localhost:*,127.0.0.1,127.0.0.1:*
+    environment:
+      # Off: job execution adds 7 worker processes (1.6 GiB in all, measured) for GenAI
+      # online scoring and trace archival, which the project does not use.
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
+    # Localhost only (ADR-016). On the VM, reach it through an SSH tunnel.
+    ports:
+      - "127.0.0.1:${MLFLOW_HOST_PORT:-5000}:5000"
+    # Gitignored. Its .gitkeep makes the checkout own the folder; on Linux, Docker would
+    # create a missing one as root and the server could not write to it.
+    volumes:
+      - ./Model-Development/mlflow:/mlflow
+    # The image runs as root; as with Airflow, the files it writes belong to AIRFLOW_UID (ADR-029).
+    user: "${AIRFLOW_UID:-50000}:0"
+    # Measured on 2026-11-09: 365 MiB idle, 380 MiB at peak while 3 runs logged 600 metric
+    # values and 60 MB of artifacts. #61 sets the VM's budget; re-measure there after a change.
+    mem_limit: 512m
+    healthcheck:
+      # The image has no curl.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+      start_interval: 5s
+    logging: *default-logging
+    restart: unless-stopped
+
+  # Smoke check of the tracking server (#104): `docker compose run --rm --build mlflow-smoke`.
+  # From another container on the compose network, as a task or a training run would, it logs
+  # one run with a parameter, a metric and an artifact through MLFLOW_TRACKING_URI, reads them
+  # back and prints the run's page in the UI. The Airflow image gives Python 3.12 (ADR-013) and
+  # the mlflow client that training uses. The profile keeps it out of `docker compose up`; only
+  # the scripts it runs are mounted, read-only, and no .env value reaches it.
+  mlflow-smoke:
+    image: brt-airflow:local
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
+    profiles: ["smoke"]
+    entrypoint: ["python", "Model-Development/scripts/mlflow_smoke.py"]
+    working_dir: /opt/airflow/repo
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      BRT_MLFLOW_UI_URL: http://127.0.0.1:${MLFLOW_HOST_PORT:-5000}  # the link it prints, as the host's browser sees it
+      PYTHONDONTWRITEBYTECODE: "1"  # the scripts are read-only
+    volumes:
+      - ./Model-Development/scripts:/opt/airflow/repo/Model-Development/scripts:ro
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    user: "${AIRFLOW_UID:-50000}:0"
+    logging: *default-logging
+
   # The full test suite with coverage (#38): `docker compose run --rm --build test`.
   # The Airflow image gives Python 3.12 (ADR-013) and Airflow for the DAG tests, so
   # the host needs no Python. The profile keeps it out of `docker compose up`, and it
@@ -216,6 +299,7 @@ services:
       - ./.coveragerc:/opt/airflow/repo/.coveragerc:ro
       - ./.env.example:/opt/airflow/repo/.env.example:ro
       - ./.dvc/config:/opt/airflow/repo/.dvc/config:ro  # the remote URL only, not DVC's cache
+      - ./docker-compose.yaml:/opt/airflow/repo/docker-compose.yaml:ro  # for the mlflow service checks (#104)
     tmpfs:
       - /opt/airflow/repo/Data-Pipeline/data
     user: "${AIRFLOW_UID:-50000}:0"

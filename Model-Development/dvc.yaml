@@ -21,6 +21,7 @@ stages:
     - config
     - scripts/inner_folds.py
     - scripts/model_params.py
+    - scripts/mlflow_runs.py
     - scripts/models.py
     - scripts/predictions.py
     - scripts/seasonal_baseline.py

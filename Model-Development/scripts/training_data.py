@@ -52,7 +52,7 @@ class Settings:
     runs_dir: Path
     model_params: Path  # the candidates' starting parameters (model_params.py)
     tuned_params: Path  # M6's tuned values over them, used only when the file exists (model_params.py)
-    mlflow_store: Path  # tracking.py: the local MLflow store when MLFLOW_TRACKING_URI is unset
+    mlflow_store: Path  # mlflow_runs.py: the local MLflow store when MLFLOW_TRACKING_URI is unset
     splits: dict[str, tuple[pd.Timestamp, pd.Timestamp]]  # split -> (first day, last day), both inclusive
     down_weight_years: tuple[int, ...]
     down_weight: float
@@ -62,7 +62,7 @@ class Settings:
     seasonal_years: int
     seasonal_half_width_days: int
     seasonal_min_days: int
-    mlflow_experiment: str  # tracking.py: the MLflow experiment every run is logged to
+    mlflow_experiment: str  # mlflow_runs.py: the MLflow experiment every run is logged to
     reports_dir: Path  # selection.py: where the selection report and its charts go
     candidates: tuple[str, ...]  # selection.py: the models it trains and ranks against the baseline
     slices: Path  # slices.py: the kinds of test day the selected model is also scored on
