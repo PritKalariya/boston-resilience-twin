@@ -15,8 +15,9 @@ since a deferred task waits forever without one.
 Every Airflow service runs `brt-airflow:local`, built from `airflow.Dockerfile`
 at the repo root: the `apache/airflow:3.3.2-python3.12` base image (ADR-013)
 plus `Data-Pipeline/requirements.txt` installed under Airflow's constraints for
-that image (ADR-022). The requirements file is the only thing copied in; DAG
-and script code is bind-mounted (ADR-017).
+that image (ADR-022), and one system package, `libgomp1`, the OpenMP runtime
+LightGBM needs to load (#107). The requirements file is the only thing copied
+in; DAG and script code is bind-mounted (ADR-017).
 
 ### Rebuild the image
 

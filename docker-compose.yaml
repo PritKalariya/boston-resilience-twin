@@ -9,7 +9,8 @@ x-airflow-common:
   &airflow-common
   # Built from airflow.Dockerfile (ADR-022): the apache/airflow:3.3.2-python3.12
   # base image (Python 3.12 per ADR-013; the unsuffixed 3.3.2 tag is Python 3.13)
-  # plus Data-Pipeline/requirements.txt. Rebuild with `docker compose up -d --build --wait`
+  # plus Data-Pipeline/requirements.txt and libgomp1 for LightGBM (#107).
+  # Rebuild with `docker compose up -d --build --wait`
   # after changing that file; DAG and script changes need no rebuild.
   image: brt-airflow:local
   build:
