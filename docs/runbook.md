@@ -703,6 +703,23 @@ python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run i
   - `tuned_params.yaml` (M6, #109) has the same format but names only what was tuned; each value replaces its starting one when the file exists. The number of trees is not a parameter, since the inner-fold search always picks it. A run prints which values were tuned, and `run.json` records them under `parameters` with the file's sha256. Check a new tuned file with `model_params.py` before committing it.
 - **On Windows** with `core.autocrlf`, run DVC itself (`dvc status`, `dvc repro`) from a checkout with LF line endings or in the Airflow image: `dvc.lock` hashes the scripts and configs with LF endings, so a CRLF checkout shows every stage as changed. `train.py` and `evaluate.py` are not affected, and the data version they record ignores line endings.
 
+### Model selection (#107)
+
+```bash
+python Model-Development/scripts/selection.py   # about 40 s; trains the baseline and the 3 candidates, then decides
+```
+
+- **What it does.**
+  - Trains the baseline (`f1_baseline` in `gates.csv`, the seasonal model) and every model in `candidates` (`training.csv`), each a child of one MLflow selection run.
+  - Ranks the candidates by validation F1, compared as exact fractions like the gates; a tie goes to the lower validation log loss.
+  - The best one wins only if its F1 is at least the baseline's plus `f1_min_margin` (0.05, inclusive; ADR-026).
+- **Exit codes.** 0 with a winner, 1 when no candidate beats the baseline by the margin, 2 on an error (an undefined baseline F1 is an error, ADR-026 `on_undefined = fail`).
+- **Writes** `Model-Development/reports/` (`reports_dir`, gitignored; also logged to the selection run):
+  - `selection.json`: the decision, the rule and every model's numbers, run folder and MLflow ids.
+  - `comparison.csv` and `comparison.png`: validation F1 against the gate, with each model's training time, scoring time for one evening's rows and saved model size beside it.
+  - `confusion_matrix.png`: the winner's validation counts at its threshold.
+- **Each model's run folder** is `Model-Development/runs/<selection id>-<model>/`, as `train.py` writes it.
+
 ### MLflow tracking (#107)
 
 Every `train.py` run is also an MLflow run in the experiment `model-training` (`mlflow_experiment` in `training.csv`).

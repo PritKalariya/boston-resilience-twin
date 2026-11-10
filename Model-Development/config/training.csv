@@ -22,3 +22,5 @@ seasonal_min_days,20,whole number of 1 or more,a day with fewer labeled days in 
 runs_dir,Model-Development/runs,path from the repo root,where train.py writes each run; gitignored
 mlflow_store,Model-Development/mlruns,path from the repo root,the local MLflow store when MLFLOW_TRACKING_URI is unset (tracking.py; #107): mlflow.db (SQLite) and artifacts/; gitignored
 mlflow_experiment,model-training,a name,the MLflow experiment every training run is logged to (tracking.py; #107)
+reports_dir,Model-Development/reports,path from the repo root,where selection.py writes selection.json and the charts (#107)
+candidates,logreg;xgboost;lightgbm,model names separated by ;,the models selection.py trains and ranks against the f1_baseline of gates.csv (#107)

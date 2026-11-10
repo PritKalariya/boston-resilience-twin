@@ -42,6 +42,8 @@ import sklearn
 
 os.environ.setdefault("MLFLOW_DISABLE_TELEMETRY", "true")
 os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "true")
+# log_model loads the model back to check its input example, which prints a download bar per model
+os.environ.setdefault("MLFLOW_ENABLE_ARTIFACTS_PROGRESS_BAR", "false")
 
 
 def _cloudpickle_caution(record: logging.LogRecord) -> bool:
@@ -157,6 +159,16 @@ def metrics(run: dict, scores: dict) -> tuple[dict[str, float], list[str]]:
     if costs["model_size_bytes"] is not None:
         out["model_size_bytes"] = float(costs["model_size_bytes"])
     return out, undefined
+
+
+def log_summary(params: dict, metrics: dict[str, float], tags: dict, files: list[Path]) -> None:
+    """Log a summary on the active run, such as a selection run's decision: params, metrics, tags and files."""
+    mlflow = _mlflow()
+    mlflow.log_params({name: _flat(value) for name, value in params.items()})
+    mlflow.log_metrics(metrics)
+    mlflow.set_tags({name: str(value) for name, value in tags.items()})
+    for path in files:
+        mlflow.log_artifact(str(path))
 
 
 def log_run(run_dir: Path, run: dict, scores: dict) -> None:

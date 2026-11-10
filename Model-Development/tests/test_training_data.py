@@ -29,6 +29,8 @@ def test_the_committed_settings_load_with_the_adr_003_splits():
     assert settings.tuned_params == D.ROOT / "Model-Development" / "config" / "tuned_params.yaml"
     assert settings.mlflow_store == D.ROOT / "Model-Development" / "mlruns"
     assert settings.mlflow_experiment == "model-training"
+    assert settings.reports_dir == D.ROOT / "Model-Development" / "reports"
+    assert settings.candidates == ("logreg", "xgboost", "lightgbm")
     assert settings.threshold_rule == "validation_f1_max"
     assert (settings.seasonal_years, settings.seasonal_half_width_days, settings.seasonal_min_days) == (3, 14, 20)
     assert settings.labels == D.ROOT / "Data-Pipeline" / "data" / "processed" / "labels.parquet"
@@ -58,6 +60,9 @@ def test_the_committed_settings_load_with_the_adr_003_splits():
     ({"tuned_params": ""}, "tuned_params needs a path"),
     ({"mlflow_store": ""}, "mlflow_store needs a path"),
     ({"mlflow_experiment": ""}, "mlflow_experiment needs a name"),
+    ({"candidates": ""}, "candidates needs at least one model name"),
+    ({"candidates": "logreg;xgboost;logreg"}, "candidates names a model twice"),
+    ({"reports_dir": ""}, "reports_dir needs a path"),
     ({"threshold_rule": "fixed_half"}, "threshold_rule must be one of"),
     ({"seasonal_years": "0"}, "seasonal_years must be a whole number of 1 or more"),
     ({"seasonal_min_days": "88"}, "more than the window's 87 days"),

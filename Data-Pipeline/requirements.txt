@@ -33,6 +33,8 @@ iniconfig==2.3.1
 # LightGBM (#107) loads the OpenMP runtime: libgomp1, which airflow.Dockerfile
 # installs. On macOS, run brew install libomp first.
 lightgbm==4.7.0
+# The selection charts (#107), drawn to PNG files with no screen.
+matplotlib==3.11.2
 # MLflow's client only (#107): the training runs log to MLflow, and Airflow
 # already brings the SQLAlchemy and alembic its SQLite store needs. Browsing
 # the runs (mlflow ui) needs the full mlflow package, outside this image.

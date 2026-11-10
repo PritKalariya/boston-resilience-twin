@@ -28,6 +28,8 @@ Data-Pipeline/data/*
 Model-Development/runs/
 # The local MLflow store (#107): the SQLite database and the logged artifacts and models
 Model-Development/mlruns/
+# Selection reports (#107): written by selection.py and logged to MLflow, never committed
+Model-Development/reports/
 
 # Airflow logs (bind-mounted into the containers by docker-compose.yaml)
 Data-Pipeline/logs/*
