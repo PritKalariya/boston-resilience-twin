@@ -1,6 +1,6 @@
 """Train one named model and write its run (#106, ADR-027).
 
-    python Model-Development/scripts/train.py --model seasonal|logreg [--config Model-Development/config/training.csv]
+    python Model-Development/scripts/train.py --model seasonal|logreg|xgboost [--config Model-Development/config/training.csv]
 
 1. Loads the training table (training_data.load_table): the frozen labels and the model inputs of the
    data version Data-Pipeline/dvc.lock names, each labeled neighborhood-day in one split.
@@ -141,6 +141,8 @@ def main(argv: list[str] | None = None) -> int:
         years = ", ".join(str(fold["year"]) for fold in details["inner_folds"])
         chosen = ", ".join(f"{name} {value:g}" for name, value in details["chosen"].items())
         print(f"chosen on the inner folds {years}: {chosen} ({details['chosen_by']})")
+        if details.get("stopped_before_max_rounds") is False:
+            print("note: the tree search reached max_rounds without stopping; raise max_rounds in model_params.yaml")
     print(f"threshold {run['threshold']:.6f} ({run['threshold_rule']})")
     print(f"{'split':<11}{'rows':>7}{'surges':>8}{'tp':>6}{'fp':>7}{'fn':>6}{'f1':>9}{'precision':>11}{'recall':>9}{'auc':>9}")
     for split in PREDICTED_SPLITS:

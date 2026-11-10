@@ -108,6 +108,30 @@ def test_a_fold_that_cannot_score_a_model_is_refused_by_year(train_rows, years, 
         _folds(rows, years)
 
 
+def _steps(*curves):
+    """One step per fold that returns the next value of its loss curve on each call."""
+    return [iter(curve).__next__ for curve in curves]
+
+
+def test_early_stopping_keeps_the_round_with_the_lowest_mean_loss():
+    # fold 1 is best at round 2 and fold 2 at round 4; the mean is best at round 3
+    best, curve, at_best = F.stop_early(_steps([5, 1, 2, 6, 7, 8, 9], [9, 8, 6, 5, 8, 9, 9]), 100, 3)
+    assert curve == [7, 4.5, 4, 5.5, 7.5, 8.5]  # stopped 3 rounds after the best
+    assert (best, at_best) == (3, [2, 6])
+
+
+def test_a_tie_keeps_the_earlier_round_and_the_cap_stops_the_search():
+    best, curve, _ = F.stop_early(_steps([3, 2, 2, 2, 2]), 100, 2)
+    assert (best, len(curve)) == (2, 4)
+    best, curve, _ = F.stop_early(_steps([5, 4, 3, 2, 1]), 4, 2)  # still improving at the cap
+    assert (best, curve) == (4, [5, 4, 3, 2])
+
+
+def test_a_loss_that_is_not_a_number_stops_the_search():
+    with pytest.raises(ValueError, match="round 2 gave a log loss that is not a finite number"):
+        F.stop_early(_steps([1.0, float("nan")]), 10, 3)
+
+
 def test_labels_must_match_the_dates_one_to_one(train_rows):
     with pytest.raises(ValueError, match="labels for"):
         F.make_folds(train_rows["date"], train_rows["label"].iloc[1:], (2019,))

@@ -18,11 +18,14 @@ Earlier years would leave a fold one or two years to fit on, far from the eight 
 A fold holds row positions in the rows it was made from, not index labels, so make_folds can be
 called with any slice of the training table. index_pairs gives the folds in the form scikit-learn's
 cv argument and the folds argument of lightgbm.cv and xgboost.cv take.
+
+stop_early picks a boosted model's number of trees on the folds: one model per fold grows a tree
+at a time, and the count with the lowest mean log loss over the fold years wins.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -71,6 +74,34 @@ def index_pairs(folds: Sequence[Fold]) -> list[tuple[np.ndarray, np.ndarray]]:
     """The folds as (fit, check) position pairs: the cv argument of scikit-learn's GridSearchCV and
     cross_validate, and the folds argument of lightgbm.cv and xgboost.cv."""
     return [(fold.fit, fold.check) for fold in folds]
+
+
+def stop_early(steps: Sequence[Callable[[], float]], max_rounds: int,
+               stopping_rounds: int) -> tuple[int, list[float], list[float]]:
+    """The number of rounds (trees) with the lowest mean log loss over the folds.
+
+    steps holds one callable per fold: each call grows that fold's model by one round and returns its
+    log loss on the fold year. The folds grow together; after every round their losses are averaged.
+    The search stops stopping_rounds rounds after the best mean, or at max_rounds. A tie keeps the
+    earlier round, so the model gets fewer trees. The same rule as lightgbm.cv and xgboost.cv.
+
+    Returns the best round (counted from 1), the mean loss of every round grown, and each fold's
+    loss at the best round. Fails on a loss that is not a finite number.
+    """
+    curve: list[float] = []
+    by_round: list[list[float]] = []
+    best = 0
+    for round_number in range(1, max_rounds + 1):
+        losses = [float(step()) for step in steps]
+        if not np.isfinite(losses).all():
+            raise ValueError(f"round {round_number} gave a log loss that is not a finite number: {losses}")
+        by_round.append(losses)
+        curve.append(float(np.mean(losses)))
+        if best == 0 or curve[-1] < curve[best - 1]:
+            best = round_number
+        elif round_number - best >= stopping_rounds:
+            break
+    return best, curve, by_round[best - 1]
 
 
 def describe(folds: Sequence[Fold], dates, label) -> list[dict]:

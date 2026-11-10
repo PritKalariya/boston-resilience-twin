@@ -34,3 +34,8 @@ pyproj==3.8.0
 pytest==9.1.1
 pytest-cov==7.1.0
 shapely==2.2.0
+# XGBoost (#107): the CPU-only build on Linux, because the standard Linux wheel
+# pulls NVIDIA's NCCL GPU library (about 430 MB in the image). The Windows and
+# macOS wheels have no GPU parts, and xgboost-cpu has no macOS wheel.
+xgboost==3.4.1; sys_platform != "linux"
+xgboost-cpu==3.4.1; sys_platform == "linux"

@@ -26,17 +26,31 @@ class ParamsError(ValueError):
     """A parameters file that cannot be used."""
 
 
-def _number(name: str, value) -> float:
+def _number(name: str, value, kind: str = "a number") -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         hint = "; write decimals with a point (0.001, not 1e-3), YAML reads 1e-3 as text" if isinstance(value, str) else ""
-        raise ParamsError(f"{name} must hold numbers, got {value!r}{hint}")
+        raise ParamsError(f"{name} must be {kind}, got {value!r}{hint}")
     return float(value)
+
+
+def _fraction(name: str, value) -> float:
+    number = _number(name, value)
+    if not 0 < number <= 1:
+        raise ParamsError(f"{name} must be above 0 and at most 1, got {value!r}")
+    return number
+
+
+def _not_negative(name: str, value) -> float:
+    number = _number(name, value)
+    if number < 0:
+        raise ParamsError(f"{name} must be 0 or more, got {value!r}")
+    return number
 
 
 def _increasing_positive(name: str, value) -> tuple[float, ...]:
     if not isinstance(value, list) or not value:
         raise ParamsError(f"{name} must be a list of one or more numbers, got {value!r}")
-    numbers = [_number(name, item) for item in value]
+    numbers = [_number(name, item, "a list of numbers") for item in value]
     if min(numbers) <= 0:
         raise ParamsError(f"{name} must hold numbers above 0, got {value!r}")
     if numbers != sorted(set(numbers)):
@@ -54,6 +68,9 @@ def _whole(minimum: int):
 
 PARAMETERS = {
     "logreg": {"C_grid": _increasing_positive, "max_iter": _whole(1), "year_parts": _whole(2)},
+    "xgboost": {"learning_rate": _fraction, "max_rounds": _whole(1), "stopping_rounds": _whole(1),
+                "max_depth": _whole(1), "min_child_weight": _not_negative, "reg_lambda": _not_negative,
+                "subsample": _fraction, "colsample_bytree": _fraction, "seed": _whole(0)},
 }
 
 

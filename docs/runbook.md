@@ -675,6 +675,7 @@ Every model trains and is scored through `Model-Development/scripts/train.py`, o
 ```bash
 python Model-Development/scripts/train.py --model seasonal                          # about 2 s; prints the metrics
 python Model-Development/scripts/train.py --model logreg                            # about 12 s; also prints the C it chose
+python Model-Development/scripts/train.py --model xgboost                           # about 12 s; also prints the trees it chose
 python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run id>   # recompute and check
 python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run id> --gates-block
 ```
@@ -684,6 +685,7 @@ python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run i
 - **Inner folds (#107).** A candidate picks its own settings on the train years only, never on 2024.
   - Each fold year in `inner_fold_years` (2019, 2022, 2023) is checked by a fit on every train day before it. The 2020 and 2021 rows are fit on, never checked on.
   - Logistic regression takes the C with the lowest mean log loss over the folds, then refits on every train day.
+  - XGBoost grows one model per fold a tree at a time and keeps the tree count with the lowest mean log loss, stopping 100 trees after the best (`stopping_rounds`). The final model grows that many trees on every train day. If the search reaches `max_rounds` first, `train.py` says so: raise `max_rounds` in `model_params.yaml`.
   - 2024 then picks only the threshold and the winner.
 - **A candidate run stops** when an input's missing share in validation or test is more than `missing_gap_max_points` (10) percentage points from train. The message names the input; check that input's source in the feature table before anything else. The seasonal baseline reads no input and still runs.
 - **Settings** live in config files, never in code.

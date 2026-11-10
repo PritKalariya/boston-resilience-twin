@@ -14,3 +14,22 @@ logreg:
   # day_of_year enters as a smooth curve over the year in this many equal parts (periodic splines,
   # so 31 December joins 1 January); 12 gives about a month each.
   year_parts: 12
+
+xgboost:
+  # One booster per inner fold grows a tree at a time until stopping_rounds more trees bring no
+  # better mean log loss over the fold years; the final model grows the tree count with the best
+  # mean on every train day (inner_folds.stop_early). A small learning rate with many trees
+  # generalizes better than a large one with few (XGBoost "Notes on Parameter Tuning").
+  learning_rate: 0.05
+  max_rounds: 3000
+  stopping_rounds: 100
+  # Shallower, more regularized trees than XGBoost's defaults (max_depth 6, min_child_weight 1,
+  # reg_lambda 1): about 3 percent of the train rows are surges, so deep trees would fit noise.
+  # min_child_weight is the least total p(1 - p) a leaf may hold: 5 is about 150 rows at the
+  # surge rate. Rows and inputs are subsampled per tree for the same reason.
+  max_depth: 4
+  min_child_weight: 5.0
+  reg_lambda: 5.0
+  subsample: 0.8
+  colsample_bytree: 0.8
+  seed: 0

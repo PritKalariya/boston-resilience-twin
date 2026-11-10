@@ -15,7 +15,10 @@ reads the table's columns to find its inputs and checks their missing shares acr
 
 from __future__ import annotations
 
+import itertools
+
 import numpy as np
+import xgboost as xgb
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
@@ -113,6 +116,73 @@ class LogisticModel:
         return self.pipeline.predict_proba(rows[self.inputs])[:, 1]
 
 
+def _log_loss(label, probability, weight) -> float:
+    """The weighted log loss of probabilities for 0 or 1 labels (as scikit-learn's log_loss)."""
+    p = np.clip(np.asarray(probability, dtype="float64"), 1e-15, 1 - 1e-15)
+    y = np.asarray(label, dtype="float64")
+    return float(-np.average(y * np.log(p) + (1 - y) * np.log1p(-p), weights=weight))
+
+
+def _xgboost_step(params: dict, fit_rows, fit_label, fit_weight, check_rows, check_label, check_weight):
+    """One inner fold of the tree search: a callable that grows the fold's booster by one tree and
+    returns its log loss on the fold year. The booster's histogram bins come from the fold's fit
+    rows only. Both data sets sit in the booster's cache, so each prediction adds only the new tree."""
+    fit = xgb.DMatrix(fit_rows, label=fit_label, weight=fit_weight)
+    check = xgb.DMatrix(check_rows, label=check_label, weight=check_weight)
+    booster = xgb.Booster(params, [fit, check])
+    rounds = itertools.count()
+
+    def step() -> float:
+        booster.update(fit, next(rounds))
+        return _log_loss(check_label, booster.predict(check), check_weight)
+    return step
+
+
+class XGBoostModel:
+    """XGBoost on the inputs as they are: trees need no scaling, and a missing value takes the branch
+    learned for it. The number of trees comes from the inner folds (inner_folds.stop_early); the
+    final model then grows that many trees on every train day, with the 2020 and 2021 weights. No
+    class reweighting, as for logistic regression."""
+
+    def __init__(self, inputs: list[str], fold_years: tuple[int, ...], learning_rate: float, max_rounds: int,
+                 stopping_rounds: int, max_depth: int, min_child_weight: float, reg_lambda: float,
+                 subsample: float, colsample_bytree: float, seed: int):
+        self.inputs, self.fold_years = list(inputs), tuple(fold_years)
+        self.max_rounds, self.stopping_rounds, self.seed = max_rounds, stopping_rounds, seed
+        self.params = {"objective": "binary:logistic", "tree_method": "hist", "learning_rate": learning_rate,
+                       "max_depth": max_depth, "min_child_weight": min_child_weight, "reg_lambda": reg_lambda,
+                       "subsample": subsample, "colsample_bytree": colsample_bytree}
+        self.model: xgb.XGBClassifier | None = None
+        self.inner_curve: list[float] = []  # the mean fold log loss after each tree of the search
+        self.details: dict = {}
+
+    def fit(self, rows, label, weight) -> XGBoostModel:
+        label, weight = np.asarray(label), np.asarray(weight, dtype="float64")
+        inputs = rows[self.inputs]
+        folds = inner_folds.make_folds(rows["date"], label, self.fold_years)
+        steps = [_xgboost_step({**self.params, "seed": self.seed}, inputs.iloc[f.fit], label[f.fit], weight[f.fit],
+                               inputs.iloc[f.check], label[f.check], weight[f.check]) for f in folds]
+        trees, self.inner_curve, at_best = inner_folds.stop_early(steps, self.max_rounds, self.stopping_rounds)
+        self.model = xgb.XGBClassifier(n_estimators=trees, random_state=self.seed, **self.params)
+        self.model.fit(inputs, label, sample_weight=weight)
+        self.details = {
+            "chosen": {"trees": trees},
+            "chosen_by": f"lowest mean log loss over the inner folds, searched until {self.stopping_rounds} "
+                         "more trees brought no better mean",
+            "inner_folds": inner_folds.describe(folds, rows["date"], label),
+            "inner_log_loss": round(self.inner_curve[trees - 1], 6),
+            "inner_log_loss_by_fold": {str(f.year): round(loss, 6) for f, loss in zip(folds, at_best)},
+            "trees_grown_in_search": len(self.inner_curve),
+            "stopped_before_max_rounds": len(self.inner_curve) < self.max_rounds,
+        }
+        return self
+
+    def predict_proba(self, rows) -> np.ndarray:
+        if self.model is None:
+            raise ValueError("fit the model before predicting")
+        return self.model.predict_proba(rows[self.inputs])[:, 1]
+
+
 def _inputs(table, settings) -> list[str]:
     """The table's model inputs, after checking their missing shares across the splits."""
     inputs = training_data.input_columns(table)
@@ -130,7 +200,12 @@ def _logreg(table, settings) -> LogisticModel:
     return LogisticModel(inputs, settings.inner_fold_years, **model_params.load(settings.model_params)["logreg"])
 
 
-MODELS = {"seasonal": _seasonal, "logreg": _logreg}
+def _xgboost(table, settings) -> XGBoostModel:
+    inputs = _inputs(table, settings)
+    return XGBoostModel(inputs, settings.inner_fold_years, **model_params.load(settings.model_params)["xgboost"])
+
+
+MODELS = {"seasonal": _seasonal, "logreg": _logreg, "xgboost": _xgboost}
 
 
 def build(name: str, table, settings):

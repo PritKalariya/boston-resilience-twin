@@ -1,4 +1,4 @@
-"""Tests for the candidate models behind the training interface (#107): logistic regression."""
+"""Tests for the candidate models behind the training interface (#107): logistic regression and XGBoost."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+import xgboost as xgb
 from sklearn.metrics import log_loss, roc_auc_score
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -170,3 +171,88 @@ def test_a_candidate_is_not_built_on_inputs_missing_far_more_often_outside_train
     with pytest.raises(ValueError, match="worst wx_snowfall_mm: missing on 100.0% of validation rows"):
         models.build("logreg", holes, D.load_settings())
     models.build("seasonal", holes, D.load_settings())  # the baseline reads no input
+
+
+# --- XGBoost ---------------------------------------------------------------
+
+XGB = dict(learning_rate=0.1, max_rounds=300, stopping_rounds=20, max_depth=3, min_child_weight=1.0, reg_lambda=1.0,
+           subsample=0.8, colsample_bytree=0.8, seed=0)
+
+
+def _fit_xgboost(table, **changes):
+    rows = _train(table)
+    model = models.XGBoostModel(INPUTS, (2019, 2022, 2023), **{**XGB, **changes})
+    return model.fit(rows, rows["label"].to_numpy(), rows["weight"].to_numpy())
+
+
+@pytest.fixture(scope="module")
+def boosted(table):
+    return _fit_xgboost(table)
+
+
+def _validation(table):
+    return table[table["split"] == "validation"].reset_index(drop=True)
+
+
+def test_xgboost_reads_only_its_inputs(table, boosted):
+    validation = _validation(table)
+    changed = validation.assign(label=1 - validation["label"], weight=9.0, split="test", unit="Gamma", extra=1.0)
+    assert boosted.model.get_booster().feature_names == INPUTS
+    np.testing.assert_array_equal(boosted.predict_proba(validation), boosted.predict_proba(changed))
+
+
+def test_xgboost_learns_the_signal_and_takes_missing_values_as_they_are(table, boosted):
+    validation = _validation(table)
+    probability = boosted.predict_proba(validation)
+    assert probability.shape == (len(validation),) and ((probability > 0) & (probability < 1)).all()
+    assert roc_auc_score(validation["label"], probability) > 0.8
+    holes = validation.head(3).assign(wx_tmin_c=np.nan, snow_ice_rel7=np.nan)
+    assert np.isfinite(boosted.predict_proba(holes)).all()
+
+
+def test_xgboost_grows_the_tree_count_with_the_lowest_mean_fold_log_loss(table, boosted):
+    rows = _train(table)
+    grown, trees = boosted.details["trees_grown_in_search"], boosted.details["chosen"]["trees"]
+    curves = []
+    for fold in F.make_folds(rows["date"], rows["label"], (2019, 2022, 2023)):
+        fit, check = rows.iloc[fold.fit], rows.iloc[fold.check]
+        booster = xgb.train({**boosted.params, "seed": 0}, num_boost_round=grown,
+                            dtrain=xgb.DMatrix(fit[INPUTS], label=fit["label"], weight=fit["weight"]))
+        data = xgb.DMatrix(check[INPUTS])
+        curves.append([log_loss(check["label"], booster.predict(data, iteration_range=(0, k)).astype("float64"))
+                       for k in range(1, grown + 1)])
+    mean = np.mean(curves, axis=0)
+    np.testing.assert_allclose(boosted.inner_curve, mean, rtol=1e-6)
+    assert trees == int(np.argmin(mean)) + 1 and grown == min(trees + 20, 300)
+    assert boosted.details["inner_log_loss"] == pytest.approx(mean[trees - 1], abs=1e-6)
+    assert [fold["year"] for fold in boosted.details["inner_folds"]] == [2019, 2022, 2023]
+
+
+def test_xgboost_refits_on_every_train_day_with_the_chosen_trees(table, boosted):
+    rows, validation = _train(table), _validation(table)
+    trees = boosted.details["chosen"]["trees"]
+    assert boosted.model.get_booster().num_boosted_rounds() == trees
+    booster = xgb.train({**boosted.params, "seed": 0}, num_boost_round=trees,
+                        dtrain=xgb.DMatrix(rows[INPUTS], label=rows["label"], weight=rows["weight"]))
+    np.testing.assert_allclose(boosted.predict_proba(validation), booster.predict(xgb.DMatrix(validation[INPUTS])))
+    unweighted = xgb.XGBClassifier(n_estimators=trees, random_state=0, **boosted.params).fit(rows[INPUTS], rows["label"])
+    assert not np.allclose(unweighted.predict_proba(validation[INPUTS])[:, 1], boosted.predict_proba(validation))
+
+
+def test_xgboost_is_repeatable(table, boosted):
+    validation = _validation(table)
+    np.testing.assert_array_equal(boosted.predict_proba(validation), _fit_xgboost(table).predict_proba(validation))
+
+
+def test_a_tree_search_that_reaches_max_rounds_says_so(table):
+    details = _fit_xgboost(table, max_rounds=5).details
+    assert details["trees_grown_in_search"] == 5 and details["chosen"]["trees"] <= 5
+    assert details["stopped_before_max_rounds"] is False
+
+
+def test_xgboost_needs_fitting_before_predicting_and_builds_with_the_committed_parameters(table):
+    with pytest.raises(ValueError, match="fit the model before predicting"):
+        models.XGBoostModel(INPUTS, (2019,), **XGB).predict_proba(table)
+    model = models.build("xgboost", table, D.load_settings())
+    assert model.inputs == INPUTS and (model.max_rounds, model.stopping_rounds, model.seed) == (3000, 100, 0)
+    assert model.params["learning_rate"] == 0.05 and model.params["max_depth"] == 4
