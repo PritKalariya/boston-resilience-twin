@@ -17,7 +17,10 @@ module from every script in this folder.
    - comparison.csv and comparison.png: validation F1 against the gate, and beside it each model's
      training time, time to score one evening's rows and saved model size;
    - confusion_matrix.png: the winner's validation counts at its threshold (with no winner, the
-     best candidate's, marked as such).
+     best candidate's, marked as such);
+   - test_slices.csv, also in selection.json: the winner against the baseline on the test window,
+     overall and on storm, freeze and heat days, with the F1 gain's 95% bootstrap interval over
+     whole days (slices.py).
 
 Exits 0 with a winner, 1 when no candidate beats the baseline by the margin, and 2 on any error,
 as gates.py does.
@@ -34,9 +37,12 @@ from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
 
+import pandas as pd
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 
+import predictions
+import slices
 import tracking
 import train
 import training_data
@@ -253,6 +259,21 @@ def write_confusion(entry: Entry, selected: bool, path: Path) -> None:
     figure.savefig(path, dpi=150)
 
 
+def test_slices(subject: Entry, baseline: Entry, settings: training_data.Settings) -> list[dict]:
+    """subject against the baseline on the test window, overall and on each kind of day in slices.csv
+    (slices.py), from both runs' saved predictions and the features the rules read."""
+    rules = slices.load_rules(settings.slices)
+    inputs = sorted({rule.input for group in rules.values() for rule in group})
+    features = pd.read_parquet(settings.features, columns=[*slices.KEYS, *inputs])
+    features["date"] = pd.to_datetime(features["date"])
+
+    def test_rows(entry: Entry) -> pd.DataFrame:
+        frame = predictions.read_predictions(entry.run_dir / "predictions.parquet", entry.run["threshold"])
+        return frame[frame["split"] == "test"]
+    return slices.slice_table(test_rows(subject), test_rows(baseline), features, rules,
+                              settings.bootstrap_resamples, settings.bootstrap_seed)
+
+
 def run_selection(settings: training_data.Settings, selection_id: str | None = None,
                   reports_dir: str | Path | None = None, progress=print) -> tuple[dict, Path]:
     """Train, rank and decide (see the module docstring); returns selection.json's content and the reports folder."""
@@ -270,17 +291,28 @@ def run_selection(settings: training_data.Settings, selection_id: str | None = N
         ranked = rank([entries[name] for name in settings.candidates])
         bar, winner = decide(ranked, baseline, margin)
         content = report(selection_id, ranked, baseline, margin, bar, winner)
+        subject = winner or ranked[0]  # with no winner, the best candidate's test results, marked as such
+        content["test_slices"] = {"model": subject.model, "selected": winner is not None, "baseline": baseline.model,
+                                  "slices": test_slices(subject, baseline, settings)}
 
         out.mkdir(parents=True, exist_ok=True)
-        files = [out / name for name in ("selection.json", "comparison.csv", "comparison.png", "confusion_matrix.png")]
+        files = [out / name for name in ("selection.json", "comparison.csv", "comparison.png", "confusion_matrix.png",
+                                         "test_slices.csv")]
         files[0].write_text(json.dumps(content, indent=2) + "\n", encoding="utf-8")
         rows = comparison_rows(ranked, baseline, winner, bar)
         write_csv(rows, files[1])
         write_comparison(rows, bar, margin, files[2])
-        write_confusion(winner or ranked[0], winner is not None, files[3])
+        write_confusion(subject, winner is not None, files[3])
+        write_csv(slices.flat(content["test_slices"]["slices"]), files[4])
         metrics = {"gate_f1": float(bar), "baseline_validation_f1": float(baseline.f1)}
         if winner is not None:
             metrics["winner_validation_f1"] = float(winner.f1)
+        for record in content["test_slices"]["slices"]:
+            for name, value in (("f1", record["model"]["f1"]), ("baseline_f1", record["baseline"]["f1"]),
+                                ("f1_gain", record["f1_gain"]), *zip(("f1_gain_ci95_low", "f1_gain_ci95_high"),
+                                                                    record["f1_gain_ci95"] or ())):
+                if value is not None:
+                    metrics[f"test_{record['slice']}_{name}"] = value
         tracking.log_summary(params={"baseline": baseline_name, "candidates": list(settings.candidates),
                                      "f1_min_margin": str(margin)},
                              metrics=metrics, tags={"winner": content["winner"] or "none"}, files=files)
@@ -315,6 +347,16 @@ def main(argv: list[str] | None = None) -> int:
               f"{row['costs']['train_time_s']:>9.1f}{row['costs']['score_time_evening_ms']['median']:>10.1f}"
               f"{'n/a' if size is None else f'{size / 1024:,.0f}':>9}")
     print(content["decision"])
+    tested = content["test_slices"]
+    print(f"test window by kind of day: {tested['model']}{'' if tested['selected'] else ' (not selected)'} against "
+          f"{tested['baseline']}, the F1 gain with its 95% bootstrap interval over whole days")
+    print(f"{'slice':<8}{'days':>6}{'rows':>7}{'surges':>8}{'F1':>8}{'baseline':>10}{'gain':>8}  interval")
+    for record in tested["slices"]:
+        interval = record["f1_gain_ci95"]
+        gain = "n/a" if record["f1_gain"] is None else f"{record['f1_gain']:+.4f}"
+        print(f"{record['slice']:<8}{record['days']:>6}{record['rows']:>7}{record['surges']:>8}"
+              f"{cell(record['model']['f1'], 8)}{cell(record['baseline']['f1'], 10)}{gain:>8}  "
+              + ("n/a" if interval is None else f"[{interval[0]:+.4f}, {interval[1]:+.4f}]"))
     print(f"wrote {out}")
     return 0 if content["winner"] else 1
 

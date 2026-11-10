@@ -112,12 +112,19 @@ def test_the_charts_handle_a_baseline_without_a_model_and_a_row_without_cases(tm
 
 def _signal_repo(tmp_path):
     """A temp repo over every season from 2016 whose one extra input carries the surge signal, so the
-    candidates clearly beat the seasonal baseline."""
+    candidates clearly beat the seasonal baseline. The features also hold what the slice rules read:
+    winter alerts on surge days, winter frost, and heat only on July days without a surge."""
     labels = H.make_labels(first="2016-01-01")
     features = H.make_features(labels)
     surge = labels["surge"].fillna(False).astype(bool).to_numpy()
     rng = np.random.default_rng(1)
     features["signal"] = np.where(surge, rng.normal(2.0, 1.0, len(surge)), rng.normal(0.0, 1.0, len(surge)))
+    winter = features["date"].dt.month.isin([1, 2, 12]).to_numpy()
+    day_has_surge = labels.assign(s=surge).groupby("date")["s"].transform("max").to_numpy()
+    features = features.assign(alert_snow_ice_count=(winter & surge).astype(int), alert_tree_count=0,
+                               alert_flooding_count=0, wx_snowfall_mm=0.0, wx_precip_mm=0.0, wx_gust_max_ms=5.0,
+                               wx_tmin_c=np.where(winter, -3.0, 10.0),
+                               wx_tmax_c=np.where((features["date"].dt.month == 7).to_numpy() & ~day_has_surge, 35.0, 20.0))
     catalog = H.CATALOG + "signal,test,test,2019-01-01,pass,pass,yes,a strong signal\n"
     return H.write_repo(tmp_path, label_frame=labels, feature_frame=features, catalog=catalog)
 
@@ -136,12 +143,20 @@ def test_a_selection_trains_every_model_logs_them_and_writes_the_reports(tmp_pat
         assert row["costs"]["model_size_bytes"] > 0 and (tmp_path / "runs" / row["run_folder"]).is_dir()
     for name in ("comparison.png", "confusion_matrix.png"):
         assert (out / name).read_bytes()[:4] == b"\x89PNG"
+    tested = content["test_slices"]
+    assert (tested["model"], tested["selected"], tested["baseline"]) == (content["winner"], True, "seasonal")
+    records = {record["slice"]: record for record in tested["slices"]}
+    assert list(records) == ["all", "storm", "freeze", "heat"] and records["all"]["days"] == 546
+    heat = records["heat"]  # July days without a surge: recall is undefined, never 0
+    assert heat["days"] > 0 and heat["surges"] == 0 and heat["model"]["recall"] is None
+    assert heat["model"]["f1"] in (None, 0.0) and "test window by kind of day" in printed
     client = mlflow.MlflowClient(tracking.tracking_uri(D.load_settings(config)))
     experiment = client.get_experiment_by_name("model-training").experiment_id
     (parent,) = client.search_runs([experiment], filter_string="attributes.run_name = 'sel-e2e'")
     assert parent.data.tags["winner"] == content["winner"] and parent.data.params["f1_min_margin"] == "1/20"
+    assert parent.data.metrics["test_all_f1"] == pytest.approx(records["all"]["model"]["f1"])
     assert {a.path for a in client.list_artifacts(parent.info.run_id)} == {
-        "selection.json", "comparison.csv", "comparison.png", "confusion_matrix.png"}
+        "selection.json", "comparison.csv", "comparison.png", "confusion_matrix.png", "test_slices.csv"}
     children = client.search_runs([experiment], filter_string=f"tags.mlflow.parentRunId = '{parent.info.run_id}'")
     assert sorted(c.data.tags["model"] for c in children) == ["lightgbm", "logreg", "seasonal", "xgboost"]
 
@@ -149,6 +164,7 @@ def test_a_selection_trains_every_model_logs_them_and_writes_the_reports(tmp_pat
 def test_main_exits_1_without_a_winner_and_2_on_an_error(tmp_path, monkeypatch, capsys):
     baseline, best = entry("seasonal", 1, 4, 4), entry("best", 1, 3, 4)
     content = S.report("s", [best], baseline, MARGIN, *S.decide([best], baseline, MARGIN))
+    content["test_slices"] = {"model": "best", "selected": False, "baseline": "seasonal", "slices": []}
     monkeypatch.setattr(S, "run_selection", lambda settings, selection_id, reports_dir: (content, tmp_path))
     assert S.main(["--config", str(H.write_repo(tmp_path))]) == 1
     assert "no winner" in capsys.readouterr().out

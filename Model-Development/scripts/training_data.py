@@ -32,11 +32,11 @@ ROW_COLUMNS = (*KEYS, "split", "label", "weight")  # every table column that is 
 THRESHOLD_RULES = ("validation_f1_max",)
 SETTINGS_HEADER = ["setting", "value"]
 PATH_SETTINGS = ("labels", "features", "feature_catalog", "dvc_lock", "runs_dir", "model_params", "tuned_params",
-                 "mlflow_store", "reports_dir")
+                 "mlflow_store", "reports_dir", "slices")
 DATE_SETTINGS = tuple(f"{split}_{end}" for split in SPLITS for end in ("start", "end"))
 SETTING_NAMES = (*PATH_SETTINGS, *DATE_SETTINGS, "down_weight_years", "down_weight", "inner_fold_years",
                  "missing_gap_max_points", "threshold_rule", "seasonal_years", "seasonal_half_width_days",
-                 "seasonal_min_days", "mlflow_experiment", "candidates")
+                 "seasonal_min_days", "mlflow_experiment", "candidates", "bootstrap_resamples", "bootstrap_seed")
 
 
 class SettingsError(ValueError):
@@ -65,6 +65,9 @@ class Settings:
     mlflow_experiment: str  # tracking.py: the MLflow experiment every run is logged to
     reports_dir: Path  # selection.py: where the selection report and its charts go
     candidates: tuple[str, ...]  # selection.py: the models it trains and ranks against the baseline
+    slices: Path  # slices.py: the kinds of test day the selected model is also scored on
+    bootstrap_resamples: int  # slices.py: draws of whole days for the F1 gain's interval
+    bootstrap_seed: int
 
 
 def _read_pairs(path: Path) -> dict[str, str]:
@@ -193,11 +196,13 @@ def load_settings(path: str | Path = DEFAULT_CONFIG, root: str | Path = ROOT) ->
         raise SettingsError("candidates needs at least one model name")
     if len(set(candidates)) != len(candidates):
         raise SettingsError(f"candidates names a model twice: {pairs['candidates']!r}")
+    resamples = _whole("bootstrap_resamples", pairs["bootstrap_resamples"], 100)
+    seed = _whole("bootstrap_seed", pairs["bootstrap_seed"], 0)
 
     return Settings(splits=splits, down_weight_years=years, down_weight=weight, inner_fold_years=fold_years,
                     missing_gap_max_points=max_gap, threshold_rule=rule, seasonal_years=seasonal_years,
                     seasonal_half_width_days=half_width, seasonal_min_days=min_days, mlflow_experiment=experiment,
-                    candidates=candidates, **paths)
+                    candidates=candidates, bootstrap_resamples=resamples, bootstrap_seed=seed, **paths)
 
 
 def split_of(dates: pd.Series, splits: dict[str, tuple[pd.Timestamp, pd.Timestamp]]) -> pd.Series:

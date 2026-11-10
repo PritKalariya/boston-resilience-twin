@@ -718,6 +718,15 @@ python Model-Development/scripts/selection.py   # about 40 s; trains the baselin
   - `selection.json`: the decision, the rule and every model's numbers, run folder and MLflow ids.
   - `comparison.csv` and `comparison.png`: validation F1 against the gate, with each model's training time, scoring time for one evening's rows and saved model size beside it.
   - `confusion_matrix.png`: the winner's validation counts at its threshold.
+  - `test_slices.csv`, also in `selection.json`: the winner against the baseline on the test window, overall and on storm, freeze and heat days.
+- **Test results by kind of day** (`slices.py`, rules in `Model-Development/config/slices.csv`).
+  - The rules read the inputs known at the 18:00 cutoff, so a kind of day is what the model saw the evening before:
+    - storm: an alert in effect and known by then, 1 inch of forecast snow or rain, or a 46 mph gust;
+    - freeze: a forecast low at or below 32 F;
+    - heat: a forecast high of 90 F or more.
+  - The F1 gain over the baseline has a 95% bootstrap interval that resamples whole days (`bootstrap_resamples`, `bootstrap_seed`).
+  - A kind of day with no surge has no recall, and with no surge and no alarm no F1 either. Those are reported as `null`, never 0.
+  - On this data version the test window has 72 storm, 157 freeze and 9 heat days (3 heat-day surges), so the heat numbers carry little weight.
 - **Each model's run folder** is `Model-Development/runs/<selection id>-<model>/`, as `train.py` writes it.
 
 ### MLflow tracking (#107)
