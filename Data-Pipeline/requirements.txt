@@ -29,6 +29,9 @@ fairlearn==0.15.0
 geopandas==1.2.0
 great-expectations==1.24.1
 iniconfig==2.3.1
+# LightGBM (#107) loads the OpenMP runtime: libgomp1, which airflow.Dockerfile
+# installs. On macOS, run brew install libomp first.
+lightgbm==4.7.0
 pyogrio==0.13.0
 pyproj==3.8.0
 pytest==9.1.1

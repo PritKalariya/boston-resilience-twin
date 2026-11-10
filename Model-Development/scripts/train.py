@@ -1,6 +1,6 @@
 """Train one named model and write its run (#106, ADR-027).
 
-    python Model-Development/scripts/train.py --model seasonal|logreg|xgboost [--config Model-Development/config/training.csv]
+    python Model-Development/scripts/train.py --model seasonal|logreg|xgboost|lightgbm [--config Model-Development/config/training.csv]
 
 1. Loads the training table (training_data.load_table): the frozen labels and the model inputs of the
    data version Data-Pipeline/dvc.lock names, each labeled neighborhood-day in one split.

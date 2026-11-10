@@ -71,6 +71,10 @@ PARAMETERS = {
     "xgboost": {"learning_rate": _fraction, "max_rounds": _whole(1), "stopping_rounds": _whole(1),
                 "max_depth": _whole(1), "min_child_weight": _not_negative, "reg_lambda": _not_negative,
                 "subsample": _fraction, "colsample_bytree": _fraction, "seed": _whole(0)},
+    "lightgbm": {"learning_rate": _fraction, "max_rounds": _whole(1), "stopping_rounds": _whole(1),
+                 "num_leaves": _whole(2), "min_child_samples": _whole(1), "reg_lambda": _not_negative,
+                 "subsample": _fraction, "subsample_freq": _whole(0), "colsample_bytree": _fraction,
+                 "seed": _whole(0)},
 }
 
 

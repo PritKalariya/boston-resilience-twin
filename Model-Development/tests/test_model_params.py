@@ -15,18 +15,24 @@ import training_data as D  # noqa: E402
 LOGREG = "logreg:\n  C_grid: [0.01, 0.1, 1.0]\n  max_iter: 500\n  year_parts: 12\n"
 XGBOOST = ("xgboost:\n  learning_rate: 0.1\n  max_rounds: 300\n  stopping_rounds: 20\n  max_depth: 3\n"
            "  min_child_weight: 1.0\n  reg_lambda: 1.0\n  subsample: 0.8\n  colsample_bytree: 0.8\n  seed: 0\n")
-GOOD = LOGREG + XGBOOST
+LIGHTGBM = ("lightgbm:\n  learning_rate: 0.2\n  max_rounds: 200\n  stopping_rounds: 10\n  num_leaves: 7\n"
+            "  min_child_samples: 20\n  reg_lambda: 2.0\n  subsample: 0.7\n  subsample_freq: 1\n"
+            "  colsample_bytree: 0.6\n  seed: 1\n")
+GOOD = LOGREG + XGBOOST + LIGHTGBM
 
 
 def test_the_committed_parameters_load():
     params = M.load(D.load_settings().model_params)
-    assert set(params) == {"logreg", "xgboost"}
+    assert set(params) == {"logreg", "xgboost", "lightgbm"}
     logreg, xgboost = params["logreg"], params["xgboost"]
     assert logreg["C_grid"][0] == 0.001 and logreg["C_grid"][-1] == 100.0 and len(logreg["C_grid"]) == 11
     assert (logreg["max_iter"], logreg["year_parts"]) == (2000, 12)
     assert xgboost == {"learning_rate": 0.05, "max_rounds": 3000, "stopping_rounds": 100, "max_depth": 4,
                        "min_child_weight": 5.0, "reg_lambda": 5.0, "subsample": 0.8, "colsample_bytree": 0.8,
                        "seed": 0}
+    assert params["lightgbm"] == {"learning_rate": 0.05, "max_rounds": 3000, "stopping_rounds": 100,
+                                  "num_leaves": 15, "min_child_samples": 100, "reg_lambda": 5.0, "subsample": 0.8,
+                                  "subsample_freq": 1, "colsample_bytree": 0.8, "seed": 0}
 
 
 def test_a_good_file_loads_with_its_values(tmp_path):
@@ -35,16 +41,18 @@ def test_a_good_file_loads_with_its_values(tmp_path):
     params = M.load(path)
     assert params["logreg"] == {"C_grid": (0.01, 0.1, 1.0), "max_iter": 500, "year_parts": 12}
     assert params["xgboost"]["learning_rate"] == 0.1 and params["xgboost"]["seed"] == 0
+    assert params["lightgbm"]["num_leaves"] == 7 and params["lightgbm"]["subsample_freq"] == 1
 
 
 @pytest.mark.parametrize("text, message", [
     ("", "must map each model to its parameters"),
     ("logreg: [\n", "is not valid YAML"),
-    ("{}\n", r"has no parameters for \['logreg', 'xgboost'\]"),
+    ("{}\n", r"has no parameters for \['lightgbm', 'logreg', 'xgboost'\]"),
     (GOOD + "forest:\n  trees: 10\n", r"unknown model\(s\) in params.yaml: \['forest'\]"),
-    ("logreg: [0.1]\n" + XGBOOST, "logreg in params.yaml must map each parameter"),
-    (LOGREG + "  penalty: l1\n" + XGBOOST, r"unknown parameter\(s\) for logreg in params.yaml: \['penalty'\]"),
-    ("logreg:\n  C_grid: [0.1]\n  max_iter: 500\n" + XGBOOST, r"logreg in params.yaml is missing \['year_parts'\]"),
+    ("logreg: [0.1]\n" + XGBOOST + LIGHTGBM, "logreg in params.yaml must map each parameter"),
+    (LOGREG + "  penalty: l1\n" + XGBOOST + LIGHTGBM, r"unknown parameter\(s\) for logreg in params.yaml: \['penalty'\]"),
+    ("logreg:\n  C_grid: [0.1]\n  max_iter: 500\n" + XGBOOST + LIGHTGBM,
+     r"logreg in params.yaml is missing \['year_parts'\]"),
     (GOOD.replace("[0.01, 0.1, 1.0]", "[]"), "logreg.C_grid must be a list of one or more numbers"),
     (GOOD.replace("[0.01, 0.1, 1.0]", "0.1"), "logreg.C_grid must be a list of one or more numbers"),
     (GOOD.replace("[0.01, 0.1, 1.0]", "[0.0, 1.0]"), "logreg.C_grid must hold numbers above 0"),
@@ -62,7 +70,11 @@ def test_a_good_file_loads_with_its_values(tmp_path):
     (GOOD.replace("min_child_weight: 1.0", "min_child_weight: high"), "xgboost.min_child_weight must be a number"),
     (GOOD.replace("max_depth: 3", "max_depth: 0"), "xgboost.max_depth must be a whole number of 1 or more"),
     (GOOD.replace("seed: 0", "seed: -1"), "xgboost.seed must be a whole number of 0 or more"),
-    (XGBOOST + "  gamma: 1.0\n" + LOGREG, r"unknown parameter\(s\) for xgboost in params.yaml: \['gamma'\]"),
+    (XGBOOST + "  gamma: 1.0\n" + LOGREG + LIGHTGBM, r"unknown parameter\(s\) for xgboost in params.yaml: \['gamma'\]"),
+    (GOOD.replace("num_leaves: 7", "num_leaves: 1"), "lightgbm.num_leaves must be a whole number of 2 or more"),
+    (GOOD.replace("subsample_freq: 1", "subsample_freq: -1"), "lightgbm.subsample_freq must be a whole number of 0"),
+    (GOOD.replace("colsample_bytree: 0.6", "colsample_bytree: 0"), "lightgbm.colsample_bytree must be above 0"),
+    (GOOD.replace("min_child_samples: 20", "min_child_samples: 0"), "lightgbm.min_child_samples must be a whole"),
 ])
 def test_a_bad_file_is_refused_naming_the_problem(tmp_path, text, message):
     path = tmp_path / "params.yaml"

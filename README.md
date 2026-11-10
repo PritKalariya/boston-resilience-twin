@@ -114,7 +114,7 @@ The test command needs Docker only, no Python on the host. It builds the Airflow
 
 CI (`.github/workflows/ci.yml`) runs the same lint and test command for every pull request and every push to main. Tests may not reach the network: `Data-Pipeline/tests/conftest.py` fails any test that tries, so use fixture files or fakes.
 
-To run the tests on the host instead, use Python 3.12 (ADR-013): the pins come from the Airflow constraints for 3.12, and on other versions the install can fail or build packages from source. Without a system 3.12, `uv venv --python 3.12 --seed .venv && source .venv/bin/activate` creates one (`.venv/` is gitignored); then `pip install -r Data-Pipeline/requirements.txt` and `python -m pytest Data-Pipeline/tests`. The DAG tests skip there, since Airflow comes only with the image.
+To run the tests on the host instead, use Python 3.12 (ADR-013): the pins come from the Airflow constraints for 3.12, and on other versions the install can fail or build packages from source. Without a system 3.12, `uv venv --python 3.12 --seed .venv && source .venv/bin/activate` creates one (`.venv/` is gitignored); then `pip install -r Data-Pipeline/requirements.txt` and `python -m pytest Data-Pipeline/tests`. On macOS, LightGBM also needs the OpenMP runtime: `brew install libomp`. The DAG tests skip there, since Airflow comes only with the image.
 
 ### Versioned data (DVC)
 

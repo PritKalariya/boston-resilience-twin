@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import itertools
 
+import lightgbm as lgb
 import numpy as np
 import xgboost as xgb
 from sklearn.compose import ColumnTransformer
@@ -124,8 +125,8 @@ def _log_loss(label, probability, weight) -> float:
 
 
 def _xgboost_step(params: dict, fit_rows, fit_label, fit_weight, check_rows, check_label, check_weight):
-    """One inner fold of the tree search: a callable that grows the fold's booster by one tree and
-    returns its log loss on the fold year. The booster's histogram bins come from the fold's fit
+    """One inner fold of the XGBoost tree search: a callable that grows the fold's booster by one tree
+    and returns its log loss on the fold year. The booster's histogram bins come from the fold's fit
     rows only. Both data sets sit in the booster's cache, so each prediction adds only the new tree."""
     fit = xgb.DMatrix(fit_rows, label=fit_label, weight=fit_weight)
     check = xgb.DMatrix(check_rows, label=check_label, weight=check_weight)
@@ -138,33 +139,42 @@ def _xgboost_step(params: dict, fit_rows, fit_label, fit_weight, check_rows, che
     return step
 
 
-class XGBoostModel:
-    """XGBoost on the inputs as they are: trees need no scaling, and a missing value takes the branch
-    learned for it. The number of trees comes from the inner folds (inner_folds.stop_early); the
-    final model then grows that many trees on every train day, with the 2020 and 2021 weights. No
-    class reweighting, as for logistic regression."""
+def _lightgbm_step(params: dict, fit_rows, fit_label, fit_weight, check_rows, check_label, check_weight):
+    """One inner fold of the LightGBM tree search, as _xgboost_step. The fold year is binned with the
+    bins of the fit rows (reference), so the binning learns nothing from it. LightGBM scores the
+    fold year after each tree itself, at full precision."""
+    fit = lgb.Dataset(fit_rows, label=fit_label, weight=fit_weight)
+    check = lgb.Dataset(check_rows, label=check_label, weight=check_weight, reference=fit)
+    booster = lgb.Booster({**params, "metric": "binary_logloss"}, fit)
+    booster.add_valid(check, "check")
 
-    def __init__(self, inputs: list[str], fold_years: tuple[int, ...], learning_rate: float, max_rounds: int,
-                 stopping_rounds: int, max_depth: int, min_child_weight: float, reg_lambda: float,
-                 subsample: float, colsample_bytree: float, seed: int):
+    def step() -> float:
+        booster.update()
+        return booster.eval_valid()[0][2]
+    return step
+
+
+class _TreeSearchModel:
+    """What XGBoost and LightGBM share. The number of trees comes from the inner folds
+    (inner_folds.stop_early); the final model then grows that many trees on every train day, with the
+    2020 and 2021 weights. Trees need no scaling, and a missing value takes the branch learned for it.
+    No class reweighting, as for logistic regression. A subclass gives _fold_step and _final_model."""
+
+    def __init__(self, inputs: list[str], fold_years: tuple[int, ...], max_rounds: int, stopping_rounds: int):
         self.inputs, self.fold_years = list(inputs), tuple(fold_years)
-        self.max_rounds, self.stopping_rounds, self.seed = max_rounds, stopping_rounds, seed
-        self.params = {"objective": "binary:logistic", "tree_method": "hist", "learning_rate": learning_rate,
-                       "max_depth": max_depth, "min_child_weight": min_child_weight, "reg_lambda": reg_lambda,
-                       "subsample": subsample, "colsample_bytree": colsample_bytree}
-        self.model: xgb.XGBClassifier | None = None
+        self.max_rounds, self.stopping_rounds = max_rounds, stopping_rounds
+        self.model = None
         self.inner_curve: list[float] = []  # the mean fold log loss after each tree of the search
         self.details: dict = {}
 
-    def fit(self, rows, label, weight) -> XGBoostModel:
+    def fit(self, rows, label, weight):
         label, weight = np.asarray(label), np.asarray(weight, dtype="float64")
         inputs = rows[self.inputs]
         folds = inner_folds.make_folds(rows["date"], label, self.fold_years)
-        steps = [_xgboost_step({**self.params, "seed": self.seed}, inputs.iloc[f.fit], label[f.fit], weight[f.fit],
-                               inputs.iloc[f.check], label[f.check], weight[f.check]) for f in folds]
+        steps = [self._fold_step(inputs.iloc[f.fit], label[f.fit], weight[f.fit],
+                                 inputs.iloc[f.check], label[f.check], weight[f.check]) for f in folds]
         trees, self.inner_curve, at_best = inner_folds.stop_early(steps, self.max_rounds, self.stopping_rounds)
-        self.model = xgb.XGBClassifier(n_estimators=trees, random_state=self.seed, **self.params)
-        self.model.fit(inputs, label, sample_weight=weight)
+        self.model = self._final_model(trees).fit(inputs, label, sample_weight=weight)
         self.details = {
             "chosen": {"trees": trees},
             "chosen_by": f"lowest mean log loss over the inner folds, searched until {self.stopping_rounds} "
@@ -181,6 +191,46 @@ class XGBoostModel:
         if self.model is None:
             raise ValueError("fit the model before predicting")
         return self.model.predict_proba(rows[self.inputs])[:, 1]
+
+
+class XGBoostModel(_TreeSearchModel):
+    """XGBoost: trees grown level by level up to max_depth, on histogram bins (tree_method hist)."""
+
+    def __init__(self, inputs: list[str], fold_years: tuple[int, ...], learning_rate: float, max_rounds: int,
+                 stopping_rounds: int, max_depth: int, min_child_weight: float, reg_lambda: float,
+                 subsample: float, colsample_bytree: float, seed: int):
+        super().__init__(inputs, fold_years, max_rounds, stopping_rounds)
+        self.seed = seed
+        self.params = {"objective": "binary:logistic", "tree_method": "hist", "learning_rate": learning_rate,
+                       "max_depth": max_depth, "min_child_weight": min_child_weight, "reg_lambda": reg_lambda,
+                       "subsample": subsample, "colsample_bytree": colsample_bytree}
+
+    def _fold_step(self, *data):
+        return _xgboost_step({**self.params, "seed": self.seed}, *data)
+
+    def _final_model(self, trees: int) -> xgb.XGBClassifier:
+        return xgb.XGBClassifier(n_estimators=trees, random_state=self.seed, **self.params)
+
+
+class LightGBMModel(_TreeSearchModel):
+    """LightGBM: trees grown leaf by leaf, so num_leaves bounds a tree's size. deterministic and
+    force_row_wise make the same data and seed give the same model on every run."""
+
+    def __init__(self, inputs: list[str], fold_years: tuple[int, ...], learning_rate: float, max_rounds: int,
+                 stopping_rounds: int, num_leaves: int, min_child_samples: int, reg_lambda: float,
+                 subsample: float, subsample_freq: int, colsample_bytree: float, seed: int):
+        super().__init__(inputs, fold_years, max_rounds, stopping_rounds)
+        self.seed = seed
+        self.params = {"objective": "binary", "learning_rate": learning_rate, "num_leaves": num_leaves,
+                       "min_child_samples": min_child_samples, "reg_lambda": reg_lambda, "subsample": subsample,
+                       "subsample_freq": subsample_freq, "colsample_bytree": colsample_bytree, "random_state": seed,
+                       "deterministic": True, "force_row_wise": True, "verbose": -1}
+
+    def _fold_step(self, *data):
+        return _lightgbm_step(self.params, *data)
+
+    def _final_model(self, trees: int) -> lgb.LGBMClassifier:
+        return lgb.LGBMClassifier(n_estimators=trees, **self.params)
 
 
 def _inputs(table, settings) -> list[str]:
@@ -205,7 +255,12 @@ def _xgboost(table, settings) -> XGBoostModel:
     return XGBoostModel(inputs, settings.inner_fold_years, **model_params.load(settings.model_params)["xgboost"])
 
 
-MODELS = {"seasonal": _seasonal, "logreg": _logreg, "xgboost": _xgboost}
+def _lightgbm(table, settings) -> LightGBMModel:
+    inputs = _inputs(table, settings)
+    return LightGBMModel(inputs, settings.inner_fold_years, **model_params.load(settings.model_params)["lightgbm"])
+
+
+MODELS = {"seasonal": _seasonal, "logreg": _logreg, "xgboost": _xgboost, "lightgbm": _lightgbm}
 
 
 def build(name: str, table, settings):

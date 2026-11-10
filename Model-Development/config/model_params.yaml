@@ -33,3 +33,20 @@ xgboost:
   subsample: 0.8
   colsample_bytree: 0.8
   seed: 0
+
+lightgbm:
+  # The same tree search as XGBoost's, with the same learning rate and stopping rule.
+  learning_rate: 0.05
+  max_rounds: 3000
+  stopping_rounds: 100
+  # LightGBM grows trees leaf by leaf, so num_leaves, not depth, bounds a tree. Against
+  # over-fitting, as LightGBM's "Parameters Tuning" page advises: fewer leaves than the default
+  # (15, not 31), at least 100 rows per leaf (default 20), L2 regularization, and bagging of rows
+  # (subsample, redrawn every subsample_freq trees; 0 would turn it off) and of inputs.
+  num_leaves: 15
+  min_child_samples: 100
+  reg_lambda: 5.0
+  subsample: 0.8
+  subsample_freq: 1
+  colsample_bytree: 0.8
+  seed: 0

@@ -65,8 +65,9 @@ def test_evaluate_catches_metrics_that_disagree_with_the_predictions(run_dir, ca
 def test_an_unknown_model_is_refused_with_the_known_ones(tmp_path, capsys):
     config = H.write_repo(tmp_path)
     assert train.main(["--model", "random_forest", "--config", str(config)]) == 2
-    assert "unknown model 'random_forest'; known models: ['logreg', 'seasonal', 'xgboost']" in capsys.readouterr().err
-    assert sorted(models.MODELS) == ["logreg", "seasonal", "xgboost"]
+    known = "['lightgbm', 'logreg', 'seasonal', 'xgboost']"
+    assert f"unknown model 'random_forest'; known models: {known}" in capsys.readouterr().err
+    assert sorted(models.MODELS) == ["lightgbm", "logreg", "seasonal", "xgboost"]
 
 
 def test_a_logreg_run_records_what_it_chose_on_the_inner_folds(tmp_path, capsys):
@@ -105,11 +106,12 @@ def test_a_bad_config_is_refused_before_anything_runs(tmp_path, capsys):
     assert not (tmp_path / "runs").exists()
 
 
-def test_an_xgboost_run_records_the_trees_it_chose_on_the_inner_folds(tmp_path, capsys):
+@pytest.mark.parametrize("model", ["xgboost", "lightgbm"])
+def test_a_tree_model_run_records_the_trees_it_chose_on_the_inner_folds(tmp_path, capsys, model):
     config = H.write_repo(tmp_path, label_frame=H.make_labels(first="2016-01-01"))
-    assert train.main(["--model", "xgboost", "--config", str(config), "--run-id", "xgb"]) == 0
+    assert train.main(["--model", model, "--config", str(config), "--run-id", "trees"]) == 0
     out = capsys.readouterr().out
-    run_dir = tmp_path / "runs" / "xgb"
+    run_dir = tmp_path / "runs" / "trees"
     details = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))["model_details"]
     trees = details["chosen"]["trees"]
     assert 1 <= trees and details["trees_grown_in_search"] == trees + 100 and details["stopped_before_max_rounds"]
@@ -117,10 +119,11 @@ def test_an_xgboost_run_records_the_trees_it_chose_on_the_inner_folds(tmp_path, 
     assert evaluate.main(["--run", str(run_dir)]) == 0
 
 
-def test_a_tree_search_that_reaches_max_rounds_is_flagged_in_the_output(tmp_path, capsys):
+@pytest.mark.parametrize("model", ["xgboost", "lightgbm"])
+def test_a_tree_search_that_reaches_max_rounds_is_flagged_in_the_output(tmp_path, capsys, model):
     params = (H.training_data.ROOT / "Model-Development" / "config" / "model_params.yaml").read_text(encoding="utf-8")
     capped = tmp_path / "model_params.yaml"
     capped.write_text(params.replace("max_rounds: 3000", "max_rounds: 3"), encoding="utf-8")
     config = H.write_repo(tmp_path, label_frame=H.make_labels(first="2016-01-01"), model_params=str(capped))
-    assert train.main(["--model", "xgboost", "--config", str(config), "--run-id", "xgb"]) == 0
+    assert train.main(["--model", model, "--config", str(config), "--run-id", "trees"]) == 0
     assert "the tree search reached max_rounds without stopping" in capsys.readouterr().out
