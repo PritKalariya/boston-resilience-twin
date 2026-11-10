@@ -3,6 +3,7 @@ labels,Data-Pipeline/data/processed/labels.parquet,path from the repo root,the f
 features,Data-Pipeline/data/processed/features.parquet,path from the repo root,the model inputs from feature_table.py; the version Data-Pipeline/dvc.lock names
 feature_catalog,Data-Pipeline/config/feature_catalog.csv,path from the repo root,a column is a model input when its use_in_model is yes
 dvc_lock,Data-Pipeline/dvc.lock,path from the repo root,its sha256 with line endings as LF is the run's data version
+model_params,Model-Development/config/model_params.yaml,path from the repo root,the candidates' starting parameters (model_params.py; #107); M6 tunes them
 train_start,2015-01-01,YYYY-MM-DD,ADR-003 train years 2015 to 2023; the first labeled day is 2016-01-06 (ADR-005 needs 20 history days)
 train_end,2023-12-31,YYYY-MM-DD,ADR-003
 validation_start,2024-01-01,YYYY-MM-DD,ADR-003 validation year; the shared threshold and the gates use it (ADR-026)
@@ -12,6 +13,7 @@ test_end,2026-06-30,YYYY-MM-DD,ADR-003 says mid-2026; ADR-027 fixes it to June 3
 down_weight_years,2020;2021,whole years separated by ;,train years flagged and down-weighted (ADR-003 and the spec); empty for none
 down_weight,0.5,number above 0 and at most 1,sample weight of a train row in a down-weighted year; every other row weighs 1; a starting value M6 may tune
 inner_fold_years,2019;2022;2023,increasing train years separated by ; with none down-weighted and the first after train_start,the inner time folds (inner_folds.py; #107): fold Y fits on every train day before Y and is checked on Y; a candidate picks its own settings such as its number of trees on them so validation 2024 only picks the threshold and the winner
+missing_gap_max_points,10,number from 0 to 100,a candidate run stops when an input's missing share in validation or test is more than this many percentage points from train (#107); the largest gap on this data version is 5.5 (weather on 2024-01-01 to 2024-01-20 when no GFS forecast is stored)
 threshold_rule,validation_f1_max,validation_f1_max,the shared threshold rule (ADR-026 threshold_rule = shared): the threshold with the highest F1 on validation and the higher one on a tie; reused unchanged on test
 seasonal_years,3,whole number of 1 or more,the seasonal baseline window: the same days in this many previous years (ADR-005)
 seasonal_half_width_days,14,whole number of 0 or more,the seasonal baseline window: D plus or minus this many days in each previous year (ADR-005)

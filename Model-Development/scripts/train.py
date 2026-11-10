@@ -1,10 +1,11 @@
 """Train one named model and write its run (#106, ADR-027).
 
-    python Model-Development/scripts/train.py --model seasonal [--config Model-Development/config/training.csv]
+    python Model-Development/scripts/train.py --model seasonal|logreg [--config Model-Development/config/training.csv]
 
 1. Loads the training table (training_data.load_table): the frozen labels and the model inputs of the
    data version Data-Pipeline/dvc.lock names, each labeled neighborhood-day in one split.
-2. Fits the model on the train split and predicts the validation and test splits.
+2. Fits the model on the train split and predicts the validation and test splits. A candidate (#107)
+   first picks its own settings on the inner folds of the train years (inner_folds.py).
 3. Picks the threshold on validation with the shared rule (threshold.py) and applies the same
    threshold to test, which never picks it.
 4. Writes Model-Development/runs/<run id>/ (runs_dir in the config; gitignored):
@@ -12,7 +13,8 @@
    - metrics.json: F1, precision, recall, AUC and the counts they come from, per split;
    - validation_counts.json: tp, fp and fn on validation with the data version, the block the
      promotion gates read for a candidate or for the baseline (ADR-026);
-   - run.json: the model, threshold, data version, git commit, model inputs, settings and row counts.
+   - run.json: the model, threshold, data version, git commit, model inputs, settings, row counts and
+     the model's details (what a candidate chose on the inner folds and how each choice scored).
 
 Every setting comes from the config file; nothing needs a code edit. Exits 0 when the run is written
 and 2, with the reason, on any error.
@@ -108,9 +110,8 @@ def train(model_name: str, settings: training_data.Settings, run_id: str | None 
     _write_json(run_dir / "run.json", {
         "run_id": run_id, "model": model_name, "created_utc": created.isoformat(timespec="seconds"),
         "threshold_rule": settings.threshold_rule, "threshold": cut, "data_version": version,
-        "git": git_state(training_data.ROOT), "rows": counts,
-        "inputs": [c for c in table.columns if c not in (*training_data.KEYS, "split", "label", "weight")],
-        "settings": _settings_record(settings)})
+        "git": git_state(training_data.ROOT), "rows": counts, "inputs": training_data.input_columns(table),
+        "settings": _settings_record(settings), "model_details": getattr(model, "details", {})})
     return run_dir
 
 
@@ -135,6 +136,11 @@ def main(argv: list[str] | None = None) -> int:
     run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     scores = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
     print(f"run {run['run_id']}: model {run['model']}, data {run['data_version'][:19]}, commit {run['git']['commit']}")
+    details = run["model_details"]
+    if details.get("chosen"):
+        years = ", ".join(str(fold["year"]) for fold in details["inner_folds"])
+        chosen = ", ".join(f"{name} {value:g}" for name, value in details["chosen"].items())
+        print(f"chosen on the inner folds {years}: {chosen} ({details['chosen_by']})")
     print(f"threshold {run['threshold']:.6f} ({run['threshold_rule']})")
     print(f"{'split':<11}{'rows':>7}{'surges':>8}{'tp':>6}{'fp':>7}{'fn':>6}{'f1':>9}{'precision':>11}{'recall':>9}{'auc':>9}")
     for split in PREDICTED_SPLITS:

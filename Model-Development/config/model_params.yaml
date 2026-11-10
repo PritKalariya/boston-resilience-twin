@@ -1,0 +1,16 @@
+# Starting parameters of the candidate models (#107), read and checked by
+# Model-Development/scripts/model_params.py. M6 (#109) writes tuned_params.yaml in the same
+# format; a value there will replace the one here.
+# Write decimals with a point (0.001, not 1e-3): YAML reads 1e-3 as text, and the check refuses it.
+
+logreg:
+  # The C values tried on the inner folds (inner_fold_years in training.csv). C is the inverse of
+  # the regularization strength: a smaller C keeps the coefficients smaller. The C with the lowest
+  # mean log loss over the folds is refit on every train day. Half-decade steps from 0.001 to 100;
+  # a list of one value fixes C.
+  C_grid: [0.001, 0.00316, 0.01, 0.0316, 0.1, 0.316, 1.0, 3.16, 10.0, 31.6, 100.0]
+  # lbfgs iterations at most; run.json reports a fit that stopped here as not converged.
+  max_iter: 2000
+  # day_of_year enters as a smooth curve over the year in this many equal parts (periodic splines,
+  # so 31 December joins 1 January); 12 gives about a month each.
+  year_parts: 12

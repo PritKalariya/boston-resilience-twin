@@ -24,7 +24,8 @@ def test_the_committed_settings_load_with_the_adr_003_splits():
         "test": ("2025-01-01", "2026-06-30"),
     }
     assert settings.down_weight_years == (2020, 2021) and settings.down_weight == 0.5
-    assert settings.inner_fold_years == (2019, 2022, 2023)
+    assert settings.inner_fold_years == (2019, 2022, 2023) and settings.missing_gap_max_points == 10
+    assert settings.model_params == D.ROOT / "Model-Development" / "config" / "model_params.yaml"
     assert settings.threshold_rule == "validation_f1_max"
     assert (settings.seasonal_years, settings.seasonal_half_width_days, settings.seasonal_min_days) == (3, 14, 20)
     assert settings.labels == D.ROOT / "Data-Pipeline" / "data" / "processed" / "labels.parquet"
@@ -47,6 +48,10 @@ def test_the_committed_settings_load_with_the_adr_003_splits():
     ({"inner_fold_years": "2019;2020"}, "inner_fold_years: 2020 is down-weighted"),
     ({"inner_fold_years": "2023;2019"}, "inner_fold_years must increase with no year twice"),
     ({"inner_fold_years": "2019;2019"}, "inner_fold_years must increase with no year twice"),
+    ({"missing_gap_max_points": "-1"}, "missing_gap_max_points must be a number from 0 to 100"),
+    ({"missing_gap_max_points": "101"}, "missing_gap_max_points must be a number from 0 to 100"),
+    ({"missing_gap_max_points": "ten"}, "missing_gap_max_points must be a number from 0 to 100"),
+    ({"model_params": ""}, "model_params needs a path"),
     ({"threshold_rule": "fixed_half"}, "threshold_rule must be one of"),
     ({"seasonal_years": "0"}, "seasonal_years must be a whole number of 1 or more"),
     ({"seasonal_min_days": "88"}, "more than the window's 87 days"),
@@ -129,6 +134,33 @@ def test_the_table_keeps_labeled_days_in_a_split_and_down_weights_2020_and_2021(
     assert (table.loc[down, "weight"] == 0.5).all() and (table.loc[~down, "weight"] == 1.0).all()
     assert counts["down-weighted train rows"] == int(down.sum()) > 0
     assert counts["validation surges"] == int(table.loc[table["split"] == "validation", "label"].sum()) > 0
+
+
+def test_the_inputs_are_every_column_but_the_row_columns(tmp_path):
+    table, _ = D.load_table(D.load_settings(H.write_repo(tmp_path)))
+    assert D.input_columns(table) == ["day_of_week"]
+    assert D.input_columns(table.assign(extra=1.0)) == ["day_of_week", "extra"]
+
+
+def test_an_input_missing_far_more_often_outside_train_is_refused(tmp_path):
+    table, _ = D.load_table(D.load_settings(H.write_repo(tmp_path)))
+    validation = table.index[table["split"] == "validation"]
+    table.loc[validation[: len(validation) // 2], "day_of_week"] = float("nan")
+    with pytest.raises(ValueError, match="1 input\\(s\\) differ in missing share between train and validation by "
+                                         "more than missing_gap_max_points \\(10\\), worst day_of_week: missing on "
+                                         "50.0% of validation rows against 0.0% of train rows"):
+        D.check_missing_gaps(table, ["day_of_week"], 10)
+    D.check_missing_gaps(table, ["day_of_week"], 50)  # a gap at the limit passes
+
+
+def test_a_test_split_gap_is_refused_too_and_small_gaps_pass(tmp_path):
+    table, _ = D.load_table(D.load_settings(H.write_repo(tmp_path)))
+    test = table.index[table["split"] == "test"]
+    table.loc[test[: len(test) // 20], "day_of_week"] = float("nan")  # 5 percent of test
+    D.check_missing_gaps(table, ["day_of_week"], 10)
+    table.loc[test[: len(test) // 4], "day_of_week"] = float("nan")  # 25 percent of test
+    with pytest.raises(ValueError, match="between train and test"):
+        D.check_missing_gaps(table, ["day_of_week"], 10)
 
 
 def test_only_the_catalog_model_inputs_are_kept():

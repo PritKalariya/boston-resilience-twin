@@ -7,7 +7,8 @@ train, validation or test. Days in none of them, the live days after the test wi
 and counted; so are unlabeled days (ADR-005: no label without 20 history days). Train rows in the
 down-weighted years (2020 and 2021, ADR-003) get a smaller sample weight; every other row weighs 1.
 
-Every setting comes from Model-Development/config/training.csv (load_settings), never from code.
+Every setting comes from Model-Development/config/training.csv (load_settings), never from code;
+the candidates' parameters come from the model_params.yaml it names (model_params.py, #107).
 """
 
 from __future__ import annotations
@@ -26,12 +27,14 @@ DEFAULT_CONFIG = ROOT / "Model-Development" / "config" / "training.csv"
 
 SPLITS = ("train", "validation", "test")
 KEYS = ["unit", "date"]
+ROW_COLUMNS = (*KEYS, "split", "label", "weight")  # every table column that is not a model input
 THRESHOLD_RULES = ("validation_f1_max",)
 SETTINGS_HEADER = ["setting", "value"]
-PATH_SETTINGS = ("labels", "features", "feature_catalog", "dvc_lock", "runs_dir")
+PATH_SETTINGS = ("labels", "features", "feature_catalog", "dvc_lock", "runs_dir", "model_params")
 DATE_SETTINGS = tuple(f"{split}_{end}" for split in SPLITS for end in ("start", "end"))
 SETTING_NAMES = (*PATH_SETTINGS, *DATE_SETTINGS, "down_weight_years", "down_weight", "inner_fold_years",
-                 "threshold_rule", "seasonal_years", "seasonal_half_width_days", "seasonal_min_days")
+                 "missing_gap_max_points", "threshold_rule", "seasonal_years", "seasonal_half_width_days",
+                 "seasonal_min_days")
 
 
 class SettingsError(ValueError):
@@ -45,10 +48,12 @@ class Settings:
     feature_catalog: Path
     dvc_lock: Path
     runs_dir: Path
+    model_params: Path  # the candidates' parameters (model_params.py)
     splits: dict[str, tuple[pd.Timestamp, pd.Timestamp]]  # split -> (first day, last day), both inclusive
     down_weight_years: tuple[int, ...]
     down_weight: float
     inner_fold_years: tuple[int, ...]  # inner_folds.py: the train years a candidate picks its own settings on
+    missing_gap_max_points: float  # check_missing_gaps: the largest train to validation or test gap allowed
     threshold_rule: str
     seasonal_years: int
     seasonal_half_width_days: int
@@ -155,6 +160,13 @@ def load_settings(path: str | Path = DEFAULT_CONFIG, root: str | Path = ROOT) ->
     if down:
         raise SettingsError(f"inner_fold_years: {down[0]} is down-weighted; "
                             "such a year is only fit on, never checked on")
+    try:
+        max_gap = float(pairs["missing_gap_max_points"])
+    except ValueError:
+        max_gap = -1.0
+    if not 0 <= max_gap <= 100:
+        raise SettingsError(f"missing_gap_max_points must be a number from 0 to 100, "
+                            f"got {pairs['missing_gap_max_points']!r}")
 
     rule = pairs["threshold_rule"]
     if rule not in THRESHOLD_RULES:
@@ -167,8 +179,8 @@ def load_settings(path: str | Path = DEFAULT_CONFIG, root: str | Path = ROOT) ->
                             f"{seasonal_years * (2 * half_width + 1)} days")
 
     return Settings(splits=splits, down_weight_years=years, down_weight=weight, inner_fold_years=fold_years,
-                    threshold_rule=rule, seasonal_years=seasonal_years, seasonal_half_width_days=half_width,
-                    seasonal_min_days=min_days, **paths)
+                    missing_gap_max_points=max_gap, threshold_rule=rule, seasonal_years=seasonal_years,
+                    seasonal_half_width_days=half_width, seasonal_min_days=min_days, **paths)
 
 
 def split_of(dates: pd.Series, splits: dict[str, tuple[pd.Timestamp, pd.Timestamp]]) -> pd.Series:
@@ -274,10 +286,36 @@ def load_table(settings: Settings) -> tuple[pd.DataFrame, dict]:
     down = (table["split"] == "train") & table["date"].dt.year.isin(settings.down_weight_years)
     weight[down] = settings.down_weight
     table["weight"] = weight
-    table = table[[*KEYS, "split", "label", "weight", *inputs]].sort_values(["date", "unit"], ignore_index=True)
+    table = table[[*ROW_COLUMNS, *inputs]].sort_values(["date", "unit"], ignore_index=True)
     check_splits(table, settings.splits)
     for split in SPLITS:
         counts[f"{split} rows"] = int((table["split"] == split).sum())
         counts[f"{split} surges"] = int(table.loc[table["split"] == split, "label"].sum())
     counts["down-weighted train rows"] = int(down.sum())
     return table, counts
+
+
+def input_columns(table: pd.DataFrame) -> list[str]:
+    """The model inputs of a load_table table: every column but the row columns, in table order."""
+    return [column for column in table.columns if column not in ROW_COLUMNS]
+
+
+def check_missing_gaps(table: pd.DataFrame, inputs: list[str], max_points: float) -> None:
+    """Fails when an input's missing share in validation or test is more than max_points percentage
+    points (missing_gap_max_points) from its share in train. A model fills a missing value from what
+    it learned on train, so a gap like the 2024 GFS snowfall one (341 of 366 days, fixed in #107)
+    would quietly score validation on made-up values."""
+    share = table[inputs].isna().groupby(table["split"]).mean() * 100
+    if "train" not in share.index:
+        return
+    for split in SPLITS[1:]:
+        if split not in share.index:
+            continue
+        gap = (share.loc[split] - share.loc["train"]).abs()
+        over = gap[gap > max_points].sort_values(ascending=False)
+        if len(over):
+            worst = over.index[0]
+            raise ValueError(f"{len(over)} input(s) differ in missing share between train and {split} by more "
+                             f"than missing_gap_max_points ({max_points:g}), worst {worst}: missing on "
+                             f"{share.loc[split, worst]:.1f}% of {split} rows against "
+                             f"{share.loc['train', worst]:.1f}% of train rows")

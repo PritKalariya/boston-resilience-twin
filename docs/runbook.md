@@ -674,13 +674,21 @@ Every model trains and is scored through `Model-Development/scripts/train.py`, o
 
 ```bash
 python Model-Development/scripts/train.py --model seasonal                          # about 2 s; prints the metrics
+python Model-Development/scripts/train.py --model logreg                            # about 12 s; also prints the C it chose
 python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run id>   # recompute and check
 python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run id> --gates-block
 ```
 
-- **Writes** `Model-Development/runs/<UTC time>-<model>/` (gitignored): `predictions.parquet` (the contract in `predictions.py`), `metrics.json` (per split), `validation_counts.json` (validation tp, fp and fn with the data version, for the gates) and `run.json` (threshold, data version, git commit, inputs, settings, row counts).
+- **Writes** `Model-Development/runs/<UTC time>-<model>/` (gitignored): `predictions.parquet` (the contract in `predictions.py`), `metrics.json` (per split), `validation_counts.json` (validation tp, fp and fn with the data version, for the gates) and `run.json` (threshold, data version, git commit, inputs, settings, row counts, and in `model_details` what a candidate chose on the inner folds).
 - **The threshold** is picked on validation with the shared rule (highest F1, the higher one on a tie) and reused on test.
-- **Settings** live in `training.csv`, never in code. That covers the split dates, the 2020 and 2021 weight, the threshold rule and the seasonal window.
+- **Inner folds (#107).** A candidate picks its own settings on the train years only, never on 2024.
+  - Each fold year in `inner_fold_years` (2019, 2022, 2023) is checked by a fit on every train day before it. The 2020 and 2021 rows are fit on, never checked on.
+  - Logistic regression takes the C with the lowest mean log loss over the folds, then refits on every train day.
+  - 2024 then picks only the threshold and the winner.
+- **A candidate run stops** when an input's missing share in validation or test is more than `missing_gap_max_points` (10) percentage points from train. The message names the input; check that input's source in the feature table before anything else. The seasonal baseline reads no input and still runs.
+- **Settings** live in config files, never in code.
+  - `training.csv` covers the split dates, the 2020 and 2021 weight, the inner fold years, the missing-share limit, the threshold rule and the seasonal window.
+  - `model_params.yaml` holds the candidates' starting parameters (#107). It is checked on load: write decimals with a point (`0.001`, not `1e-3`, which YAML reads as text).
 - **On Windows** with `core.autocrlf`, run DVC itself (`dvc status`, `dvc repro`) from a checkout with LF line endings or in the Airflow image: `dvc.lock` hashes the scripts and configs with LF endings, so a CRLF checkout shows every stage as changed. `train.py` and `evaluate.py` are not affected, and the data version they record ignores line endings.
 
 ## Versioned data (DVC)

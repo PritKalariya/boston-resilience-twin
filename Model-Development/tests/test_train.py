@@ -34,6 +34,7 @@ def test_a_run_writes_the_contract_files(run_dir, tmp_path):
     assert run["inputs"] == ["day_of_week"] and run["threshold_rule"] == "validation_f1_max"
     assert set(run["git"]) == {"commit", "uncommitted_changes"}
     assert run["settings"]["splits"]["test"] == ["2025-01-01", "2026-06-30"]
+    assert run["model_details"] == {}  # the baseline chooses nothing
 
 
 def test_validation_counts_are_the_gates_block_at_the_shared_threshold(run_dir):
@@ -63,9 +64,24 @@ def test_evaluate_catches_metrics_that_disagree_with_the_predictions(run_dir, ca
 
 def test_an_unknown_model_is_refused_with_the_known_ones(tmp_path, capsys):
     config = H.write_repo(tmp_path)
-    assert train.main(["--model", "lightgbm", "--config", str(config)]) == 2
-    assert "unknown model 'lightgbm'; known models: ['seasonal']" in capsys.readouterr().err
-    assert sorted(models.MODELS) == ["seasonal"]
+    assert train.main(["--model", "random_forest", "--config", str(config)]) == 2
+    assert "unknown model 'random_forest'; known models: ['logreg', 'seasonal']" in capsys.readouterr().err
+    assert sorted(models.MODELS) == ["logreg", "seasonal"]
+
+
+def test_a_logreg_run_records_what_it_chose_on_the_inner_folds(tmp_path, capsys):
+    config = H.write_repo(tmp_path, label_frame=H.make_labels(first="2016-01-01"))
+    assert train.main(["--model", "logreg", "--config", str(config), "--run-id", "lr"]) == 0
+    out = capsys.readouterr().out
+    run_dir = tmp_path / "runs" / "lr"
+    run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    details = run["model_details"]
+    grid = [c for c, _ in details["inner_log_loss_by_C"]]
+    assert len(grid) == 11 and details["chosen"]["C"] in grid and details["converged"] is True
+    assert [fold["year"] for fold in details["inner_folds"]] == [2019, 2022, 2023]
+    assert f"chosen on the inner folds 2019, 2022, 2023: C {details['chosen']['C']:g}" in out
+    assert set(P.read_predictions(run_dir / "predictions.parquet", threshold=run["threshold"])["model"]) == {"logreg"}
+    assert evaluate.main(["--run", str(run_dir)]) == 0
 
 
 def test_a_run_folder_is_never_overwritten(run_dir, tmp_path, capsys):
