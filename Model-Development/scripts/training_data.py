@@ -8,7 +8,8 @@ and counted; so are unlabeled days (ADR-005: no label without 20 history days). 
 down-weighted years (2020 and 2021, ADR-003) get a smaller sample weight; every other row weighs 1.
 
 Every setting comes from Model-Development/config/training.csv (load_settings), never from code;
-the candidates' parameters come from the model_params.yaml it names (model_params.py, #107).
+the candidates' parameters come from the model_params.yaml it names, with M6's tuned_params.yaml
+over them when that file exists (model_params.py, #107).
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ KEYS = ["unit", "date"]
 ROW_COLUMNS = (*KEYS, "split", "label", "weight")  # every table column that is not a model input
 THRESHOLD_RULES = ("validation_f1_max",)
 SETTINGS_HEADER = ["setting", "value"]
-PATH_SETTINGS = ("labels", "features", "feature_catalog", "dvc_lock", "runs_dir", "model_params")
+PATH_SETTINGS = ("labels", "features", "feature_catalog", "dvc_lock", "runs_dir", "model_params", "tuned_params")
 DATE_SETTINGS = tuple(f"{split}_{end}" for split in SPLITS for end in ("start", "end"))
 SETTING_NAMES = (*PATH_SETTINGS, *DATE_SETTINGS, "down_weight_years", "down_weight", "inner_fold_years",
                  "missing_gap_max_points", "threshold_rule", "seasonal_years", "seasonal_half_width_days",
@@ -48,7 +49,8 @@ class Settings:
     feature_catalog: Path
     dvc_lock: Path
     runs_dir: Path
-    model_params: Path  # the candidates' parameters (model_params.py)
+    model_params: Path  # the candidates' starting parameters (model_params.py)
+    tuned_params: Path  # M6's tuned values over them, used only when the file exists (model_params.py)
     splits: dict[str, tuple[pd.Timestamp, pd.Timestamp]]  # split -> (first day, last day), both inclusive
     down_weight_years: tuple[int, ...]
     down_weight: float

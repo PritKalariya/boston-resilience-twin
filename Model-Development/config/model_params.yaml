@@ -1,6 +1,7 @@
 # Starting parameters of the candidate models (#107), read and checked by
 # Model-Development/scripts/model_params.py. M6 (#109) writes tuned_params.yaml in the same
-# format; a value there will replace the one here.
+# format, naming only what it tuned; each value there replaces the one here. The number of trees
+# is not a parameter: it always comes from the inner-fold search.
 # Write decimals with a point (0.001, not 1e-3): YAML reads 1e-3 as text, and the check refuses it.
 
 logreg:

@@ -13,8 +13,9 @@
    - metrics.json: F1, precision, recall, AUC and the counts they come from, per split;
    - validation_counts.json: tp, fp and fn on validation with the data version, the block the
      promotion gates read for a candidate or for the baseline (ADR-026);
-   - run.json: the model, threshold, data version, git commit, model inputs, settings, row counts and
-     the model's details (what a candidate chose on the inner folds and how each choice scored).
+   - run.json: the model, threshold, data version, git commit, model inputs, settings, row counts,
+     a candidate's parameters (the values used, the ones tuned_params.yaml set and that file's
+     sha256) and the model's details (what it chose on the inner folds and how each choice scored).
 
 Every setting comes from the config file; nothing needs a code edit. Exits 0 when the run is written
 and 2, with the reason, on any error.
@@ -111,7 +112,8 @@ def train(model_name: str, settings: training_data.Settings, run_id: str | None 
         "run_id": run_id, "model": model_name, "created_utc": created.isoformat(timespec="seconds"),
         "threshold_rule": settings.threshold_rule, "threshold": cut, "data_version": version,
         "git": git_state(training_data.ROOT), "rows": counts, "inputs": training_data.input_columns(table),
-        "settings": _settings_record(settings), "model_details": getattr(model, "details", {})})
+        "settings": _settings_record(settings), "parameters": getattr(model, "parameters", {}),
+        "model_details": getattr(model, "details", {})})
     return run_dir
 
 
@@ -136,6 +138,14 @@ def main(argv: list[str] | None = None) -> int:
     run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     scores = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
     print(f"run {run['run_id']}: model {run['model']}, data {run['data_version'][:19]}, commit {run['git']['commit']}")
+    parameters = run["parameters"]
+    starting, tuned = (Path(run["settings"][key]).name for key in ("model_params", "tuned_params"))
+    if parameters.get("tuned"):
+        print(f"parameters: {', '.join(parameters['tuned'])} from {tuned} ({parameters['tuned_sha256'][:19]}); "
+              f"the rest from {starting}")
+    elif parameters:
+        print(f"parameters: the starting values in {starting}"
+              + (f" ({tuned} sets none for this model)" if parameters["tuned_sha256"] else ""))
     details = run["model_details"]
     if details.get("chosen"):
         years = ", ".join(str(fold["year"]) for fold in details["inner_folds"])

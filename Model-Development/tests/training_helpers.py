@@ -60,7 +60,8 @@ def committed_settings() -> dict[str, str]:
 def write_repo(tmp_path: Path, label_frame: pd.DataFrame | None = None, feature_frame: pd.DataFrame | None = None,
                catalog: str = CATALOG, **changes: str) -> Path:
     """A temp repo with the files training.csv names; returns its training.csv. changes replace
-    settings by name (a value of None drops the setting)."""
+    settings by name (a value of None drops the setting). tuned_params points into the temp repo,
+    where no file is until a test writes one, so the committed tuned values never reach a test."""
     labels = make_labels() if label_frame is None else label_frame
     features = make_features(labels) if feature_frame is None else feature_frame
     data = tmp_path / "data"
@@ -72,7 +73,7 @@ def write_repo(tmp_path: Path, label_frame: pd.DataFrame | None = None, feature_
     settings = committed_settings()
     settings.update(labels=str(data / "labels.parquet"), features=str(data / "features.parquet"),
                     feature_catalog=str(data / "feature_catalog.csv"), dvc_lock=str(data / "dvc.lock"),
-                    runs_dir=str(tmp_path / "runs"))
+                    runs_dir=str(tmp_path / "runs"), tuned_params=str(tmp_path / "tuned_params.yaml"))
     settings.update(changes)
     config = tmp_path / "training.csv"
     with open(config, "w", encoding="utf-8", newline="") as handle:

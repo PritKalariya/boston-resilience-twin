@@ -84,6 +84,7 @@ class LogisticModel:
         self.inputs, self.fold_years = list(inputs), tuple(fold_years)
         self.C_grid, self.max_iter, self.year_parts = tuple(C_grid), max_iter, year_parts
         self.pipeline: Pipeline | None = None
+        self.parameters: dict = {}  # set by build: the parameters' record for run.json
         self.details: dict = {}
 
     def _pipeline(self) -> Pipeline:
@@ -165,6 +166,7 @@ class _TreeSearchModel:
         self.max_rounds, self.stopping_rounds = max_rounds, stopping_rounds
         self.model = None
         self.inner_curve: list[float] = []  # the mean fold log loss after each tree of the search
+        self.parameters: dict = {}  # set by build: the parameters' record for run.json
         self.details: dict = {}
 
     def fit(self, rows, label, weight):
@@ -233,34 +235,27 @@ class LightGBMModel(_TreeSearchModel):
         return lgb.LGBMClassifier(n_estimators=trees, **self.params)
 
 
-def _inputs(table, settings) -> list[str]:
-    """The table's model inputs, after checking their missing shares across the splits."""
-    inputs = training_data.input_columns(table)
-    training_data.check_missing_gaps(table, inputs, settings.missing_gap_max_points)
-    return inputs
-
-
 def _seasonal(table, settings) -> SeasonalBaseline:
     return SeasonalBaseline(table[["unit", "date", "label"]], years=settings.seasonal_years,
                             half_width=settings.seasonal_half_width_days, min_days=settings.seasonal_min_days)
 
 
-def _logreg(table, settings) -> LogisticModel:
-    inputs = _inputs(table, settings)
-    return LogisticModel(inputs, settings.inner_fold_years, **model_params.load(settings.model_params)["logreg"])
+def _candidate(model_class, name: str):
+    """The factory of a candidate: it checks the inputs' missing shares across the splits, takes the
+    starting parameters with M6's tuned values over them (model_params.resolve), and keeps the record
+    of those parameters on the model as parameters, for run.json."""
+    def factory(table, settings):
+        inputs = training_data.input_columns(table)
+        training_data.check_missing_gaps(table, inputs, settings.missing_gap_max_points)
+        resolved = model_params.resolve(settings.model_params, settings.tuned_params)
+        model = model_class(inputs, settings.inner_fold_years, **resolved.values[name])
+        model.parameters = resolved.record(name)
+        return model
+    return factory
 
 
-def _xgboost(table, settings) -> XGBoostModel:
-    inputs = _inputs(table, settings)
-    return XGBoostModel(inputs, settings.inner_fold_years, **model_params.load(settings.model_params)["xgboost"])
-
-
-def _lightgbm(table, settings) -> LightGBMModel:
-    inputs = _inputs(table, settings)
-    return LightGBMModel(inputs, settings.inner_fold_years, **model_params.load(settings.model_params)["lightgbm"])
-
-
-MODELS = {"seasonal": _seasonal, "logreg": _logreg, "xgboost": _xgboost, "lightgbm": _lightgbm}
+MODELS = {"seasonal": _seasonal, "logreg": _candidate(LogisticModel, "logreg"),
+          "xgboost": _candidate(XGBoostModel, "xgboost"), "lightgbm": _candidate(LightGBMModel, "lightgbm")}
 
 
 def build(name: str, table, settings):

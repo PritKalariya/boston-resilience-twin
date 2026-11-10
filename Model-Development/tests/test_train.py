@@ -34,7 +34,7 @@ def test_a_run_writes_the_contract_files(run_dir, tmp_path):
     assert run["inputs"] == ["day_of_week"] and run["threshold_rule"] == "validation_f1_max"
     assert set(run["git"]) == {"commit", "uncommitted_changes"}
     assert run["settings"]["splits"]["test"] == ["2025-01-01", "2026-06-30"]
-    assert run["model_details"] == {}  # the baseline chooses nothing
+    assert run["model_details"] == {} and run["parameters"] == {}  # the baseline has no parameters
 
 
 def test_validation_counts_are_the_gates_block_at_the_shared_threshold(run_dir):
@@ -81,6 +81,7 @@ def test_a_logreg_run_records_what_it_chose_on_the_inner_folds(tmp_path, capsys)
     assert len(grid) == 11 and details["chosen"]["C"] in grid and details["converged"] is True
     assert [fold["year"] for fold in details["inner_folds"]] == [2019, 2022, 2023]
     assert f"chosen on the inner folds 2019, 2022, 2023: C {details['chosen']['C']:g}" in out
+    assert "parameters: the starting values in model_params.yaml\n" in out and run["parameters"]["tuned"] == []
     assert set(P.read_predictions(run_dir / "predictions.parquet", threshold=run["threshold"])["model"]) == {"logreg"}
     assert evaluate.main(["--run", str(run_dir)]) == 0
 
@@ -127,3 +128,14 @@ def test_a_tree_search_that_reaches_max_rounds_is_flagged_in_the_output(tmp_path
     config = H.write_repo(tmp_path, label_frame=H.make_labels(first="2016-01-01"), model_params=str(capped))
     assert train.main(["--model", model, "--config", str(config), "--run-id", "trees"]) == 0
     assert "the tree search reached max_rounds without stopping" in capsys.readouterr().out
+
+
+def test_a_run_records_and_prints_the_tuned_values_it_used(tmp_path, capsys):
+    config = H.write_repo(tmp_path, label_frame=H.make_labels(first="2016-01-01"))
+    (tmp_path / "tuned_params.yaml").write_text("logreg:\n  C_grid: [0.1]\n", encoding="utf-8")
+    assert train.main(["--model", "logreg", "--config", str(config), "--run-id", "tuned"]) == 0
+    out = capsys.readouterr().out
+    run = json.loads((tmp_path / "runs" / "tuned" / "run.json").read_text(encoding="utf-8"))
+    assert run["parameters"]["tuned"] == ["C_grid"] and run["parameters"]["values"]["C_grid"] == [0.1]
+    assert run["model_details"]["chosen"] == {"C": 0.1}
+    assert f"parameters: C_grid from tuned_params.yaml ({run['parameters']['tuned_sha256'][:19]})" in out

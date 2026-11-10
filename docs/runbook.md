@@ -678,6 +678,7 @@ python Model-Development/scripts/train.py --model seasonal                      
 python Model-Development/scripts/train.py --model logreg                            # about 12 s; also prints the C it chose
 python Model-Development/scripts/train.py --model xgboost                           # about 12 s; also prints the trees it chose
 python Model-Development/scripts/train.py --model lightgbm                          # about 6 s; also prints the trees it chose
+python Model-Development/scripts/model_params.py                                    # check the parameter files; print every value, tuned ones marked
 python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run id>   # recompute and check
 python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run id> --gates-block
 ```
@@ -693,6 +694,7 @@ python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run i
 - **Settings** live in config files, never in code.
   - `training.csv` covers the split dates, the 2020 and 2021 weight, the inner fold years, the missing-share limit, the threshold rule and the seasonal window.
   - `model_params.yaml` holds the candidates' starting parameters (#107). It is checked on load: write decimals with a point (`0.001`, not `1e-3`, which YAML reads as text).
+  - `tuned_params.yaml` (M6, #109) has the same format but names only what was tuned; each value replaces its starting one when the file exists. The number of trees is not a parameter, since the inner-fold search always picks it. A run prints which values were tuned, and `run.json` records them under `parameters` with the file's sha256. Check a new tuned file with `model_params.py` before committing it.
 - **On Windows** with `core.autocrlf`, run DVC itself (`dvc status`, `dvc repro`) from a checkout with LF line endings or in the Airflow image: `dvc.lock` hashes the scripts and configs with LF endings, so a CRLF checkout shows every stage as changed. `train.py` and `evaluate.py` are not affected, and the data version they record ignores line endings.
 
 ## Versioned data (DVC)

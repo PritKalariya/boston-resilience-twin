@@ -4,6 +4,7 @@ features,Data-Pipeline/data/processed/features.parquet,path from the repo root,t
 feature_catalog,Data-Pipeline/config/feature_catalog.csv,path from the repo root,a column is a model input when its use_in_model is yes
 dvc_lock,Data-Pipeline/dvc.lock,path from the repo root,its sha256 with line endings as LF is the run's data version
 model_params,Model-Development/config/model_params.yaml,path from the repo root,the candidates' starting parameters (model_params.py; #107); M6 tunes them
+tuned_params,Model-Development/config/tuned_params.yaml,path from the repo root,M6's tuned values (#109) in the model_params.yaml format; each replaces its starting value when this file exists; absent until M6 writes it
 train_start,2015-01-01,YYYY-MM-DD,ADR-003 train years 2015 to 2023; the first labeled day is 2016-01-06 (ADR-005 needs 20 history days)
 train_end,2023-12-31,YYYY-MM-DD,ADR-003
 validation_start,2024-01-01,YYYY-MM-DD,ADR-003 validation year; the shared threshold and the gates use it (ADR-026)

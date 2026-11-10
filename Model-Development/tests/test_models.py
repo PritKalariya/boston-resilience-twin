@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from pathlib import Path
 
@@ -42,6 +43,14 @@ def make_table(first: str = "2016-01-01", seed: int = 0) -> pd.DataFrame:
     table["static_population"] = table["unit"].map({"Alpha": 30000.0, "Beta": np.nan})
     table["wx_tmin_c"] = 5 - 10 * np.cos(2 * np.pi * table["day_of_year"] / 366) + rng.normal(0, 3, n)
     return table
+
+
+def _settings(tmp_path, tuned=None):
+    """The committed settings with tuned_params in tmp_path: absent, or holding tuned."""
+    path = tmp_path / "tuned_params.yaml"
+    if tuned is not None:
+        path.write_text(tuned, encoding="utf-8")
+    return dataclasses.replace(D.load_settings(), tuned_params=path)
 
 
 @pytest.fixture(scope="module")
@@ -160,18 +169,18 @@ def test_predicting_before_fitting_is_refused(table):
         models.LogisticModel(INPUTS, (2019,), GRID, 2000, 12).predict_proba(table)
 
 
-def test_build_makes_logreg_with_the_committed_parameters(table):
-    model = models.build("logreg", table, D.load_settings())
+def test_build_makes_logreg_with_the_committed_parameters(table, tmp_path):
+    model = models.build("logreg", table, _settings(tmp_path))
     assert model.inputs == INPUTS and model.fold_years == (2019, 2022, 2023)
     assert (len(model.C_grid), model.max_iter, model.year_parts) == (11, 2000, 12)
 
 
-def test_a_candidate_is_not_built_on_inputs_missing_far_more_often_outside_train(table):
+def test_a_candidate_is_not_built_on_inputs_missing_far_more_often_outside_train(table, tmp_path):
     holes = table.copy()
     holes.loc[holes["split"] == "validation", "wx_snowfall_mm"] = np.nan  # the 2024 GFS snowfall gap
     with pytest.raises(ValueError, match="worst wx_snowfall_mm: missing on 100.0% of validation rows"):
-        models.build("logreg", holes, D.load_settings())
-    models.build("seasonal", holes, D.load_settings())  # the baseline reads no input
+        models.build("logreg", holes, _settings(tmp_path))
+    models.build("seasonal", holes, _settings(tmp_path))  # the baseline reads no input
 
 
 # --- XGBoost and LightGBM --------------------------------------------------
@@ -281,10 +290,21 @@ def test_a_tree_search_that_reaches_max_rounds_says_so(table, name):
     ("xgboost", {"learning_rate": 0.05, "max_depth": 4, "min_child_weight": 5.0}),
     ("lightgbm", {"learning_rate": 0.05, "num_leaves": 15, "min_child_samples": 100, "deterministic": True}),
 ])
-def test_a_tree_model_needs_fitting_and_builds_with_the_committed_parameters(table, name, committed):
+def test_a_tree_model_needs_fitting_and_builds_with_the_committed_parameters(table, tmp_path, name, committed):
     model_class, params = TREES[name]
     with pytest.raises(ValueError, match="fit the model before predicting"):
         model_class(INPUTS, (2019,), **params).predict_proba(table)
-    model = models.build(name, table, D.load_settings())
+    model = models.build(name, table, _settings(tmp_path))
     assert model.inputs == INPUTS and (model.max_rounds, model.stopping_rounds, model.seed) == (3000, 100, 0)
     assert {key: model.params[key] for key in committed} == committed
+    assert model.parameters["tuned"] == [] and model.parameters["tuned_sha256"] is None
+
+
+def test_build_uses_the_tuned_values_over_the_starting_ones(table, tmp_path):
+    settings = _settings(tmp_path, "lightgbm:\n  num_leaves: 31\n  stopping_rounds: 50\n")
+    model = models.build("lightgbm", table, settings)
+    assert model.params["num_leaves"] == 31 and model.stopping_rounds == 50 and model.params["learning_rate"] == 0.05
+    assert model.parameters["tuned"] == ["num_leaves", "stopping_rounds"]
+    assert model.parameters["values"]["num_leaves"] == 31 and model.parameters["tuned_sha256"].startswith("sha256:")
+    other = models.build("xgboost", table, settings)  # the file names no xgboost value
+    assert other.parameters["tuned"] == [] and other.parameters["tuned_sha256"] == model.parameters["tuned_sha256"]

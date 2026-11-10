@@ -1,7 +1,8 @@
-"""Tests for the candidates' parameters file (#107)."""
+"""Tests for the candidates' parameter files: the starting values and M6's tuned values (#107)."""
 
 from __future__ import annotations
 
+import hashlib
 import sys
 from pathlib import Path
 
@@ -81,3 +82,75 @@ def test_a_bad_file_is_refused_naming_the_problem(tmp_path, text, message):
     path.write_text(text, encoding="utf-8")
     with pytest.raises(M.ParamsError, match=message):
         M.load(path)
+
+
+# --- tuned values (M6, #109) -------------------------------------------------
+
+
+def _settings(tmp_path, tuned=None):
+    """Settings of a temp repo; tuned, when given, is written to its tuned_params.yaml."""
+    settings = D.load_settings(H.write_repo(tmp_path))
+    if tuned is not None:
+        settings.tuned_params.write_text(tuned, encoding="utf-8")
+    return settings
+
+
+def test_without_a_tuned_file_every_value_is_the_starting_one(tmp_path):
+    settings = _settings(tmp_path)
+    resolved = M.resolve(settings.model_params, settings.tuned_params)
+    assert resolved.values == M.load(settings.model_params)
+    assert resolved.tuned == {} and resolved.tuned_sha256 is None
+    assert resolved.record("lightgbm") == {"values": resolved.values["lightgbm"], "tuned": [], "tuned_sha256": None}
+
+
+def test_a_tuned_value_replaces_only_its_starting_value(tmp_path):
+    tuned = "# M6 study, 50 trials\nlightgbm:\n  num_leaves: 31\n  learning_rate: 0.03\nlogreg:\n  C_grid: [0.1]\n"
+    settings = _settings(tmp_path, tuned)
+    resolved, starting = M.resolve(settings.model_params, settings.tuned_params), M.load(settings.model_params)
+    assert resolved.values["lightgbm"] == {**starting["lightgbm"], "num_leaves": 31, "learning_rate": 0.03}
+    assert resolved.values["logreg"] == {**starting["logreg"], "C_grid": (0.1,)}
+    assert resolved.values["xgboost"] == starting["xgboost"]
+    assert resolved.tuned == {"lightgbm": ["learning_rate", "num_leaves"], "logreg": ["C_grid"]}
+    assert resolved.tuned_sha256 == "sha256:" + hashlib.sha256(tuned.encode("utf-8")).hexdigest()
+    settings.tuned_params.write_bytes(tuned.replace("\n", "\r\n").encode("utf-8"))  # as a Windows checkout
+    assert M.resolve(settings.model_params, settings.tuned_params).tuned_sha256 == resolved.tuned_sha256
+
+
+def test_an_empty_tuned_file_sets_nothing(tmp_path):
+    settings = _settings(tmp_path, "# nothing tuned yet\n")
+    resolved = M.resolve(settings.model_params, settings.tuned_params)
+    assert resolved.values == M.load(settings.model_params) and resolved.tuned == {}
+    assert resolved.tuned_sha256.startswith("sha256:")
+
+
+@pytest.mark.parametrize("text, message", [
+    ("forest:\n  trees: 10\n", r"unknown model\(s\) in tuned_params.yaml: \['forest'\]"),
+    ("lightgbm:\n  trees: 400\n", r"unknown parameter\(s\) for lightgbm in tuned_params.yaml: \['trees'\]"),
+    ("lightgbm:\n  num_leaves: 1\n", "lightgbm.num_leaves must be a whole number of 2 or more"),
+    ("lightgbm: 31\n", "lightgbm in tuned_params.yaml must map each parameter"),
+    ("- lightgbm\n", "tuned_params.yaml must map each model to its parameters"),
+    ("lightgbm: [\n", "tuned_params.yaml is not valid YAML"),
+])
+def test_a_bad_tuned_file_is_refused_naming_the_problem(tmp_path, text, message):
+    settings = _settings(tmp_path, text)
+    with pytest.raises(M.ParamsError, match=message):
+        M.resolve(settings.model_params, settings.tuned_params)
+
+
+def test_the_check_command_prints_every_parameter_and_marks_the_tuned_ones(tmp_path, capsys):
+    config = H.write_repo(tmp_path)
+    assert M.main(["--config", str(config)]) == 0
+    out = capsys.readouterr().out
+    assert "tuned values: none" in out and "(tuned)" not in out
+    assert "lightgbm:\n  learning_rate: 0.05\n" in out and "  C_grid: [0.001, 0.00316, 0.01" in out
+    (tmp_path / "tuned_params.yaml").write_text("xgboost:\n  max_depth: 6\n", encoding="utf-8")
+    assert M.main(["--config", str(config)]) == 0
+    out = capsys.readouterr().out
+    assert "  max_depth: 6  (tuned)" in out and "(sha256:" in out and out.count("(tuned)") == 1
+
+
+def test_the_check_command_exits_2_on_a_bad_file(tmp_path, capsys):
+    config = H.write_repo(tmp_path)
+    (tmp_path / "tuned_params.yaml").write_text("xgboost:\n  max_depth: 0\n", encoding="utf-8")
+    assert M.main(["--config", str(config)]) == 2
+    assert "xgboost.max_depth must be a whole number of 1 or more" in capsys.readouterr().err

@@ -26,6 +26,7 @@ def test_the_committed_settings_load_with_the_adr_003_splits():
     assert settings.down_weight_years == (2020, 2021) and settings.down_weight == 0.5
     assert settings.inner_fold_years == (2019, 2022, 2023) and settings.missing_gap_max_points == 10
     assert settings.model_params == D.ROOT / "Model-Development" / "config" / "model_params.yaml"
+    assert settings.tuned_params == D.ROOT / "Model-Development" / "config" / "tuned_params.yaml"
     assert settings.threshold_rule == "validation_f1_max"
     assert (settings.seasonal_years, settings.seasonal_half_width_days, settings.seasonal_min_days) == (3, 14, 20)
     assert settings.labels == D.ROOT / "Data-Pipeline" / "data" / "processed" / "labels.parquet"
@@ -52,6 +53,7 @@ def test_the_committed_settings_load_with_the_adr_003_splits():
     ({"missing_gap_max_points": "101"}, "missing_gap_max_points must be a number from 0 to 100"),
     ({"missing_gap_max_points": "ten"}, "missing_gap_max_points must be a number from 0 to 100"),
     ({"model_params": ""}, "model_params needs a path"),
+    ({"tuned_params": ""}, "tuned_params needs a path"),
     ({"threshold_rule": "fixed_half"}, "threshold_rule must be one of"),
     ({"seasonal_years": "0"}, "seasonal_years must be a whole number of 1 or more"),
     ({"seasonal_min_days": "88"}, "more than the window's 87 days"),
