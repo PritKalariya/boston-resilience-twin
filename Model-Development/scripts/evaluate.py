@@ -3,8 +3,9 @@
     python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run id> [--gates-block]
 
 Reads the run's predictions.parquet through the predictions.py contract (so a broken file fails here)
-and its threshold from run.json, recomputes F1, precision, recall, AUC and the counts per split, and
-fails if they differ from the run's metrics.json. --gates-block prints only the run's validation tp,
+and its threshold from run.json, recomputes every metric of threshold.metrics per split (the counts,
+F1, precision, recall, AUC, PR-AUC, log loss, Brier score and Brier skill), and fails if any differs
+from the run's metrics.json. --gates-block prints only the run's validation tp,
 fp and fn, the candidate or baseline block of the promotion gates input (ADR-026).
 
 Exits 0 when the run checks out and 2, with the reason, otherwise.

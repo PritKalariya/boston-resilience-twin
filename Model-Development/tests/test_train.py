@@ -53,13 +53,22 @@ def test_evaluate_recomputes_the_metrics_and_prints_the_gates_block(run_dir, cap
     assert block == {k: scores["validation"][k] for k in ("tp", "fp", "fn")}
 
 
-def test_evaluate_catches_metrics_that_disagree_with_the_predictions(run_dir, capsys):
+@pytest.mark.parametrize("split, key", [("validation", "tp"), ("validation", "pr_auc"), ("test", "brier_skill"),
+                                        ("test", "log_loss")])
+def test_evaluate_catches_metrics_that_disagree_with_the_predictions(run_dir, capsys, split, key):
     path = run_dir / "metrics.json"
     scores = json.loads(path.read_text(encoding="utf-8"))
-    scores["validation"]["tp"] += 1
+    scores[split][key] += 1
     path.write_text(json.dumps(scores), encoding="utf-8")
     assert evaluate.main(["--run", str(run_dir)]) == 2
-    assert "validation tp" in capsys.readouterr().err
+    assert f"{split} {key}" in capsys.readouterr().err
+
+
+def test_metrics_json_holds_every_metric_for_both_splits(run_dir):
+    scores = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
+    for split in ("validation", "test"):
+        assert {"surge_rate", "auc", "pr_auc", "log_loss", "brier", "brier_skill"} <= set(scores[split])
+        assert 0 < scores[split]["pr_auc"] <= 1 and scores[split]["log_loss"] > 0
 
 
 def test_an_unknown_model_is_refused_with_the_known_ones(tmp_path, capsys):

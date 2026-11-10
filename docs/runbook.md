@@ -685,6 +685,12 @@ python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run i
 
 - **Writes** `Model-Development/runs/<UTC time>-<model>/` (gitignored): `predictions.parquet` (the contract in `predictions.py`), `metrics.json` (per split), `validation_counts.json` (validation tp, fp and fn with the data version, for the gates) and `run.json` (threshold, data version, git commit, inputs, settings, row counts, and in `model_details` what a candidate chose on the inner folds).
 - **The threshold** is picked on validation with the shared rule (highest F1, the higher one on a tie) and reused on test.
+- **Reading the metrics** (`metrics.json`, per split; #107):
+  - F1, precision and recall depend on the threshold.
+  - AUC, PR-AUC, log loss, Brier score and Brier skill do not, so they show ranking and probability quality apart from the threshold.
+  - Read PR-AUC against `surge_rate`, since a random ranking scores about the surge rate, not 0.5.
+  - Brier skill is 1 for a perfect forecast, 0 for always forecasting the split's surge rate, and below 0 for worse.
+  - A value that cannot be computed is `null`, never 0, and the counts beside it show why.
 - **Inner folds (#107).** A candidate picks its own settings on the train years only, never on 2024.
   - Each fold year in `inner_fold_years` (2019, 2022, 2023) is checked by a fit on every train day before it. The 2020 and 2021 rows are fit on, never checked on.
   - Logistic regression takes the C with the lowest mean log loss over the folds, then refits on every train day.

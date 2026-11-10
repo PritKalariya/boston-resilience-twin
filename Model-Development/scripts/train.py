@@ -10,7 +10,8 @@
    threshold to test, which never picks it.
 4. Writes Model-Development/runs/<run id>/ (runs_dir in the config; gitignored):
    - predictions.parquet: the predictions.py contract, the validation and test rows;
-   - metrics.json: F1, precision, recall, AUC and the counts they come from, per split;
+   - metrics.json, per split: the counts at the threshold with the F1, precision and recall they
+     give, the surge rate, AUC, PR-AUC, log loss, Brier score and Brier skill (threshold.metrics);
    - validation_counts.json: tp, fp and fn on validation with the data version, the block the
      promotion gates read for a candidate or for the baseline (ADR-026);
    - run.json: the model, threshold, data version, git commit, model inputs, settings, row counts,
@@ -154,11 +155,13 @@ def main(argv: list[str] | None = None) -> int:
         if details.get("stopped_before_max_rounds") is False:
             print("note: the tree search reached max_rounds without stopping; raise max_rounds in model_params.yaml")
     print(f"threshold {run['threshold']:.6f} ({run['threshold_rule']})")
-    print(f"{'split':<11}{'rows':>7}{'surges':>8}{'tp':>6}{'fp':>7}{'fn':>6}{'f1':>9}{'precision':>11}{'recall':>9}{'auc':>9}")
+    print(f"{'split':<11}{'rows':>7}{'surges':>8}{'tp':>6}{'fp':>7}{'fn':>6}{'f1':>9}{'precision':>11}{'recall':>9}"
+          f"{'auc':>9}{'pr_auc':>9}{'log_loss':>10}{'brier_ss':>10}")
     for split in PREDICTED_SPLITS:
         s = scores[split]
         print(f"{split:<11}{s['rows']:>7}{s['surges']:>8}{s['tp']:>6}{s['fp']:>7}{s['fn']:>6}"
-              f"{_fmt(s['f1']):>9}{_fmt(s['precision']):>11}{_fmt(s['recall']):>9}{_fmt(s['auc']):>9}")
+              f"{_fmt(s['f1']):>9}{_fmt(s['precision']):>11}{_fmt(s['recall']):>9}{_fmt(s['auc']):>9}"
+              f"{_fmt(s['pr_auc']):>9}{_fmt(s['log_loss']):>10}{_fmt(s['brier_skill']):>10}")
     print(f"wrote {run_dir}")
     return 0
 
