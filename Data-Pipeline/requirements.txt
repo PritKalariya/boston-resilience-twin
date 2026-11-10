@@ -11,7 +11,8 @@
 numpy==2.5.3
 pandas==3.0.5
 pyarrow==25.0.1
-# The candidate models and their parameters file (Model-Development, #107).
+# The candidate models, their parameters file and the saved models (Model-Development, #107).
+joblib==1.6.0
 PyYAML==6.0.3
 scikit-learn==1.9.1
 
@@ -32,6 +33,10 @@ iniconfig==2.3.1
 # LightGBM (#107) loads the OpenMP runtime: libgomp1, which airflow.Dockerfile
 # installs. On macOS, run brew install libomp first.
 lightgbm==4.7.0
+# MLflow's client only (#107): the training runs log to MLflow, and Airflow
+# already brings the SQLAlchemy and alembic its SQLite store needs. Browsing
+# the runs (mlflow ui) needs the full mlflow package, outside this image.
+mlflow-skinny==3.18.0
 pyogrio==0.13.0
 pyproj==3.8.0
 pytest==9.1.1

@@ -10,6 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import training_helpers as H  # noqa: E402  (also puts Model-Development/scripts on sys.path)
+from training_helpers import no_mlflow_server, shared_mlflow_store  # noqa: E402,F401  (autouse: MLflow stays in temp folders)
 import evaluate  # noqa: E402
 import models  # noqa: E402
 import predictions as P  # noqa: E402

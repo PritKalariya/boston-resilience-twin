@@ -12,6 +12,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -19,6 +20,7 @@ sys.path.insert(0, str(SCRIPTS))
 import training_data  # noqa: E402
 
 UNITS = ("Alpha", "Beta")
+MLFLOW_STORE: Path | None = None  # conftest.py's session store; write_repo uses it unless told otherwise
 CATALOG = (
     "feature,group,source,coverage_start,history_rule,live_rule,use_in_model,note\n"
     "unit,key,test,2019-01-01,n/a,n/a,no,row key\n"
@@ -26,6 +28,24 @@ CATALOG = (
     "day_of_week,calendar,test,2019-01-01,pass,pass,yes,a model input\n"
     "kept_out,test,test,2019-01-01,pass,pass,no,not a model input\n"
 )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def shared_mlflow_store(tmp_path_factory):
+    """One local MLflow store for the session, which write_repo uses unless a test names its own:
+    creating a store runs MLflow's database migrations, a few seconds each time. A test module that
+    trains imports this fixture and no_mlflow_server; they live here, not in a conftest.py, because
+    Data-Pipeline/tests imports its own conftest by that name in the same pytest session."""
+    global MLFLOW_STORE
+    MLFLOW_STORE = tmp_path_factory.mktemp("mlruns")
+    yield MLFLOW_STORE
+    MLFLOW_STORE = None
+
+
+@pytest.fixture(autouse=True)
+def no_mlflow_server(monkeypatch):
+    """No test logs to a server named in the caller's environment."""
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
 
 
 def make_labels(first: str = "2019-01-01", last: str = "2026-09-30", units=UNITS, seed: int = 0) -> pd.DataFrame:
@@ -61,7 +81,8 @@ def write_repo(tmp_path: Path, label_frame: pd.DataFrame | None = None, feature_
                catalog: str = CATALOG, **changes: str) -> Path:
     """A temp repo with the files training.csv names; returns its training.csv. changes replace
     settings by name (a value of None drops the setting). tuned_params points into the temp repo,
-    where no file is until a test writes one, so the committed tuned values never reach a test."""
+    where no file is until a test writes one, so the committed tuned values never reach a test.
+    mlflow_store is the session's shared store, never the repo's."""
     labels = make_labels() if label_frame is None else label_frame
     features = make_features(labels) if feature_frame is None else feature_frame
     data = tmp_path / "data"
@@ -73,7 +94,8 @@ def write_repo(tmp_path: Path, label_frame: pd.DataFrame | None = None, feature_
     settings = committed_settings()
     settings.update(labels=str(data / "labels.parquet"), features=str(data / "features.parquet"),
                     feature_catalog=str(data / "feature_catalog.csv"), dvc_lock=str(data / "dvc.lock"),
-                    runs_dir=str(tmp_path / "runs"), tuned_params=str(tmp_path / "tuned_params.yaml"))
+                    runs_dir=str(tmp_path / "runs"), tuned_params=str(tmp_path / "tuned_params.yaml"),
+                    mlflow_store=str(MLFLOW_STORE or tmp_path / "mlruns"))
     settings.update(changes)
     config = tmp_path / "training.csv"
     with open(config, "w", encoding="utf-8", newline="") as handle:

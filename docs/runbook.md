@@ -703,6 +703,27 @@ python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run i
   - `tuned_params.yaml` (M6, #109) has the same format but names only what was tuned; each value replaces its starting one when the file exists. The number of trees is not a parameter, since the inner-fold search always picks it. A run prints which values were tuned, and `run.json` records them under `parameters` with the file's sha256. Check a new tuned file with `model_params.py` before committing it.
 - **On Windows** with `core.autocrlf`, run DVC itself (`dvc status`, `dvc repro`) from a checkout with LF line endings or in the Airflow image: `dvc.lock` hashes the scripts and configs with LF endings, so a CRLF checkout shows every stage as changed. `train.py` and `evaluate.py` are not affected, and the data version they record ignores line endings.
 
+### MLflow tracking (#107)
+
+Every `train.py` run is also an MLflow run in the experiment `model-training` (`mlflow_experiment` in `training.csv`).
+
+- **Where runs go.** The server that `MLFLOW_TRACKING_URI` names (M1, #104), or else the local store `Model-Development/mlruns/` (gitignored): `mlflow.db` (SQLite) with `artifacts/` beside it. `run.json` says which under `mlflow.where`; it never writes a server's address, which can hold a token.
+- **What a run logs.**
+  - Tags: model, data version, git commit, split days.
+  - Params: the threshold, what the model chose on the inner folds, every parameter used and the training settings.
+  - Metrics: both splits, the inner-fold log loss, and the costs (training time, scoring time for one evening's rows, the saved model's size).
+  - Files: the run folder's files and `inputs.json` (the feature list).
+  - For a candidate, the model with its threshold.
+  - A run that fails partway stays in MLflow as `FAILED`. A metric that cannot be computed is left out and named in the tag `undefined_metrics`.
+- **Browse the local store.** The image and `requirements.txt` carry only `mlflow-skinny`, the client, so install the full package once with `pip install mlflow==3.18.0`. Then, from the repo root:
+
+  ```bash
+  mlflow ui --backend-store-uri sqlite:///Model-Development/mlruns/mlflow.db   # http://localhost:5000
+  ```
+
+  On macOS, port 5000 may be taken by AirPlay Receiver; add `--port 5001`.
+- **Load a saved model.** Use `mlflow.sklearn.load_model("models:/<id>")` (the id is in `run.json` under `mlflow.model_uri`), or `joblib.load("Model-Development/runs/<run id>/model.joblib")`. `predict` gives the surge flag at the run's threshold and `predict_proba` the probability. Both need scikit-learn and the model's own library, not this repo's code. Load models only from this project's own store: cloudpickle and joblib can run code while loading.
+
 ## Versioned data (DVC)
 
 The DVC remote is `gs://boston-resilience-twin-data/dvc` (`.dvc/config`), a

@@ -31,11 +31,12 @@ KEYS = ["unit", "date"]
 ROW_COLUMNS = (*KEYS, "split", "label", "weight")  # every table column that is not a model input
 THRESHOLD_RULES = ("validation_f1_max",)
 SETTINGS_HEADER = ["setting", "value"]
-PATH_SETTINGS = ("labels", "features", "feature_catalog", "dvc_lock", "runs_dir", "model_params", "tuned_params")
+PATH_SETTINGS = ("labels", "features", "feature_catalog", "dvc_lock", "runs_dir", "model_params", "tuned_params",
+                 "mlflow_store")
 DATE_SETTINGS = tuple(f"{split}_{end}" for split in SPLITS for end in ("start", "end"))
 SETTING_NAMES = (*PATH_SETTINGS, *DATE_SETTINGS, "down_weight_years", "down_weight", "inner_fold_years",
                  "missing_gap_max_points", "threshold_rule", "seasonal_years", "seasonal_half_width_days",
-                 "seasonal_min_days")
+                 "seasonal_min_days", "mlflow_experiment")
 
 
 class SettingsError(ValueError):
@@ -51,6 +52,7 @@ class Settings:
     runs_dir: Path
     model_params: Path  # the candidates' starting parameters (model_params.py)
     tuned_params: Path  # M6's tuned values over them, used only when the file exists (model_params.py)
+    mlflow_store: Path  # tracking.py: the local MLflow store when MLFLOW_TRACKING_URI is unset
     splits: dict[str, tuple[pd.Timestamp, pd.Timestamp]]  # split -> (first day, last day), both inclusive
     down_weight_years: tuple[int, ...]
     down_weight: float
@@ -60,6 +62,7 @@ class Settings:
     seasonal_years: int
     seasonal_half_width_days: int
     seasonal_min_days: int
+    mlflow_experiment: str  # tracking.py: the MLflow experiment every run is logged to
 
 
 def _read_pairs(path: Path) -> dict[str, str]:
@@ -180,9 +183,14 @@ def load_settings(path: str | Path = DEFAULT_CONFIG, root: str | Path = ROOT) ->
         raise SettingsError(f"seasonal_min_days {min_days} is more than the window's "
                             f"{seasonal_years * (2 * half_width + 1)} days")
 
+    experiment = pairs["mlflow_experiment"]
+    if not experiment:
+        raise SettingsError("mlflow_experiment needs a name")
+
     return Settings(splits=splits, down_weight_years=years, down_weight=weight, inner_fold_years=fold_years,
                     missing_gap_max_points=max_gap, threshold_rule=rule, seasonal_years=seasonal_years,
-                    seasonal_half_width_days=half_width, seasonal_min_days=min_days, **paths)
+                    seasonal_half_width_days=half_width, seasonal_min_days=min_days, mlflow_experiment=experiment,
+                    **paths)
 
 
 def split_of(dates: pd.Series, splits: dict[str, tuple[pd.Timestamp, pd.Timestamp]]) -> pd.Series:

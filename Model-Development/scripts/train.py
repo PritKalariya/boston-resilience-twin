@@ -16,7 +16,13 @@
      promotion gates read for a candidate or for the baseline (ADR-026);
    - run.json: the model, threshold, data version, git commit, model inputs, settings, row counts,
      a candidate's parameters (the values used, the ones tuned_params.yaml set and that file's
-     sha256) and the model's details (what it chose on the inner folds and how each choice scored).
+     sha256), the model's details (what it chose on the inner folds and how each choice scored),
+     the costs (training time, the time to score one evening's rows, the saved model's size) and
+     where MLflow holds the run;
+   - model.joblib, for a candidate: the fitted model with its threshold (with_threshold), which loads
+     with scikit-learn and the model's library alone, no code from this repo.
+5. Logs the run to MLflow (tracking.py): tags, params, metrics, the run's files and, for a
+   candidate, the model. A failure on the way marks the MLflow run FAILED.
 
 Every setting comes from the config file; nothing needs a code edit. Exits 0 when the run is written
 and 2, with the reason, on any error.
@@ -28,19 +34,28 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
+from sklearn.frozen import FrozenEstimator
+from sklearn.model_selection import FixedThresholdClassifier
 
 import models
 import predictions
 import threshold
+import tracking
 import training_data
 
 PREDICTED_SPLITS = ("validation", "test")
+# Scoring one evening's rows is timed up to EVENING_REPEATS times, stopping early once
+# EVENING_BUDGET_S has passed with at least EVENING_MIN_REPEATS timings: a fast model gets all
+# 50, the seasonal baseline (tens of milliseconds a try) enough for a steady median.
+EVENING_REPEATS, EVENING_MIN_REPEATS, EVENING_BUDGET_S = 50, 5, 1.0
 
 
 def git_state(root: Path) -> dict:
@@ -73,48 +88,91 @@ def _write_json(path: Path, data) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def scoring_ms(model, rows: pd.DataFrame, repeats: int = EVENING_REPEATS, minimum: int = EVENING_MIN_REPEATS,
+               budget_s: float = EVENING_BUDGET_S) -> dict:
+    """The model's time to score rows in milliseconds, the median and 95th percentile of up to repeats
+    tries; it stops early once budget_s has passed with at least minimum tries. Reports how many."""
+    times, started = [], time.perf_counter()
+    while len(times) < repeats and (len(times) < minimum or time.perf_counter() - started < budget_s):
+        start = time.perf_counter()
+        model.predict_proba(rows)
+        times.append((time.perf_counter() - start) * 1000)
+    return {"median": round(float(np.median(times)), 3), "p95": round(float(np.percentile(times, 95)), 3),
+            "rows": len(rows), "repeats": len(times)}
+
+
+def with_threshold(estimator, cut: float, rows: pd.DataFrame, label) -> FixedThresholdClassifier:
+    """The fitted estimator with the run's threshold attached, the model a run saves: predict gives the
+    surge flag (probability >= cut) and predict_proba the probability. FrozenEstimator keeps fit from
+    refitting it; fit only records the classes, here from rows and label."""
+    return FixedThresholdClassifier(FrozenEstimator(estimator), threshold=cut).fit(rows, label)
+
+
 def train(model_name: str, settings: training_data.Settings, run_id: str | None = None,
           runs_dir: str | Path | None = None) -> Path:
-    """Train model_name under settings, write its run folder and return it."""
+    """Train model_name under settings, write its run folder, log it to MLflow and return the folder."""
     table, counts = training_data.load_table(settings)
     version = training_data.data_version(settings.dvc_lock)
+    git = git_state(training_data.ROOT)
     model = models.build(model_name, table, settings)
-
-    train_rows = table[table["split"] == "train"]
-    model.fit(train_rows, train_rows["label"].to_numpy(), train_rows["weight"].to_numpy())
-    rows, probability = {}, {}
-    for split in PREDICTED_SPLITS:
-        rows[split] = table[table["split"] == split].reset_index(drop=True)
-        if rows[split].empty:
-            raise ValueError(f"the {split} split has no labeled rows")
-        probability[split] = np.asarray(model.predict_proba(rows[split]), dtype="float64")
-        if len(probability[split]) != len(rows[split]):
-            raise ValueError(f"{model_name} returned {len(probability[split])} probabilities for "
-                             f"{len(rows[split])} {split} rows")
-
-    cut = threshold.shared_threshold(probability["validation"], rows["validation"]["label"], settings.threshold_rule)
-    frame = pd.concat([predictions.make_predictions(rows[split], model_name, probability[split], cut)
-                       for split in PREDICTED_SPLITS], ignore_index=True)
-    scores = {split: threshold.metrics(probability[split], rows[split]["label"], cut) for split in PREDICTED_SPLITS}
-
     created = datetime.now(timezone.utc)
     run_id = run_id or f"{created:%Y%m%dT%H%M%SZ}-{model_name}"
     run_dir = Path(runs_dir or settings.runs_dir) / run_id
     if run_dir.exists():
         raise ValueError(f"run folder {run_dir} already exists")
-    run_dir.mkdir(parents=True)
-    predictions.write_predictions(frame, run_dir / "predictions.parquet", cut)
-    _write_json(run_dir / "metrics.json", scores)
-    validation = scores["validation"]
-    _write_json(run_dir / "validation_counts.json", {
-        "data_version": version, "model": model_name, "split": "validation", "threshold": cut,
-        "tp": validation["tp"], "fp": validation["fp"], "fn": validation["fn"]})
-    _write_json(run_dir / "run.json", {
-        "run_id": run_id, "model": model_name, "created_utc": created.isoformat(timespec="seconds"),
-        "threshold_rule": settings.threshold_rule, "threshold": cut, "data_version": version,
-        "git": git_state(training_data.ROOT), "rows": counts, "inputs": training_data.input_columns(table),
-        "settings": _settings_record(settings), "parameters": getattr(model, "parameters", {}),
-        "model_details": getattr(model, "details", {})})
+    tags = {"model": model_name, "data_version": version, "git_commit": git["commit"],
+            "git_uncommitted_changes": git["uncommitted_changes"], "run_folder": run_id,
+            **{f"{split}_days": f"{first.date()} to {last.date()}" for split, (first, last) in settings.splits.items()}}
+
+    with tracking.tracked_run(settings, run_id, tags) as mlflow_run:  # a failure marks the MLflow run FAILED
+        train_rows = table[table["split"] == "train"]
+        start = time.perf_counter()
+        model.fit(train_rows, train_rows["label"].to_numpy(), train_rows["weight"].to_numpy())
+        train_time_s = time.perf_counter() - start
+        rows, probability = {}, {}
+        for split in PREDICTED_SPLITS:
+            rows[split] = table[table["split"] == split].reset_index(drop=True)
+            if rows[split].empty:
+                raise ValueError(f"the {split} split has no labeled rows")
+            probability[split] = np.asarray(model.predict_proba(rows[split]), dtype="float64")
+            if len(probability[split]) != len(rows[split]):
+                raise ValueError(f"{model_name} returned {len(probability[split])} probabilities for "
+                                 f"{len(rows[split])} {split} rows")
+
+        cut = threshold.shared_threshold(probability["validation"], rows["validation"]["label"],
+                                         settings.threshold_rule)
+        frame = pd.concat([predictions.make_predictions(rows[split], model_name, probability[split], cut)
+                           for split in PREDICTED_SPLITS], ignore_index=True)
+        scores = {split: threshold.metrics(probability[split], rows[split]["label"], cut)
+                  for split in PREDICTED_SPLITS}
+
+        run_dir.mkdir(parents=True)
+        predictions.write_predictions(frame, run_dir / "predictions.parquet", cut)
+        _write_json(run_dir / "metrics.json", scores)
+        validation = scores["validation"]
+        _write_json(run_dir / "validation_counts.json", {
+            "data_version": version, "model": model_name, "split": "validation", "threshold": cut,
+            "tp": validation["tp"], "fp": validation["fp"], "fn": validation["fn"]})
+
+        # one evening is every neighborhood of one day: the last validation day
+        evening = rows["validation"][rows["validation"]["date"] == rows["validation"]["date"].max()]
+        costs = {"train_time_s": round(train_time_s, 3), "score_time_evening_ms": scoring_ms(model, evening),
+                 "model_size_bytes": None}
+        model_uri = None
+        if getattr(model, "estimator", None) is not None:  # a candidate: save it with its threshold
+            saved = with_threshold(model.estimator, cut, rows["validation"][model.inputs], rows["validation"]["label"])
+            joblib.dump(saved, run_dir / "model.joblib")
+            costs["model_size_bytes"] = (run_dir / "model.joblib").stat().st_size
+            model_uri = tracking.log_model(saved, rows["validation"][model.inputs].head(5), model_name)
+
+        run = {"run_id": run_id, "model": model_name, "created_utc": created.isoformat(timespec="seconds"),
+               "threshold_rule": settings.threshold_rule, "threshold": cut, "data_version": version, "git": git,
+               "rows": counts, "inputs": training_data.input_columns(table), "settings": _settings_record(settings),
+               "parameters": getattr(model, "parameters", {}), "model_details": getattr(model, "details", {}),
+               "costs": costs, "mlflow": {"run_id": mlflow_run.info.run_id, "experiment": settings.mlflow_experiment,
+                                          "where": tracking.where(settings), "model_uri": model_uri}}
+        _write_json(run_dir / "run.json", run)
+        tracking.log_run(run_dir, run, scores)
     return run_dir
 
 
@@ -162,6 +220,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{split:<11}{s['rows']:>7}{s['surges']:>8}{s['tp']:>6}{s['fp']:>7}{s['fn']:>6}"
               f"{_fmt(s['f1']):>9}{_fmt(s['precision']):>11}{_fmt(s['recall']):>9}{_fmt(s['auc']):>9}"
               f"{_fmt(s['pr_auc']):>9}{_fmt(s['log_loss']):>10}{_fmt(s['brier_skill']):>10}")
+    costs, evening = run["costs"], run["costs"]["score_time_evening_ms"]
+    size = "" if costs["model_size_bytes"] is None else f"; saved model {costs['model_size_bytes']:,} bytes"
+    print(f"costs: training {costs['train_time_s']:.1f} s; scoring one evening ({evening['rows']} rows) "
+          f"{evening['median']:.1f} ms median, {evening['p95']:.1f} ms p95{size}")
+    tracked = run["mlflow"]
+    print(f"mlflow: run {tracked['run_id']} in experiment {tracked['experiment']} ({tracked['where']})"
+          + (f"; model {tracked['model_uri']}" if tracked["model_uri"] else ""))
     print(f"wrote {run_dir}")
     return 0
 

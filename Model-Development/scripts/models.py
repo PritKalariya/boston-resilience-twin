@@ -103,6 +103,7 @@ class LogisticModel:
             "chosen": {"C": float(search.best_params_["model__C"])},
             "chosen_by": "lowest mean log loss over the inner folds",
             "inner_folds": inner_folds.describe(folds, rows["date"], label),
+            "inner_log_loss": round(-float(search.best_score_), 6),  # the chosen C's mean, as the trees report
             "inner_log_loss_by_C": [[float(c), round(-float(score), 6)]  # [C, mean log loss] in grid order
                                     for c, score in zip(results["param_model__C"], results["mean_test_score"])],
             "inner_log_loss_by_fold": {str(fold.year): round(-float(results[f"split{k}_test_score"][best]), 6)
@@ -111,6 +112,11 @@ class LogisticModel:
             "converged": bool(fitted.n_iter_.max() < self.max_iter),
         }
         return self
+
+    @property
+    def estimator(self) -> Pipeline | None:
+        """The fitted scikit-learn estimator, the one a run saves; it reads the inputs by name."""
+        return self.pipeline
 
     def predict_proba(self, rows) -> np.ndarray:
         if self.pipeline is None:
@@ -188,6 +194,11 @@ class _TreeSearchModel:
             "stopped_before_max_rounds": len(self.inner_curve) < self.max_rounds,
         }
         return self
+
+    @property
+    def estimator(self):
+        """The fitted scikit-learn estimator, the one a run saves; it reads the inputs by name."""
+        return self.model
 
     def predict_proba(self, rows) -> np.ndarray:
         if self.model is None:

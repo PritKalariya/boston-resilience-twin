@@ -26,6 +26,8 @@ Data-Pipeline/data/*
 
 # Training runs (#106): predictions and metrics written per run, never committed
 Model-Development/runs/
+# The local MLflow store (#107): the SQLite database and the logged artifacts and models
+Model-Development/mlruns/
 
 # Airflow logs (bind-mounted into the containers by docker-compose.yaml)
 Data-Pipeline/logs/*
