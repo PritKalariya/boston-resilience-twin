@@ -1,0 +1,34 @@
+# The training stage (#107): train the seasonal baseline and every candidate, select the model
+# against the ADR-026 margin and score it on the test window (scripts/selection.py).
+#
+# It is a pipeline of its own, with its own dvc.lock, so that it never rewrites
+# Data-Pipeline/dvc.lock, whose sha256 is the data version every run records. It depends on that
+# lock too, so a new data version reruns the selection. Run from Model-Development/ after
+# `dvc pull` in Data-Pipeline/:
+#   dvc repro   # about a minute; then dvc push (scripts/dvc_push.py) stores the reports
+# The stage fails and records nothing when no candidate beats the baseline by the margin
+# (selection.py exits 1). The run folders and the MLflow runs it writes are gitignored side files;
+# the reports are its output. tests/test_dvc_stage.py checks that the deps name the feature
+# catalog and every script selection.py loads.
+stages:
+  select:
+    cmd: python scripts/selection.py
+    deps:
+    - ../Data-Pipeline/config/feature_catalog.csv
+    - ../Data-Pipeline/data/processed/labels.parquet
+    - ../Data-Pipeline/data/processed/features.parquet
+    - ../Data-Pipeline/dvc.lock
+    - config
+    - scripts/inner_folds.py
+    - scripts/model_params.py
+    - scripts/models.py
+    - scripts/predictions.py
+    - scripts/seasonal_baseline.py
+    - scripts/selection.py
+    - scripts/slices.py
+    - scripts/threshold.py
+    - scripts/tracking.py
+    - scripts/train.py
+    - scripts/training_data.py
+    outs:
+    - reports

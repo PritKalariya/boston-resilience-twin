@@ -729,6 +729,29 @@ python Model-Development/scripts/selection.py   # about 40 s; trains the baselin
   - On this data version the test window has 72 storm, 157 freeze and 9 heat days (3 heat-day surges), so the heat numbers carry little weight.
 - **Each model's run folder** is `Model-Development/runs/<selection id>-<model>/`, as `train.py` writes it.
 
+### Training stage (DVC, #107)
+
+The selection is also a DVC stage, `select` in `Model-Development/dvc.yaml`. It has its own `Model-Development/dvc.lock`, so it never rewrites `Data-Pipeline/dvc.lock`, whose sha256 is the data version.
+
+- **Its dependencies:**
+  - `Data-Pipeline/config/feature_catalog.csv`;
+  - the labels and features;
+  - `Data-Pipeline/dvc.lock` (a new data version reruns it);
+  - the `Model-Development/config` folder (a new `tuned_params.yaml` reruns it too);
+  - every script `selection.py` loads (`tests/test_dvc_stage.py` checks the list).
+- **Its output** is `Model-Development/reports/`.
+- **Run it** from an LF checkout or the Airflow image, as for the Data-Pipeline stages (the lock hashes the scripts with LF endings):
+
+  ```bash
+  cd Data-Pipeline && dvc pull      # the data version's labels and features
+  cd ../Model-Development && dvc repro --single-item select   # about a minute; --single-item leaves the data stages alone
+  python ../Data-Pipeline/scripts/dvc_push.py                 # store the reports
+  ```
+
+  Commit `Model-Development/dvc.lock`. On a later checkout, `dvc pull` brings the reports back.
+- **It fails and records nothing** when no candidate beats the baseline by the margin (`selection.py` exits 1).
+- **The numbers are from the Linux image.** XGBoost's model differs slightly between platforms: the Linux `xgboost-cpu` build and the Windows build sum some floating-point values in a different order, so the tree count and the F1 move in the third or fourth decimal (validation F1 0.3229 in the image, 0.3222 on a Windows laptop, on data `a719afeb`). Each platform repeats itself exactly. Logistic regression and LightGBM match across platforms. Quote the numbers of a run in the Airflow image, as the locked reports are.
+
 ### MLflow tracking (#107)
 
 Every `train.py` run is also an MLflow run in the experiment `model-training` (`mlflow_experiment` in `training.csv`).
