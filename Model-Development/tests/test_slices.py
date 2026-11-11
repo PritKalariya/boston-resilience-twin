@@ -23,7 +23,9 @@ def test_the_committed_rules_load():
     assert [rule.input for rule in rules["storm"]] == ["alert_snow_ice_count", "alert_tree_count", "alert_flooding_count",
                                                       "wx_snowfall_mm", "wx_precip_mm", "wx_gust_max_ms"]
     assert (rules["freeze"][0].operator, rules["freeze"][0].value) == ("<=", 0.0)
-    assert (rules["heat"][0].input, rules["heat"][0].operator, rules["heat"][0].value) == ("wx_tmax_c", ">=", 32.2)
+    assert (rules["heat"][0].input, rules["heat"][0].operator, rules["heat"][0].value) == ("wx_tmax_c", ">=", 32.22)
+    heat = L.masks(pd.DataFrame({"wx_tmax_c": [32.1, 32.2, 32.3]}), {"heat": rules["heat"]})["heat"]
+    assert heat.tolist() == [False, False, True]  # 32.2 C is 89.96 F, under 90 F
 
 
 @pytest.mark.parametrize("text, message", [

@@ -76,14 +76,21 @@ def load_rules(path: str | Path) -> dict[str, list[Rule]]:
     return rules
 
 
+def check_inputs(rules: dict[str, list[Rule]], columns) -> None:
+    """Fails naming the first slice with a rule on an input that is not among columns."""
+    for name, group in rules.items():
+        for rule in group:
+            if rule.input not in columns:
+                raise ValueError(f"slice {name}: the input {rule.input} is not in the features")
+
+
 def masks(rows: pd.DataFrame, rules: dict[str, list[Rule]]) -> dict[str, np.ndarray]:
     """Which rows each slice holds: all of them for all, else those where any rule holds."""
+    check_inputs(rules, rows.columns)
     out = {ALL: np.ones(len(rows), dtype=bool)}
     for name, group in rules.items():
         mask = np.zeros(len(rows), dtype=bool)
         for rule in group:
-            if rule.input not in rows.columns:
-                raise ValueError(f"slice {name}: the input {rule.input} is not in the features")
             with np.errstate(invalid="ignore"):  # a missing value compares False: it holds no rule
                 mask |= OPERATORS[rule.operator](rows[rule.input].to_numpy(dtype="float64"), rule.value)
         out[name] = mask

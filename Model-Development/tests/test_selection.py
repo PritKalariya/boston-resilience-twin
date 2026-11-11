@@ -110,6 +110,14 @@ def test_the_charts_handle_a_baseline_without_a_model_and_a_row_without_cases(tm
         assert (tmp_path / name).read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+def test_a_slice_input_missing_from_the_features_is_named_before_pyarrow_reads_them(tmp_path):
+    rules = tmp_path / "slices.csv"
+    rules.write_text("slice,input,operator,value,note\nheat,wx_tmax_c,>=,32.22,x\n", encoding="utf-8")
+    settings = D.load_settings(H.write_repo(tmp_path, slices=str(rules)))  # its features have no wx_tmax_c
+    with pytest.raises(ValueError, match="slice heat: the input wx_tmax_c is not in the features"):
+        S.test_slices(entry("a", 1, 1, 1), entry("seasonal", 1, 4, 4), settings)
+
+
 def _signal_repo(tmp_path):
     """A temp repo over every season from 2016 whose one extra input carries the surge signal, so the
     candidates clearly beat the seasonal baseline. The features also hold what the slice rules read:

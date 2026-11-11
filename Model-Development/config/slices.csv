@@ -6,4 +6,4 @@ storm,wx_snowfall_mm,>=,25.4,forecast snowfall of 1 inch or more (NCEI climate n
 storm,wx_precip_mm,>=,25.4,forecast precipitation of 1 inch or more (NCEI DP1X)
 storm,wx_gust_max_ms,>=,20.6,a forecast gust of 46 mph or more (the gusts of an NWS Boston wind advisory: 46 to 57 mph)
 freeze,wx_tmin_c,<=,0,a forecast low at or below 32 F (an NWS freeze; NCEI DT32)
-heat,wx_tmax_c,>=,32.2,a forecast high of 90 F or more (NCEI DX90); a heat index needs humidity which no input has
+heat,wx_tmax_c,>=,32.22,a forecast high of 90 F or more (NCEI DX90): 90 F is 32.22 C and the inputs are in tenths of a degree so 32.2 C (89.96 F) is not a heat day; a heat index needs humidity which no input has

@@ -149,6 +149,15 @@ def test_each_input_is_prepared_by_its_kind(table):
     assert np.abs(days[0] - days[1]).max() < 0.05 < np.abs(days[0] - days[2]).max()  # 31 December meets 1 January
 
 
+def test_three_year_parts_is_the_fewest_the_periodic_curve_takes():
+    """year_parts + 1 knots, and a periodic cubic spline needs more than 3, so model_params.py
+    refuses fewer than 3 parts before scikit-learn would."""
+    year = pd.DataFrame({"day_of_year": range(1, 367)})
+    assert models.logreg_preparation(["day_of_year"], year_parts=3).fit_transform(year).shape[0] == 366
+    with pytest.raises(ValueError, match="Periodic splines require degree < n_knots"):
+        models.logreg_preparation(["day_of_year"], year_parts=2).fit(year)
+
+
 def test_the_ratio_enters_as_the_scaled_log(table):
     rows = _train(table)
     preparation = models.logreg_preparation(["snow_ice_rel7"], year_parts=12).fit(rows[["snow_ice_rel7"]])

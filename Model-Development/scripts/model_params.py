@@ -85,7 +85,8 @@ def _whole(minimum: int):
 
 
 PARAMETERS = {
-    "logreg": {"C_grid": _increasing_positive, "max_iter": _whole(1), "year_parts": _whole(2)},
+    # year_parts + 1 knots, and a periodic cubic spline needs more than 3 knots: at least 3 parts
+    "logreg": {"C_grid": _increasing_positive, "max_iter": _whole(1), "year_parts": _whole(3)},
     "xgboost": {"learning_rate": _fraction, "max_rounds": _whole(1), "stopping_rounds": _whole(1),
                 "max_depth": _whole(1), "min_child_weight": _not_negative, "reg_lambda": _not_negative,
                 "subsample": _fraction, "colsample_bytree": _fraction, "seed": _whole(0)},

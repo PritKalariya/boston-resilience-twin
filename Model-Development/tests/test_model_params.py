@@ -64,7 +64,7 @@ def test_a_good_file_loads_with_its_values(tmp_path):
     (GOOD.replace("500", "0"), "logreg.max_iter must be a whole number of 1 or more"),
     (GOOD.replace("500", "true"), "logreg.max_iter must be a whole number of 1 or more"),
     (GOOD.replace("500", "2.5"), "logreg.max_iter must be a whole number of 1 or more"),
-    (GOOD.replace("year_parts: 12", "year_parts: 1"), "logreg.year_parts must be a whole number of 2 or more"),
+    (GOOD.replace("year_parts: 12", "year_parts: 2"), "logreg.year_parts must be a whole number of 3 or more"),
     (GOOD.replace("learning_rate: 0.1", "learning_rate: 0"), "xgboost.learning_rate must be above 0 and at most 1"),
     (GOOD.replace("subsample: 0.8", "subsample: 1.5"), "xgboost.subsample must be above 0 and at most 1"),
     (GOOD.replace("reg_lambda: 1.0", "reg_lambda: -1.0"), "xgboost.reg_lambda must be 0 or more"),

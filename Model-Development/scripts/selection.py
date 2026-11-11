@@ -38,6 +38,7 @@ from fractions import Fraction
 from pathlib import Path
 
 import pandas as pd
+import pyarrow.parquet as pq
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 
@@ -263,6 +264,7 @@ def test_slices(subject: Entry, baseline: Entry, settings: training_data.Setting
     """subject against the baseline on the test window, overall and on each kind of day in slices.csv
     (slices.py), from both runs' saved predictions and the features the rules read."""
     rules = slices.load_rules(settings.slices)
+    slices.check_inputs(rules, pq.read_schema(settings.features).names)  # before pyarrow refuses the column
     inputs = sorted({rule.input for group in rules.values() for rule in group})
     features = pd.read_parquet(settings.features, columns=[*slices.KEYS, *inputs])
     features["date"] = pd.to_datetime(features["date"])
