@@ -1,0 +1,80 @@
+schema: '2.0'
+stages:
+  select:
+    cmd: python scripts/selection.py
+    deps:
+    - path: ../Data-Pipeline/config/feature_catalog.csv
+      hash: md5
+      md5: 2d4f71b056214271db1c2aab8163f1f9
+      size: 10616
+    - path: ../Data-Pipeline/data/processed/features.parquet
+      hash: md5
+      md5: 0af01ad276f431efc6d6aac576a1688a
+      size: 3953991
+    - path: ../Data-Pipeline/data/processed/labels.parquet
+      hash: md5
+      md5: e7e3f01f6b3c1e344345d893af55f9b3
+      size: 1457584
+    - path: ../Data-Pipeline/dvc.lock
+      hash: md5
+      md5: 33f588388be56702f2e5d2eeb04117e6
+      size: 33073
+    - path: config
+      hash: md5
+      md5: 7c85dbc32217de07310ef3d4e4757221.dir
+      size: 10878
+      nfiles: 6
+    - path: scripts/inner_folds.py
+      hash: md5
+      md5: 0494e04b926b8c482dbdd5a1327bf5c5
+      size: 5995
+    - path: scripts/mlflow_runs.py
+      hash: md5
+      md5: 3e0da7b507122d602c7f9dccf90c3056
+      size: 9419
+    - path: scripts/model_params.py
+      hash: md5
+      md5: bfa2a7f6cc1e538e091883031c4e7d6b
+      size: 8867
+    - path: scripts/models.py
+      hash: md5
+      md5: 4814eab2f21a1a7395604c3e8dd144cb
+      size: 15744
+    - path: scripts/predictions.py
+      hash: md5
+      md5: 7a9b064a497e404a2da733dd52f3d6ce
+      size: 5526
+    - path: scripts/seasonal_baseline.py
+      hash: md5
+      md5: b49b592489f3a61db4ea5930534ab487
+      size: 4061
+    - path: scripts/selection.py
+      hash: md5
+      md5: 3b9aee3f9630a45bec90a21e3895d8e2
+      size: 21689
+    - path: scripts/slices.py
+      hash: md5
+      md5: 744d03cf2710b90d71287e92540a1983
+      size: 9360
+    - path: scripts/threshold.py
+      hash: md5
+      md5: 48dc03bd152a0154371f596d2e32eb7a
+      size: 7117
+    - path: scripts/tracking.py
+      hash: md5
+      md5: 4ae920cc56a55f62bd9020ef25ce84ee
+      size: 4032
+    - path: scripts/train.py
+      hash: md5
+      md5: a693fb2128a1d591d838423928c8f073
+      size: 13886
+    - path: scripts/training_data.py
+      hash: md5
+      md5: 51e5d93c1c9fdc18f99800e9dcd573c9
+      size: 20797
+    outs:
+    - path: reports
+      hash: md5
+      md5: 0e12431556ae636765227531ff3b71a6.dir
+      size: 140789
+      nfiles: 5

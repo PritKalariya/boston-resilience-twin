@@ -15,6 +15,12 @@ pulls every year. When each year was pulled is kept in _downloads.json under
 stored file as it was, so a run with nothing new changes nothing in raw/. A
 pull without IEM's columns (an error page) never replaces a stored year.
 
+First bulletins (--download, #107): the bulletin that first sent each Boston
+alert, from IEM's text service (TEXT_URL/<product_id>), kept as published in
+Data-Pipeline/data/raw/nws_alerts/bulletins/<product_id>.txt. A bulletin never
+changes, so each is fetched once, one request at a time with a pause
+(BULLETIN_PAUSE_S); an answer without a VTEC string is never stored.
+
 Prepare: keeps the rows of Boston's forecast zone MAZ015 and county MAC025,
 one row per area and first bulletin, with what is known when an alert is first
 sent (ADR-014): the first bulletin `utc_prodissue`, checked against the first
@@ -29,13 +35,22 @@ is kept as `unmapped` and reported. Writes
 Data-Pipeline/data/interim/nws_alerts.parquet and prints alerts per year and
 area, to compare with ADR-014.
 
+First-announced begin (with_first_begins, #107): the bulk download keeps only
+the begin as last known (`utc_issue`), which later bulletins can move, so it is
+never used. The first bulletin's segment that names the row's area holds the
+alert's VTEC string, /O.NEW.KBOX.BZ.W.0001.150127T0000Z-150128T0600Z/ for the
+2015 blizzard warning, and its begin (2015-01-27 00:00 UTC there) is the begin
+as first announced, `first_begin_utc`. A begin of 000000T0000Z means the alert
+was in effect when sent (NWSI 10-1703), so it begins at the bulletin. A row
+whose bulletin gives no single begin for its area stops the run.
+
 Features (alert_features, used by feature_table.py for the history and the
 evening run alike): for each day D and storm group, the alerts whose first
 bulletin came before the forecast cutoff (the evening before D, Boston time),
-whose first-announced end is after D begins, and that were not cancelled or
-upgraded before that same cutoff. One VTEC event counts once, even when it went
-to both Boston's zone and county. The start time is never used: the archive has
-only its last state (ADR-014).
+that as first announced begin before D ends and end after D begins, and that
+were not cancelled or upgraded before that same cutoff. So a watch sent on D-1
+for a storm on D+1 counts for D+1, not for D. One VTEC event counts once, even
+when it went to both Boston's zone and county.
 
 Freshness (--check-nws, ADR-014): the evening run uses a pull only if it holds
 every Boston alert message in #7's NWS snapshot that was sent before the
@@ -51,6 +66,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -85,12 +101,26 @@ DOWNLOADS = "_downloads.json"
 VTEC_KEY = ["phenomena", "significance", "eventid", "vtec_year"]  # one VTEC event of office BOX
 EVENT_KEY = [*VTEC_KEY, "first_bulletin_utc"]  # one row per area and first bulletin
 OUT_COLUMNS = ["ugc", "area", "phenomena", "significance", "alert_type", "storm_groups", "eventid",
-               "vtec_year", "product_id", "first_bulletin_utc", "first_end_utc", "ended_early_utc"]
-FEATURE_INPUT = ["storm_groups", *EVENT_KEY, "first_end_utc", "ended_early_utc"]
+               "vtec_year", "product_id", "first_bulletin_utc", "first_begin_utc", "first_end_utc", "ended_early_utc"]
+PREPARED_COLUMNS = [column for column in OUT_COLUMNS if column != "first_begin_utc"]  # before with_first_begins
+FEATURE_INPUT = ["storm_groups", *EVENT_KEY, "first_begin_utc", "first_end_utc", "ended_early_utc"]
 NEVER = np.iinfo(np.int64).max  # a missing time: later than every cutoff
 # Operational VTEC: /O.action.office.phenomena.significance.event number.start-end/
 VTEC = re.compile(r"/O\.([A-Z]{3})\.([A-Z]{4})\.([A-Z]{2})\.([A-Z])\.(\d{4})\.")
+VTEC_TIMES = re.compile(VTEC.pattern + r"(\d{6}T\d{4}Z)-(\d{6}T\d{4}Z)/")  # the same with its begin and end
+IN_EFFECT = "000000T0000Z"  # the VTEC begin of an alert already in effect when sent (NWSI 10-1703)
+STARTS = ("NEW", "EXA", "EXB")  # VTEC actions that start an alert in an area: new, area added, area and time
 SNAPSHOT_NAME = re.compile(r"\d{8}T\d{6}Z\.json")  # #7's nws.py names a snapshot by NWS's updated time
+TEXT_URL = "https://mesonet.agron.iastate.edu/api/1/nwstext"  # IEM's text service, one product per id
+BULLETINS = "bulletins"  # the first bulletins, a folder of the raw folder (#107)
+BULLETIN_PAUSE_S = 0.5  # between two text requests, to go easy on IEM
+# IEM's product id: send time, office, WMO heading, AWIPS id and, for a correction or resend, its BBB code
+PRODUCT_ID = re.compile(r"\d{12}-[A-Z0-9]{4}-[A-Z0-9]{6}-[A-Z0-9]{4,6}(?:-[A-Z]{3})?")
+# A UGC block (NWSI 10-1702): areas as SSFNNN, NNN or NNN>NNN joined by "-", then the expiry DDHHMM-
+UGC_CODE = re.compile(r"([A-Z]{2}[CZ])?(\d{3})(?:>(?:[A-Z]{2}[CZ])?(\d{3}))?")
+UGC_BLOCK = re.compile(rf"(?:{UGC_CODE.pattern}-)+\d{{6}}-")
+UGC_FIRST = re.compile(r"[A-Z]{2}[CZ]\d{3}[->]")  # how a UGC block's first line begins
+UGC_MAX_LINES = 10  # a UGC block longer than this is not one
 
 
 class FreshnessError(RuntimeError):
@@ -209,6 +239,50 @@ def read_raw(raw_dir: Path, years: list[int], optional=frozenset()) -> pd.DataFr
     return pd.concat(frames, ignore_index=True)
 
 
+def bulletin_url(product_id: str) -> str:
+    """IEM's text of a product; nolimit returns every product with this id, should IEM hold two."""
+    return f"{TEXT_URL}/{product_id}?nolimit=true"
+
+
+def bulletin_path(raw_dir: Path, product_id: str) -> Path:
+    if not PRODUCT_ID.fullmatch(product_id):
+        raise ValueError(f"{product_id!r} is not an IEM product id")
+    return raw_dir / BULLETINS / f"{product_id}.txt"
+
+
+def download_bulletins(raw_dir: Path, product_ids, fetch=download, pause_s: float = BULLETIN_PAUSE_S) -> dict:
+    """Fetch the first bulletins not stored yet, one at a time; a stored one is kept as it is.
+
+    Each lands next to its target first and is kept only when it holds an
+    operational VTEC string, so an error page never becomes a bulletin.
+    """
+    wanted = sorted(set(product_ids))
+    missing = [product_id for product_id in wanted if not bulletin_path(raw_dir, product_id).is_file()]
+    (raw_dir / BULLETINS).mkdir(parents=True, exist_ok=True)
+    for i, product_id in enumerate(missing):
+        if i:
+            time.sleep(pause_s)
+        path = bulletin_path(raw_dir, product_id)
+        staging = path.with_name(path.name + ".download")
+        try:
+            fetch(bulletin_url(product_id), staging)
+            if not VTEC_TIMES.search(staging.read_text(encoding="utf-8")):
+                raise ValueError(f"IEM's text for {product_id} holds no VTEC string; not a bulletin")
+        except Exception as exc:
+            staging.unlink(missing_ok=True)
+            exc.add_note(f"IEM text of {product_id} failed; nothing was stored for it")
+            raise
+        staging.replace(path)
+    return {"needed": len(wanted), "already stored": len(wanted) - len(missing), "downloaded": len(missing)}
+
+
+def read_bulletin(raw_dir: Path, product_id: str) -> str:
+    path = bulletin_path(raw_dir, product_id)
+    if not path.is_file():
+        raise FileNotFoundError(f"{path} is missing; run alert_history.py --download")
+    return path.read_text(encoding="utf-8")
+
+
 def load_alert_map(path: Path | str) -> pd.DataFrame:
     """The reviewed map from alert type to storm groups. Raises on a malformed file."""
     df = pd.read_csv(path, dtype=str, keep_default_na=False)
@@ -291,7 +365,85 @@ def prepare(raw: pd.DataFrame, alert_map: pd.DataFrame) -> tuple[pd.DataFrame, p
     out["alert_type"] = out["alert_type"].fillna(code)
     out["storm_groups"] = out["storm_groups"].fillna(UNMAPPED)
     out = out.sort_values(["first_bulletin_utc", "ugc", "phenomena", "significance", "eventid"], ignore_index=True)
-    return out[OUT_COLUMNS], report
+    return out[PREPARED_COLUMNS], report
+
+
+def ugc_codes(block: str) -> set[str]:
+    """The areas a UGC block names: MAZ005>007-013-RIZ001-260500- is MAZ005, MAZ006, MAZ007, MAZ013 and RIZ001."""
+    codes, prefix = set(), None
+    for part in block.split("-")[:-2]:  # the last two pieces are the expiry time and nothing
+        match = UGC_CODE.fullmatch(part)
+        prefix = (match.group(1) or prefix) if match else None  # a bare number keeps the state and type before it
+        if prefix is None:
+            raise ValueError(f"unreadable UGC {part!r} in {block!r}")
+        first, last = int(match.group(2)), int(match.group(3) or match.group(2))
+        codes.update(f"{prefix}{number:03d}" for number in range(first, last + 1))
+    return codes
+
+
+def bulletin_segments(text: str) -> list[tuple[set[str], list[tuple[str, ...]]]]:
+    """Each segment of an IEM text answer: the areas its UGC block names and its operational VTEC
+    strings as (action, office, phenomena, significance, event number, begin, end)."""
+    lines = [line.strip() for line in re.sub(r"[\x00-\x08\x0b-\x1f]", "", text).split("\n")]
+    segments, i = [], 0
+    while i < len(lines):
+        block, j = lines[i], i
+        while UGC_FIRST.match(lines[i]) and not re.search(r"\d{6}-$", block) and j + 1 < min(len(lines), i + UGC_MAX_LINES):
+            j += 1
+            block += lines[j]
+        if not (UGC_FIRST.match(lines[i]) and UGC_BLOCK.fullmatch(block)):
+            i += 1
+            continue
+        vtecs, i = [], j + 1
+        while i < len(lines) and lines[i] != "$$" and not UGC_FIRST.match(lines[i]):  # the segment ends at $$
+            vtecs.extend(VTEC_TIMES.findall(lines[i]))
+            i += 1
+        segments.append((ugc_codes(block), vtecs))
+    return segments
+
+
+def first_begin(text: str, ugc: str, phenomena: str, significance: str, eventid: int,
+                sent: pd.Timestamp) -> tuple[pd.Timestamp, bool]:
+    """When the first bulletin announced the alert to begin in this area, in UTC (module docstring), and
+    whether a VTEC string with the alert's own event number gave it.
+
+    The begin of the alert's VTEC string in the segment that names ugc, or the
+    bulletin's send time when it reads IN_EFFECT. IEM renumbered a few events
+    (two wind chill advisories of December 2017, ADR-014), so when no string
+    has the row's number, the one alert of the same type that the segment
+    starts (NEW, EXA or EXB) is used. Raises unless that leaves exactly one
+    begin.
+    """
+    found = {(action, vtec_event[2], begin) for codes, vtecs in bulletin_segments(text) if ugc in codes
+             for action, office, *vtec_event, begin, _end in vtecs
+             if office == f"K{WFO}" and vtec_event[:2] == [phenomena, significance]}
+    own = {begin for _, number, begin in found if number == f"{eventid:04d}"}
+    started = {(number, begin) for action, number, begin in found if action in STARTS}
+    begins = own or ({begin for _, begin in started} if len(started) == 1 else set())
+    if len(begins) != 1:
+        raise ValueError(f"the first bulletin gives {len(begins)} begins for {phenomena}.{significance} {eventid} "
+                         f"in {ugc}: {sorted(found)}")
+    (begin,) = begins
+    when = pd.Timestamp(sent) if begin == IN_EFFECT else pd.to_datetime(begin, format="%y%m%dT%H%MZ", utc=True)
+    return when, bool(own)
+
+
+def with_first_begins(alerts: pd.DataFrame, bulletin) -> tuple[pd.DataFrame, list[str]]:
+    """alerts (prepare's) with first_begin_utc, and the alerts matched by type alone (first_begin), as
+    "WC.Y 4 in <product id>"; bulletin(product_id) returns that first bulletin's text."""
+    begins, by_type = [], []
+    for alert in alerts.itertuples(index=False):
+        try:
+            begin, own_number = first_begin(bulletin(alert.product_id), alert.ugc, alert.phenomena,
+                                            alert.significance, alert.eventid, alert.first_bulletin_utc)
+        except ValueError as exc:
+            exc.add_note(f"in bulletin {alert.product_id}; check it, IEM may have changed its text (ADR-014, revisit)")
+            raise
+        begins.append(begin)
+        if not own_number:
+            by_type.append(f"{alert.phenomena}.{alert.significance} {alert.eventid} in {alert.product_id}")
+    first = pd.to_datetime(pd.Series(begins, index=alerts.index, dtype=object), utc=True)
+    return alerts.assign(first_begin_utc=first)[OUT_COLUMNS], by_type
 
 
 def cutoff_utc(days: pd.DatetimeIndex, cutoff_local: str) -> pd.DatetimeIndex:
@@ -318,9 +470,11 @@ def _ns(values) -> np.ndarray:
 
 
 def alert_features(alerts: pd.DataFrame, dates, cutoff_local: str, groups: list[str]) -> pd.DataFrame:
-    """Per day D: alerts known before the cutoff the evening before D that, as first announced, run past D's start.
+    """Per day D: alerts known before the cutoff the evening before D that, as first announced, run during D.
 
-    An alert cancelled or upgraded before that same cutoff is left out (A+); a
+    Running during D means beginning before D ends and ending after it begins,
+    so an alert announced for the next day is left out (#107). An alert
+    cancelled or upgraded before that same cutoff is left out too (A+); a
     cancellation at or after the cutoff changes nothing. One VTEC event counts
     once, and counts while any of its rows (Boston's zone, its county) does.
     `_count` is how many such alerts a group has; `_warning` is 1 if one of
@@ -328,11 +482,14 @@ def alert_features(alerts: pd.DataFrame, dates, cutoff_local: str, groups: list[
     """
     missing = set(FEATURE_INPUT) - set(alerts.columns)
     if missing:
-        raise ValueError(f"alerts are missing columns {sorted(missing)}; rerun alert_history.py (ADR-014 A+)")
+        raise ValueError(f"alerts are missing columns {sorted(missing)}; rerun alert_history.py (ADR-014 A+, #107)")
+    if alerts["first_begin_utc"].isna().any():
+        raise ValueError(f"{int(alerts['first_begin_utc'].isna().sum())} alerts have no first-announced begin; "
+                         "rerun alert_history.py (#107)")
     days = pd.DatetimeIndex(pd.to_datetime(pd.Series(dates, dtype="datetime64[ns]")).unique()).sort_values()
-    cutoff, start = cutoff_utc(days, cutoff_local), day_start_utc(days)
+    cutoff, start, end = cutoff_utc(days, cutoff_local), day_start_utc(days), day_start_utc(days + pd.Timedelta(days=1))
     out = pd.DataFrame({"date": days, "forecast_cutoff_utc": cutoff})
-    known_before, day_begins = _ns(cutoff)[:, None], _ns(start)[:, None]
+    known_before, day_begins, day_ends = _ns(cutoff)[:, None], _ns(start)[:, None], _ns(end)[:, None]
     for group in groups:
         in_group = alerts["storm_groups"].map(lambda value, g=group: g in value.split(";")).astype(bool)
         mine = alerts.loc[in_group].sort_values(VTEC_KEY, kind="stable")  # .loc with a bool mask selects rows even when there are none
@@ -341,6 +498,7 @@ def alert_features(alerts: pd.DataFrame, dates, cutoff_local: str, groups: list[
             out[f"alert_{group}_warning"] = 0
             continue
         row_active = ((_ns(mine["first_bulletin_utc"])[None, :] < known_before)
+                      & (_ns(mine["first_begin_utc"])[None, :] < day_ends)
                       & (_ns(mine["first_end_utc"])[None, :] > day_begins)
                       & ~(_ns(mine["ended_early_utc"])[None, :] < known_before))
         event = mine.groupby(VTEC_KEY, sort=False).ngroup().to_numpy()
@@ -457,6 +615,11 @@ def main() -> None:
         print(markdown(pd.DataFrame(download_years(raw_dir, years, now, refresh=args.refresh, state_dir=state_dir))))
     raw = read_raw(raw_dir, years, optional={year for year in years if year > today.year})
     alerts, report = prepare(raw, load_alert_map(args.map))
+    if args.download or args.refresh:
+        fetched = download_bulletins(raw_dir, alerts["product_id"])
+        print(f"\nfirst bulletins: {fetched['needed']:,} needed, {fetched['already stored']:,} already stored, "
+              f"{fetched['downloaded']:,} downloaded")
+    alerts, by_type = with_first_begins(alerts, lambda product_id: read_bulletin(raw_dir, product_id))
     if args.check_nws:
         cutoff_local = load_settings(args.settings)["forecast_cutoff_local"]
         cutoff = cutoff_utc(pd.DatetimeIndex([pd.Timestamp(today) + pd.Timedelta(days=1)]), cutoff_local)[0]
@@ -474,6 +637,12 @@ def main() -> None:
     print(markdown(report.reset_index().rename(columns={"pull_year": "year"})))
     print(f"\n{int(alerts['ended_early_utc'].notna().sum()):,} alerts were cancelled or upgraded early "
           "(A+: CAN or UPG with utc_expire = utc_updated)")
+    later = int((alerts["first_begin_utc"] > alerts["first_bulletin_utc"]).sum())
+    print(f"{later:,} of {len(alerts):,} alerts were first announced to begin after their first bulletin "
+          "(first_begin_utc, #107)")
+    if by_type:
+        print(f"{len(by_type)} alerts have another event number in their first bulletin than in IEM's record and "
+              f"took the begin of the one alert of their type there: {'; '.join(by_type)}")
     failed = int(ended_early(raw[raw["ugc"].isin(list(UGCS))])[1].sum())
     if failed:
         print(f"WARNING: {failed} CAN or UPG rows have a utc_expire unlike their utc_updated and keep their "

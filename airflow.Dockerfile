@@ -1,11 +1,24 @@
 # The image every Airflow service in docker-compose.yaml runs (ADR-022).
 # It is the ADR-013 base image plus the pins in Data-Pipeline/requirements.txt
-# that the base image does not already ship. DAG and script code stays
-# bind-mounted (ADR-017), so the only thing copied in is the requirements file.
+# that the base image does not already ship, and one system package, libgomp1,
+# for LightGBM (#107). DAG and script code stays bind-mounted (ADR-017), so the
+# only thing copied in is the requirements file.
 #
 # Rebuild after any change to Data-Pipeline/requirements.txt:
 #   docker compose up -d --build --wait
 FROM apache/airflow:3.3.2-python3.12
+
+# LightGBM (#107) needs the OpenMP runtime, a system library pip cannot install:
+# without it, import lightgbm fails with "libgomp.so.1: cannot open shared object
+# file". XGBoost and scikit-learn ship their own copy. This is the only apt step,
+# written the way Airflow's docs add a system package: as root, then back to the
+# airflow user before pip runs. Debian 12 gives libgomp1 12.2.0 (312 KB).
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && apt-get autoremove -yqq --purge \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Never root: pip installs into the airflow user's environment.
 USER airflow

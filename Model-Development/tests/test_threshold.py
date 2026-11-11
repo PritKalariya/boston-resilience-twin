@@ -76,10 +76,16 @@ def test_auc_from_ranks():
 
 def test_metrics_report_counts_and_ratios_at_the_threshold():
     m = T.metrics([0.9, 0.8, 0.7, 0.2], [1, 0, 1, 0], 0.7)
+    assert list(m) == ["rows", "surges", "surge_rate", "threshold", "tp", "fp", "fn", "tn", "f1", "precision",
+                       "recall", "auc", "pr_auc", "log_loss", "brier", "brier_skill"]  # the metrics.json shape
     assert (m["tp"], m["fp"], m["fn"], m["tn"]) == (2, 1, 0, 1)
-    assert (m["rows"], m["surges"], m["threshold"]) == (4, 2, 0.7)
+    assert (m["rows"], m["surges"], m["surge_rate"], m["threshold"]) == (4, 2, 0.5, 0.7)
     assert m["f1"] == pytest.approx(0.8) and m["precision"] == pytest.approx(2 / 3) and m["recall"] == 1.0
     assert m["auc"] == 0.75
+    assert m["pr_auc"] == pytest.approx(1 / 2 * 1 + 1 / 2 * 2 / 3)  # each surge's recall step times precision there
+    assert m["brier"] == pytest.approx((0.1 ** 2 + 0.8 ** 2 + 0.3 ** 2 + 0.2 ** 2) / 4)
+    assert m["brier_skill"] == pytest.approx(1 - 0.195 / 0.25)  # against always forecasting the rate 0.5
+    assert m["log_loss"] == pytest.approx(-np.mean(np.log([0.9, 0.2, 0.7, 0.8])))
 
 
 def test_a_ratio_with_a_zero_denominator_is_none_not_zero():
@@ -87,6 +93,31 @@ def test_a_ratio_with_a_zero_denominator_is_none_not_zero():
     assert nothing_predicted["precision"] is None and nothing_predicted["recall"] == 0.0
     no_surge = T.metrics([0.1, 0.2], [0, 0], 0.5)
     assert no_surge["recall"] is None and no_surge["f1"] is None and no_surge["auc"] is None
+    assert no_surge["pr_auc"] is None and no_surge["brier_skill"] is None  # undefined, never 0
+    assert no_surge["log_loss"] == pytest.approx(-np.mean(np.log([0.9, 0.8]))) and no_surge["surge_rate"] == 0.0
+
+
+def test_pr_auc_takes_tied_probabilities_as_one_threshold_and_needs_a_surge():
+    assert T.pr_auc([0.5, 0.5, 0.1], [1, 0, 0]) == 0.5  # the tie is one step: precision 1/2 at recall 1
+    assert T.pr_auc([0.9, 0.1], [1, 0]) == 1.0 and T.pr_auc([0.3, 0.6], [1, 1]) == 1.0
+    assert T.pr_auc([0.3, 0.6], [0, 0]) is None
+
+
+@pytest.mark.parametrize("probability, skill", [
+    ([1.0, 0.0], 1.0),     # perfect
+    ([0.5, 0.5], 0.0),     # always the surge rate: no skill
+    ([0.2, 0.8], -1.56),   # worse than the rate: Brier 0.64 against 0.25
+])
+def test_brier_skill_compares_with_always_forecasting_the_surge_rate(probability, skill):
+    assert T.brier_skill(probability, [1, 0]) == pytest.approx(skill)
+
+
+def test_brier_skill_is_none_with_one_class_and_the_new_metrics_check_their_input():
+    assert T.brier_skill([0.2, 0.4], [1, 1]) is None and T.brier([0.2, 0.4], [1, 1]) == pytest.approx(0.5)
+    with pytest.raises(ValueError, match="probabilities must be from 0 to 1"):
+        T.brier([1.2], [1])
+    with pytest.raises(ValueError, match="labels must be 0 or 1"):
+        T.pr_auc([0.5], [2])
 
 
 def test_counts_match_the_prediction_rule():

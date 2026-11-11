@@ -61,7 +61,7 @@ docker compose up -d --build --wait
 
 The first start downloads the base images, builds the Airflow image and sets up the database. With the base image already pulled that took 1m37s on a laptop; allow a few minutes when Docker has to download it too. Later starts take under a minute. `docker compose ps -a` should show four services as `(healthy)` and `airflow-init` as `Exited (0)`.
 
-**The Airflow image.** Every Airflow service runs `brt-airflow:local`, built from `airflow.Dockerfile`: the `apache/airflow:3.3.2-python3.12` base image (ADR-013) plus `Data-Pipeline/requirements.txt`, installed under Airflow's constraints for that image (ADR-022). The base image has none of the geo packages, so without it a task that imports geopandas, shapely, pyogrio or pyproj fails.
+**The Airflow image.** Every Airflow service runs `brt-airflow:local`, built from `airflow.Dockerfile`: the `apache/airflow:3.3.2-python3.12` base image (ADR-013) plus `Data-Pipeline/requirements.txt`, installed under Airflow's constraints for that image (ADR-022), and the system package `libgomp1`, which LightGBM needs to load (#107). The base image has none of the geo packages, so without it a task that imports geopandas, shapely, pyogrio or pyproj fails.
 
 Rebuild it whenever `Data-Pipeline/requirements.txt` changes, including a change you pulled from `main`:
 
@@ -114,7 +114,7 @@ The test command needs Docker only, no Python on the host. It builds the Airflow
 
 CI (`.github/workflows/ci.yml`) runs the same lint and test command for every pull request and every push to main. Tests may not reach the network: `Data-Pipeline/tests/conftest.py` fails any test that tries, so use fixture files or fakes.
 
-To run the tests on the host instead, use Python 3.12 (ADR-013): the pins come from the Airflow constraints for 3.12, and on other versions the install can fail or build packages from source. Without a system 3.12, `uv venv --python 3.12 --seed .venv && source .venv/bin/activate` creates one (`.venv/` is gitignored); then `pip install -r Data-Pipeline/requirements.txt` and `python -m pytest Data-Pipeline/tests`. The DAG tests skip there, since Airflow comes only with the image.
+To run the tests on the host instead, use Python 3.12 (ADR-013): the pins come from the Airflow constraints for 3.12, and on other versions the install can fail or build packages from source. Without a system 3.12, `uv venv --python 3.12 --seed .venv && source .venv/bin/activate` creates one (`.venv/` is gitignored); then `pip install -r Data-Pipeline/requirements.txt` and `python -m pytest Data-Pipeline/tests`. On macOS, LightGBM also needs the OpenMP runtime: `brew install libomp`. The DAG tests skip there, since Airflow comes only with the image.
 
 ### Versioned data (DVC)
 

@@ -12,6 +12,17 @@ Model-Development/config/training.csv):
 F1 values are compared exactly, as integer ratios, so a tie is a real tie (ADR-026 compares the gates
 on exact fractions for the same reason). A validation split with no surge has no F1, so no threshold
 can be chosen and the rule fails instead of guessing (ADR-026: on_undefined = fail).
+
+metrics() reports, per split, what the threshold gives (the counts, F1, precision, recall) and what
+does not depend on it (#107):
+- auc and pr_auc rank surge days above calm ones. pr_auc is the average precision; a model that
+  ranks at random scores about the surge rate, not 0.5, so read it against surge_rate. With rare
+  surges it shows more than auc does (Saito and Rehmsmeier, PLOS ONE 2015).
+- log_loss and brier score the probabilities themselves; lower is better.
+- brier_skill is 1 minus the Brier score over that of always forecasting the split's own surge rate
+  (its sample climatology): 1 is perfect, 0 no better than that rate, below 0 worse.
+A metric that cannot be computed is None, never 0: F1, precision or recall with a zero denominator,
+auc and brier_skill with one class only, pr_auc with no surge. The counts show why.
 """
 
 from __future__ import annotations
@@ -20,6 +31,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import average_precision_score, log_loss
 
 RULES = ("validation_f1_max",)
 
@@ -93,21 +105,52 @@ def auc(probability, label) -> float | None:
     return float((ranks[y == 1].sum() - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg))
 
 
+def pr_auc(probability, label) -> float | None:
+    """The area under the precision-recall curve as average precision (scikit-learn's step sum, tied
+    probabilities as one threshold); None with no surge."""
+    p, y = _checked(probability, label)
+    if not y.any():
+        return None
+    return float(average_precision_score(y, p))
+
+
+def brier(probability, label) -> float:
+    """The mean squared difference between the probability and the 0 or 1 label."""
+    p, y = _checked(probability, label)
+    return float(np.mean((p - y) ** 2))
+
+
+def brier_skill(probability, label) -> float | None:
+    """1 minus the Brier score over that of always forecasting these rows' surge rate; None with one
+    class only, where that forecast is perfect."""
+    p, y = _checked(probability, label)
+    rate = y.mean()
+    reference = rate * (1 - rate)  # the Brier score of forecasting rate on every row
+    return float(1 - brier(p, y) / reference) if reference > 0 else None
+
+
 def _ratio(num: int, den: int) -> float | None:
     return num / den if den else None
 
 
 def metrics(probability, label, threshold: float) -> dict:
-    """Surge-class F1, precision and recall at threshold, AUC, and the counts they come from.
-    A metric with a zero denominator is None (no prediction or no surge), never 0."""
-    c = counts(probability, label, threshold)
+    """Per split: the counts at threshold and the F1, precision and recall they give; the surge rate;
+    auc and pr_auc; log loss, Brier score and Brier skill. A metric that cannot be computed is None,
+    never 0 (see the module docstring)."""
+    p, y = _checked(probability, label)
+    c = counts(p, y, threshold)
     return {
         "rows": c.tp + c.fp + c.fn + c.tn,
         "surges": c.tp + c.fn,
+        "surge_rate": (c.tp + c.fn) / len(y),
         "threshold": float(threshold),
         "tp": c.tp, "fp": c.fp, "fn": c.fn, "tn": c.tn,
         "f1": _ratio(2 * c.tp, 2 * c.tp + c.fp + c.fn),
         "precision": _ratio(c.tp, c.tp + c.fp),
         "recall": _ratio(c.tp, c.tp + c.fn),
-        "auc": auc(probability, label),
+        "auc": auc(p, y),
+        "pr_auc": pr_auc(p, y),
+        "log_loss": float(log_loss(y, p, labels=[0, 1])),
+        "brier": brier(p, y),
+        "brier_skill": brier_skill(p, y),
     }
