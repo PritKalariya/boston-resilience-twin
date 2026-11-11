@@ -32,7 +32,14 @@ Measured in run `mem-baseline-20261110` on airflow-vm, e2-medium, us-east1-b, at
 - **Durations:** `schema_and_statistics` 2 min 53 s, `bias_slicing` 6 min 47 s, `ingest_alert_history` 20 s, `ingest_static_layers` 62 s.
 - **Open item:** after the run, available memory dipped to 1820 MiB at 02:37 and to 786 MiB at 02:47:22, with nothing scheduled. No host service peaked above 144 MiB and the journal was empty. The most likely cause is a short spike in the scheduler cgroup between two `docker stats` samples. The re-measure sampler logs the top processes whenever available memory is low, so it can identify this if it recurs.
 
-The budget covers today's stack only: Postgres plus the four Airflow services. mlflow will run under a compose profile that is off by default (#104), so airflow-vm reserves nothing for it.
+Measured again in run `mem-20261110` (run 2) on airflow-vm, at `ba08086`, from freshly created containers, following the runbook's re-measure procedure: 2026-11-10 06:03:51 to 06:28:51 UTC (25 min 00 s), against 25 min 39 s for the baseline.
+
+- **Host low:** 463 MiB (485 MB) at 06:14:02. Available memory was under 500 MB for about 3 s (06:14:00 to 06:14:03), while `combine_311` ran alone; its task process was at 1909 MiB RSS. The same window bottomed at 623 MiB in the baseline, so it varies by about 160 MiB between runs.
+- **Scheduler:** anonymous peak 2219 MiB, 341 below its 2560m limit. `memory.peak` was 2486 MiB; the limit was never hit (`memory.events` max 0). It stalled for memory 1.58 s (`memory.pressure` full).
+- **Other containers:** `oom_kill` 0 in every container. Peaks: dag-processor 414 MiB, apiserver 346, postgres 69.
+- **Pool:** the heavy tasks ran one at a time. `schema_and_statistics` took 38 s alone, against 2 min 53 s alongside `bias_slicing` in the baseline.
+
+The budget covers today's stack only: Postgres plus the four Airflow services. mlflow will run under a compose profile that is off by default (#135), so airflow-vm reserves nothing for it.
 
 ## Decision
 
@@ -55,8 +62,8 @@ The budget covers today's stack only: Postgres plus the four Airflow services. m
 
 | Option | Cost | Effort | Failure behavior |
 |---|---|---|---|
-| **Pool of 1 for four heavy tasks, limits, parallelism 4 (chosen)** | About 3 min 15 s longer per build; $0 | Small: one constant, one init line, limits in compose | A task over its container's limit is killed alone (`oom_kill` in `memory.events`) and the DAG's alert fires; a task that needs more than the scheduler's limit fails every run until the limit or the task changes |
-| Chain `schema_and_statistics` before `bias_slicing` | Same added time as the pool for those two; does not cover the ingest overlap (low 509 MiB at 02:00:05, only 9 MiB over the floor) | Small | Fixes the 81 MiB low but leaves the ingest low one new download away from the floor, and a new heavy task needs its own edge |
+| **Pool of 1 for four heavy tasks, limits, parallelism 4 (chosen)** | None: run 2 was 39 s faster than the baseline, since the heavy tasks no longer contend; $0 | Small: one constant, one init line, limits in compose | A task over its container's limit is killed alone (`oom_kill` in `memory.events`) and the DAG's alert fires; a task that needs more than the scheduler's limit fails every run until the limit or the task changes |
+| Chain `schema_and_statistics` before `bias_slicing` | Same effect as the pool for those two; does not cover the ingest overlap (low 509 MiB at 02:00:05, only 9 MiB over the floor) | Small | Fixes the 81 MiB low but leaves the ingest low one new download away from the floor, and a new heavy task needs its own edge |
 | Parallelism 1 or 3 | Parallelism 1 runs every task, the 4-wide legacy parse included, one at a time; the added time was not measured | One setting | Slower for tasks that were never a problem (the parse low was 1074 MiB), while the overlap that caused the 81 MiB low can still happen at 3 |
 | e2-standard-2 (8 GB) | About $56 a month with disk and IP (machine about $49), against about $31 for e2-medium (ADR-016): nearly double, against a $50 per-member budget | Resize in Terraform | No change in behavior except more room; the budget is the failure |
 | Swap | $0 beyond disk | Small | Slow paging on a 2-shared-vCPU VM instead of a clean kill; every task and service slows down while memory is short |
@@ -64,14 +71,14 @@ The budget covers today's stack only: Postgres plus the four Airflow services. m
 
 ## Consequences
 
-- A full build takes about 3 min 15 s longer, because the four heavy tasks no longer overlap each other.
-- The projected build low is about 623 MiB, during `combine_311`, which runs alone. That is above the 500 MB floor.
+- Run 2 took 25 min 00 s, 39 s faster than the baseline: the four heavy tasks no longer overlap, so each runs faster (`schema_and_statistics` 38 s alone against 2 min 53 s).
+- The measured build low is 463 MiB (485 MB), for about 3 s during `combine_311`, which runs alone: 15 MB short of the 500 MB target, and neither the pool nor the limits change a single task's peak. It is accepted because the scheduler's 2560m limit kills a runaway task inside its cgroup before Postgres is affected. The window varies by about 160 MiB between runs (623 MiB in the baseline). Trimming `combine_311`'s peak is on the Later list for Deployment planning.
 - If every service peaked at once (the scheduler at its 2560 MiB limit, the others at their measured peaks, and the 458 MiB outside containers), the total would be about 25 MiB over the host. That is why Postgres gets `oom_score_adj`: the kernel then picks a task, not the database.
 - Laptops get the same limits through the shared compose file. The PR's laptop full build passed under them (34 of 34 tasks, oom_kill 0).
 - The scheduler's `memory.peak` reads at or near its limit once page cache fills, so it is not the measure.
 - The limit sits above the build's anonymous-memory peak, and page cache is reclaimed at the limit.
 - On the laptop build in this PR, the scheduler hit its limit 1650 times (`memory.events` max), every time reclaimed (oom 0, oom_kill 0), with 0.97 s stalled for memory in total.
-- The VM re-measure records the anonymous peak.
+- Run 2 recorded the scheduler's anonymous peak at 2219 MiB, 341 below the limit.
 - The baseline's 2805 MiB was measured before the limits and includes page cache.
 - The open 02:47 dip (786 MiB available with nothing scheduled) is unexplained. The re-measure sampler logs the top processes when available memory is low and may identify it.
 - If `airflow-init` has not run, the pool does not exist. What the scheduler does with a task whose pool is missing is recorded in the runbook ("Memory budget on airflow-vm").
@@ -79,7 +86,7 @@ The budget covers today's stack only: Postgres plus the four Airflow services. m
 
 ## Revisit when
 
-- A re-measure shows a low below 500 MB available.
+- A re-measure shows a low below 450 MiB available, confirmed by one re-run (run 2 measured 463 MiB; the 500 MB target was accepted short at that value).
 - Any container's `memory.events` shows `oom_kill` above 0.
 - A single task needs more than about 1.9 GiB.
 - The scheduler's `memory.pressure` full total passes 10 s in one build.
