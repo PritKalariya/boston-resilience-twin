@@ -1,0 +1,53 @@
+# Starting parameters of the candidate models (#107), read and checked by
+# Model-Development/scripts/model_params.py. M6 (#109) writes tuned_params.yaml in the same
+# format, naming only what it tuned; each value there replaces the one here. The number of trees
+# is not a parameter: it always comes from the inner-fold search.
+# Write decimals with a point (0.001, not 1e-3): YAML reads 1e-3 as text, and the check refuses it.
+
+logreg:
+  # The C values tried on the inner folds (inner_fold_years in training.csv). C is the inverse of
+  # the regularization strength: a smaller C keeps the coefficients smaller. The C with the lowest
+  # mean log loss over the folds is refit on every train day. Half-decade steps from 0.001 to 100;
+  # a list of one value fixes C.
+  C_grid: [0.001, 0.00316, 0.01, 0.0316, 0.1, 0.316, 1.0, 3.16, 10.0, 31.6, 100.0]
+  # lbfgs iterations at most; run.json reports a fit that stopped here as not converged.
+  max_iter: 2000
+  # day_of_year enters as a smooth curve over the year in this many equal parts (periodic splines,
+  # so 31 December joins 1 January); 12 gives about a month each.
+  year_parts: 12
+
+xgboost:
+  # One booster per inner fold grows a tree at a time until stopping_rounds more trees bring no
+  # better mean log loss over the fold years; the final model grows the tree count with the best
+  # mean on every train day (inner_folds.stop_early). A small learning rate with many trees
+  # generalizes better than a large one with few (XGBoost "Notes on Parameter Tuning").
+  learning_rate: 0.05
+  max_rounds: 3000
+  stopping_rounds: 100
+  # Shallower, more regularized trees than XGBoost's defaults (max_depth 6, min_child_weight 1,
+  # reg_lambda 1): about 3 percent of the train rows are surges, so deep trees would fit noise.
+  # min_child_weight is the least total p(1 - p) a leaf may hold: 5 is about 150 rows at the
+  # surge rate. Rows and inputs are subsampled per tree for the same reason.
+  max_depth: 4
+  min_child_weight: 5.0
+  reg_lambda: 5.0
+  subsample: 0.8
+  colsample_bytree: 0.8
+  seed: 0
+
+lightgbm:
+  # The same tree search as XGBoost's, with the same learning rate and stopping rule.
+  learning_rate: 0.05
+  max_rounds: 3000
+  stopping_rounds: 100
+  # LightGBM grows trees leaf by leaf, so num_leaves, not depth, bounds a tree. Against
+  # over-fitting, as LightGBM's "Parameters Tuning" page advises: fewer leaves than the default
+  # (15, not 31), at least 100 rows per leaf (default 20), L2 regularization, and bagging of rows
+  # (subsample, redrawn every subsample_freq trees; 0 would turn it off) and of inputs.
+  num_leaves: 15
+  min_child_samples: 100
+  reg_lambda: 5.0
+  subsample: 0.8
+  subsample_freq: 1
+  colsample_bytree: 0.8
+  seed: 0

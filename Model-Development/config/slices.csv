@@ -1,0 +1,9 @@
+slice,input,operator,value,note
+storm,alert_snow_ice_count,>=,1,a snow or ice NWS alert in effect on the day and known at the 18:00 cutoff (ADR-014 A+)
+storm,alert_tree_count,>=,1,a tree-group alert (wind and storm types in docs/data/alert-map.csv) likewise
+storm,alert_flooding_count,>=,1,a flood alert likewise
+storm,wx_snowfall_mm,>=,25.4,forecast snowfall of 1 inch or more (NCEI climate normals DSNW: days with 1.0 inch of snowfall or more)
+storm,wx_precip_mm,>=,25.4,forecast precipitation of 1 inch or more (NCEI DP1X)
+storm,wx_gust_max_ms,>=,20.6,a forecast gust of 46 mph or more (the gusts of an NWS Boston wind advisory: 46 to 57 mph)
+freeze,wx_tmin_c,<=,0,a forecast low at or below 32 F (an NWS freeze; NCEI DT32)
+heat,wx_tmax_c,>=,32.22,a forecast high of 90 F or more (NCEI DX90): 90 F is 32.22 C and the inputs are in tenths of a degree so 32.2 C (89.96 F) is not a heat day; a heat index needs humidity which no input has

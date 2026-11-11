@@ -57,15 +57,17 @@ def counts_table(units=("East", "West"), days=120, start="2016-01-01"):
 
 def alerts_table(*alerts):
     """Prepared alerts like alert_history.py writes: (storm_groups, significance, first bulletin, first end
-    [, cancelled or upgraded]) in UTC."""
+    [, cancelled or upgraded]) in UTC. Each begins at its first bulletin (first_begin_utc, #107)."""
     rows = [{
         "ugc": "MAZ015", "area": "zone", "phenomena": "WS", "significance": significance, "alert_type": "test",
         "storm_groups": groups, "eventid": i, "vtec_year": 2016, "product_id": f"p{i}",
-        "first_bulletin_utc": pd.Timestamp(first, tz="UTC"), "first_end_utc": pd.Timestamp(end, tz="UTC"),
+        "first_bulletin_utc": pd.Timestamp(first, tz="UTC"), "first_begin_utc": pd.Timestamp(first, tz="UTC"),
+        "first_end_utc": pd.Timestamp(end, tz="UTC"),
         "ended_early_utc": pd.Timestamp(early[0], tz="UTC") if early else pd.NaT,
     } for i, (groups, significance, first, end, *early) in enumerate(alerts)]
     df = pd.DataFrame(rows, columns=ALERT_COLUMNS)
-    return df.assign(ended_early_utc=pd.to_datetime(df["ended_early_utc"], utc=True))
+    return df.assign(first_begin_utc=pd.to_datetime(df["first_begin_utc"], utc=True),
+                     ended_early_utc=pd.to_datetime(df["ended_early_utc"], utc=True))
 
 
 def weather_frame(days, source=None, lag=2):
