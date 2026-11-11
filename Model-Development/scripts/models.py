@@ -9,8 +9,12 @@ After fit, a candidate's details record what it chose on the inner folds (inner_
 
 build(name, table, settings) makes a model. table is the whole labeled table of every split. Only a
 history model such as the seasonal baseline reads its labels, and only into the past. A candidate
-reads the table's columns to find its inputs and checks their missing shares across the splits
+reads the table's columns to find its inputs and checks them across the splits
 (training_data.check_missing_gaps); it learns from the rows fit gives it and nothing else.
+
+Missing values: an input missing on some train rows has a learned treatment, the branch a tree
+learned for it or the logistic regression's median with a missing flag. An input never missing in
+train has none, so check_missing_gaps stops a run where such an input is missing on a scored row.
 """
 
 from __future__ import annotations
@@ -45,8 +49,10 @@ def _log_amount(column: str) -> bool:
 
 
 def _fill_and_scale() -> list:
-    """A missing value takes the median of the rows fit on, with a 0 or 1 column flagging it; then
-    every column is scaled to mean 0 and standard deviation 1, so one C regularizes all alike."""
+    """A missing value takes the median of the rows fit on; a column with missing values in those rows
+    also gets a 0 or 1 column flagging them (only those: an input never missing in train is never
+    missing where a model scores, training_data.check_missing_gaps). Then every column is scaled to
+    mean 0 and standard deviation 1, so one C regularizes all alike."""
     return [("fill", SimpleImputer(strategy="median", add_indicator=True)), ("scale", StandardScaler())]
 
 
@@ -164,8 +170,9 @@ def _lightgbm_step(params: dict, fit_rows, fit_label, fit_weight, check_rows, ch
 class _TreeSearchModel:
     """What XGBoost and LightGBM share. The number of trees comes from the inner folds
     (inner_folds.stop_early); the final model then grows that many trees on every train day, with the
-    2020 and 2021 weights. Trees need no scaling, and a missing value takes the branch learned for it.
-    No class reweighting, as for logistic regression. A subclass gives _fold_step and _final_model."""
+    2020 and 2021 weights. Trees need no scaling. A value missing in an input that has missing values
+    in train takes the branch learned for it; an input never missing in train is never missing where
+    a model scores (training_data.check_missing_gaps). No class reweighting, as for logistic regression. A subclass gives _fold_step and _final_model."""
 
     def __init__(self, inputs: list[str], fold_years: tuple[int, ...], max_rounds: int, stopping_rounds: int):
         self.inputs, self.fold_years = list(inputs), tuple(fold_years)

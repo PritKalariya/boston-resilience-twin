@@ -4,12 +4,13 @@
 
 1. Loads the training table (training_data.load_table): the frozen labels and the model inputs of the
    data version Data-Pipeline/dvc.lock names, each labeled neighborhood-day in one split.
-2. Fits the model on the train split and predicts the validation and test splits. A candidate (#107)
-   first picks its own settings on the inner folds of the train years (inner_folds.py).
+2. Fits the model on the train split and predicts the scored rows of the validation and test splits
+   (a day with no day-before forecast is not scored; training_data.py). A candidate (#107) first
+   picks its own settings on the inner folds of the train years (inner_folds.py).
 3. Picks the threshold on validation with the shared rule (threshold.py) and applies the same
    threshold to test, which never picks it.
 4. Writes Model-Development/runs/<run id>/ (runs_dir in the config; gitignored):
-   - predictions.parquet: the predictions.py contract, the validation and test rows;
+   - predictions.parquet: the predictions.py contract, the scored validation and test rows;
    - metrics.json, per split: the counts at the threshold with the F1, precision and recall they
      give, the surge rate, AUC, PR-AUC, log loss, Brier score and Brier skill (threshold.metrics);
    - validation_counts.json: tp, fp and fn on validation with the data version, the block the
@@ -130,10 +131,10 @@ def train(model_name: str, settings: training_data.Settings, run_id: str | None 
         model.fit(train_rows, train_rows["label"].to_numpy(), train_rows["weight"].to_numpy())
         train_time_s = time.perf_counter() - start
         rows, probability = {}, {}
-        for split in PREDICTED_SPLITS:
-            rows[split] = table[table["split"] == split].reset_index(drop=True)
+        for split in PREDICTED_SPLITS:  # only the scored rows: a day with no forecast is not scored
+            rows[split] = table[(table["split"] == split) & table["scored"]].reset_index(drop=True)
             if rows[split].empty:
-                raise ValueError(f"the {split} split has no labeled rows")
+                raise ValueError(f"the {split} split has no scored rows")
             probability[split] = np.asarray(model.predict_proba(rows[split]), dtype="float64")
             if len(probability[split]) != len(rows[split]):
                 raise ValueError(f"{model_name} returned {len(probability[split])} probabilities for "
@@ -212,6 +213,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"chosen on the inner folds {years}: {chosen} ({details['chosen_by']})")
         if details.get("stopped_before_max_rounds") is False:
             print("note: the tree search reached max_rounds without stopping; raise max_rounds in model_params.yaml")
+    for split in PREDICTED_SPLITS:
+        note = training_data.unscored_note(run["rows"], split)
+        if note:
+            print(note)
     print(f"threshold {run['threshold']:.6f} ({run['threshold_rule']})")
     print(f"{'split':<11}{'rows':>7}{'surges':>8}{'tp':>6}{'fp':>7}{'fn':>6}{'f1':>9}{'precision':>11}{'recall':>9}"
           f"{'auc':>9}{'pr_auc':>9}{'log_loss':>10}{'brier_ss':>10}")

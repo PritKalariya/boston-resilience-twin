@@ -685,6 +685,10 @@ python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run i
 
 - **Writes** `Model-Development/runs/<UTC time>-<model>/` (gitignored): `predictions.parquet` (the contract in `predictions.py`), `metrics.json` (per split), `validation_counts.json` (validation tp, fp and fn with the data version, for the gates) and `run.json` (threshold, data version, git commit, inputs, settings, row counts, and in `model_details` what a candidate chose on the inner folds).
 - **The threshold** is picked on validation with the shared rule (highest F1, the higher one on a tie) and reused on test.
+- **Days with no forecast are not scored** (#107 review).
+  - Validation and test take their weather from the day-before forecast. A day of theirs missing any input in `forecast_inputs` (`training.csv`: the five `wx_` inputs) has no forecast, and the evening run could not forecast it either.
+  - Its rows get no prediction, no metric and no say in the threshold. They stay in the table as labels, since the seasonal baseline reads them as history.
+  - `train.py` prints them, for example `validation: 20 days not scored (480 rows, no day-before forecast), 2024-01-01 to 2024-01-20` on this data version. `run.json` counts them under `rows`.
 - **Reading the metrics** (`metrics.json`, per split; #107):
   - F1, precision and recall depend on the threshold.
   - AUC, PR-AUC, log loss, Brier score and Brier skill do not, so they show ranking and probability quality apart from the threshold.
@@ -696,9 +700,11 @@ python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run i
   - Logistic regression takes the C with the lowest mean log loss over the folds, then refits on every train day.
   - XGBoost and LightGBM each grow one model per fold a tree at a time and keep the tree count with the lowest mean log loss, stopping 100 trees after the best (`stopping_rounds`). The final model grows that many trees on every train day. If the search reaches `max_rounds` first, `train.py` says so: raise `max_rounds` in `model_params.yaml`.
   - 2024 then picks only the threshold and the winner.
-- **A candidate run stops** when an input's missing share in validation or test is more than `missing_gap_max_points` (10) percentage points from train. The message names the input; check that input's source in the feature table before anything else. The seasonal baseline reads no input and still runs.
+- **A candidate run stops** on the scored rows in either of two cases. The message names the input; check that input's source in the feature table before anything else. The seasonal baseline reads no input and still runs.
+  - An input never missing in train is missing on a scored validation or test row. No model has learned what a missing value means there: LightGBM would read it as 0, XGBoost would take a branch no row trained, and logistic regression would take the median with no flag. Fill the gap at its source. If those days have no forecast at all, name the input in `forecast_inputs`.
+  - An input's missing share in validation or test is more than `missing_gap_max_points` (10) percentage points from train.
 - **Settings** live in config files, never in code.
-  - `training.csv` covers the split dates, the 2020 and 2021 weight, the inner fold years, the missing-share limit, the threshold rule and the seasonal window.
+  - `training.csv` covers the split dates, the 2020 and 2021 weight, the inner fold years, the forecast inputs, the missing-share limit, the threshold rule and the seasonal window.
   - `model_params.yaml` holds the candidates' starting parameters (#107). It is checked on load: write decimals with a point (`0.001`, not `1e-3`, which YAML reads as text).
   - `tuned_params.yaml` (M6, #109) has the same format but names only what was tuned; each value replaces its starting one when the file exists. The number of trees is not a parameter, since the inner-fold search always picks it. A run prints which values were tuned, and `run.json` records them under `parameters` with the file's sha256. Check a new tuned file with `model_params.py` before committing it.
 - **On Windows** with `core.autocrlf`, run DVC itself (`dvc status`, `dvc repro`) from a checkout with LF line endings or in the Airflow image: `dvc.lock` hashes the scripts and configs with LF endings, so a CRLF checkout shows every stage as changed. `train.py` and `evaluate.py` are not affected, and the data version they record ignores line endings.

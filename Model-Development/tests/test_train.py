@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -94,6 +95,30 @@ def test_a_logreg_run_records_what_it_chose_on_the_inner_folds(tmp_path, capsys)
     assert "parameters: the starting values in model_params.yaml\n" in out and run["parameters"]["tuned"] == []
     assert set(P.read_predictions(run_dir / "predictions.parquet", threshold=run["threshold"])["model"]) == {"logreg"}
     assert evaluate.main(["--run", str(run_dir)]) == 0
+
+
+def test_days_with_no_forecast_are_not_scored_but_stay_baseline_history(tmp_path, capsys):
+    """2024-01-01 to 01-03 have no forecast (training_helpers.forecast_repo): no prediction, metric or
+    threshold uses them, run.json counts them, and the seasonal baseline still reads their labels."""
+    runs = {}
+    for name, inputs in (("unscored", "wx_tmin_c"), ("all", "")):
+        config = H.forecast_repo(tmp_path / name, forecast_inputs=inputs)
+        assert train.main(["--model", "seasonal", "--config", str(config), "--run-id", name]) == 0
+        runs[name] = tmp_path / name / "runs" / name
+    out = capsys.readouterr().out
+    assert "validation: 3 days not scored (6 rows, no day-before forecast), 2024-01-01 to 2024-01-03\n" in out
+    run = json.loads((runs["unscored"] / "run.json").read_text(encoding="utf-8"))
+    frames = {name: P.read_predictions(path / "predictions.parquet") for name, path in runs.items()}
+    gone = frames["all"]["date"].between("2024-01-01", "2024-01-03")
+    assert gone.sum() == 6 and not frames["unscored"]["date"].between("2024-01-01", "2024-01-03").any()
+    assert run["rows"]["validation days not scored"] == 3
+    scores = json.loads((runs["unscored"] / "metrics.json").read_text(encoding="utf-8"))
+    assert scores["validation"]["rows"] == run["rows"]["validation rows"] - 6
+    # the baseline's history keeps the unscored days' labels: every remaining probability is the same,
+    # among them January 2025, whose window holds 2024-01-01 to 01-03
+    same = frames["all"][~gone].reset_index(drop=True)
+    np.testing.assert_array_equal(frames["unscored"]["probability"].to_numpy(), same["probability"].to_numpy())
+    assert evaluate.main(["--run", str(runs["unscored"])]) == 0
 
 
 def test_a_run_folder_is_never_overwritten(run_dir, tmp_path, capsys):

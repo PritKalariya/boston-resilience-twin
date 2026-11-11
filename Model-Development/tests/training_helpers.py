@@ -82,7 +82,8 @@ def write_repo(tmp_path: Path, label_frame: pd.DataFrame | None = None, feature_
     """A temp repo with the files training.csv names; returns its training.csv. changes replace
     settings by name (a value of None drops the setting). tuned_params points into the temp repo,
     where no file is until a test writes one, so the committed tuned values never reach a test.
-    mlflow_store is the session's shared store, never the repo's."""
+    mlflow_store is the session's shared store, never the repo's. forecast_inputs is empty, since
+    the test catalog has no forecast input, unless a test names some."""
     labels = make_labels() if label_frame is None else label_frame
     features = make_features(labels) if feature_frame is None else feature_frame
     data = tmp_path / "data"
@@ -95,7 +96,7 @@ def write_repo(tmp_path: Path, label_frame: pd.DataFrame | None = None, feature_
     settings.update(labels=str(data / "labels.parquet"), features=str(data / "features.parquet"),
                     feature_catalog=str(data / "feature_catalog.csv"), dvc_lock=str(data / "dvc.lock"),
                     runs_dir=str(tmp_path / "runs"), tuned_params=str(tmp_path / "tuned_params.yaml"),
-                    mlflow_store=str(MLFLOW_STORE or tmp_path / "mlruns"))
+                    mlflow_store=str(MLFLOW_STORE or tmp_path / "mlruns"), forecast_inputs="")
     settings.update(changes)
     config = tmp_path / "training.csv"
     with open(config, "w", encoding="utf-8", newline="") as handle:
@@ -105,3 +106,16 @@ def write_repo(tmp_path: Path, label_frame: pd.DataFrame | None = None, feature_
             if value is not None:
                 writer.writerow([name, value, "", ""])
     return config
+
+
+def forecast_repo(tmp_path: Path, **changes: str) -> Path:
+    """write_repo with the forecast input wx_tmin_c in the catalog, missing on 2024-01-01 to 01-03
+    (validation days with no forecast) and on 2021-05-05 (observed weather can miss a train day)."""
+    labels = make_labels()
+    features = make_features(labels)
+    features["wx_tmin_c"] = 1.0
+    gone = features["date"].between("2024-01-01", "2024-01-03") | (features["date"] == "2021-05-05")
+    features.loc[gone, "wx_tmin_c"] = np.nan
+    catalog = CATALOG + "wx_tmin_c,weather,test,2019-01-01,pass,pass,yes,a forecast input\n"
+    return write_repo(tmp_path, label_frame=labels, feature_frame=features, catalog=catalog,
+                      **{"forecast_inputs": "wx_tmin_c", **changes})

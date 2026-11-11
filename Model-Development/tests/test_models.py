@@ -33,6 +33,7 @@ def make_table(first: str = "2016-01-01", seed: int = 0) -> pd.DataFrame:
     table["split"] = np.where(table["date"].dt.year <= 2023, "train", "validation")
     table["label"] = labels["surge"].astype(bool).astype("int8")
     table["weight"] = np.where((table["split"] == "train") & table["date"].dt.year.isin([2020, 2021]), 0.5, 1.0)
+    table["scored"] = True
     surge, n = table["label"].to_numpy(), len(table)
     table["day_of_week"] = table["date"].dt.dayofweek
     table["month"] = table["date"].dt.month
@@ -177,8 +178,8 @@ def test_build_makes_logreg_with_the_committed_parameters(table, tmp_path):
 
 def test_a_candidate_is_not_built_on_inputs_missing_far_more_often_outside_train(table, tmp_path):
     holes = table.copy()
-    holes.loc[holes["split"] == "validation", "wx_snowfall_mm"] = np.nan  # the 2024 GFS snowfall gap
-    with pytest.raises(ValueError, match="worst wx_snowfall_mm: missing on 100.0% of validation rows"):
+    holes.loc[holes["split"] == "validation", "snow_ice_rel7"] = np.nan  # missing in January 2016 too
+    with pytest.raises(ValueError, match="worst snow_ice_rel7: missing on 100.0% of validation rows"):
         models.build("logreg", holes, _settings(tmp_path))
     models.build("seasonal", holes, _settings(tmp_path))  # the baseline reads no input
 
@@ -236,14 +237,39 @@ def test_a_tree_model_reads_only_its_inputs(table, tree):
     np.testing.assert_array_equal(model.predict_proba(validation), model.predict_proba(changed))
 
 
-def test_a_tree_model_learns_the_signal_and_takes_missing_values_as_they_are(table, tree):
+def test_a_tree_model_learns_the_signal(table, tree):
     _, model = tree
     validation = _validation(table)
     probability = model.predict_proba(validation)
     assert probability.shape == (len(validation),) and ((probability > 0) & (probability < 1)).all()
     assert roc_auc_score(validation["label"], probability) > 0.8
-    holes = validation.head(3).assign(wx_tmin_c=np.nan, snow_ice_rel7=np.nan)
-    assert np.isfinite(model.predict_proba(holes)).all()
+
+
+@pytest.mark.parametrize("name", sorted(TREES))
+def test_a_tree_model_takes_the_branch_it_learned_for_an_input_missing_in_train(table, name):
+    """snow_ice_rel7 is missing on half the surge rows of every split and nowhere else, so a missing
+    value means a surge: the branch learned for it must score those rows far above the rest."""
+    rng = np.random.default_rng(3)
+    holes = (table["label"] == 1).to_numpy() & (rng.random(len(table)) < 0.5)
+    signal = table.assign(snow_ice_rel7=table["snow_ice_rel7"].mask(holes), wx_snowfall_mm=1.0)
+    model = _fit_tree(name, signal)
+    validation = _validation(signal)
+    probability = model.predict_proba(validation)
+    missing = validation["snow_ice_rel7"].isna().to_numpy()
+    assert missing.sum() > 20 and probability[missing].mean() > 3 * probability[~missing].mean()
+
+
+@pytest.mark.parametrize("name", sorted(TREES) + ["logreg"])
+def test_a_candidate_refuses_an_input_never_missing_in_train_but_missing_on_a_scored_day(table, name, tmp_path):
+    """wx_tmin_c is never missing in train: no candidate has learned what a missing value means."""
+    hole = table.copy()
+    day = hole.index[hole["date"] == "2024-01-01"]  # both neighborhoods
+    hole.loc[day, "wx_tmin_c"] = np.nan
+    with pytest.raises(ValueError, match="1 input\\(s\\) never missing in train are missing on scored validation "
+                                         "rows, first wx_tmin_c: on 1 days from 2024-01-01 to 2024-01-01"):
+        models.build(name, hole, _settings(tmp_path))
+    hole.loc[day, "scored"] = False  # the day is not scored: nothing to refuse
+    assert models.build(name, hole, _settings(tmp_path)).inputs == INPUTS
 
 
 def test_a_tree_model_grows_the_tree_count_with_the_lowest_mean_fold_log_loss(table, tree):
