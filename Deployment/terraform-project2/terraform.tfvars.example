@@ -1,0 +1,13 @@
+# Copy to terraform.tfvars and fill in the real values.
+# terraform.tfvars is gitignored and MUST NEVER BE COMMITTED.
+
+project_id = "boston-resilience-twin-p2"
+region     = "us-east1"
+
+# gcloud billing accounts list
+billing_account = "000000-000000-000000"
+
+# Teammates who review plans and debug CI (roles/editor + projectIamAdmin).
+project_admins = [
+  "user:member-one@northeastern.edu",
+]
