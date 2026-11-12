@@ -193,6 +193,22 @@ def student_slices(units: pd.DataFrame, factor: float) -> tuple[dict[str, pd.Ser
     return {"student_area": area, "poverty_share_without_student_areas": poverty}, city
 
 
+MODEL_GROUPS_HEADER = ["neighborhood", "poc", "limited_english", "flood_zone", "student_area"]
+
+
+def model_groups(units: pd.DataFrame, factor: float) -> pd.DataFrame:
+    """Each neighborhood's group in the reported families of the model bias check (#110, ADR-033), for
+    Model-Development/config/slice_groups.csv: the training image has neither geopandas nor the static
+    layers, so it reads them from that file. Poverty is not here: the gate's groups are
+    poverty_groups.csv (ADR-026). A neighborhood with no value is "ungrouped"."""
+    groups = slice_groups(units, "unit")
+    students, _ = student_slices(units, factor)
+    columns = {"poc": groups["poc_share"], "limited_english": groups["limited_english_share"],
+               "flood_zone": groups["flood_zone"], "student_area": students["student_area"]}
+    out = pd.DataFrame({name: series.astype(object).where(series.notna(), "ungrouped") for name, series in columns.items()})
+    return out.rename_axis("neighborhood").sort_index().reset_index()[MODEL_GROUPS_HEADER]
+
+
 def name_units(storm: pd.DataFrame, min_share: float, min_placed: float) -> dict[str, tuple[str, ...]]:
     """The neighborhoods each recorded 311 neighborhood name covers: every unit holding at least
     min_share of the name's placed storm requests, for names with at least min_placed of them. The
@@ -555,7 +571,15 @@ def main() -> None:
     parser.add_argument("--static-dir", default="Data-Pipeline/data/interim/static")
     parser.add_argument("--config", default="Data-Pipeline/config/bias_slicing.csv")
     parser.add_argument("--out-dir", default="Data-Pipeline/data/interim/reports/bias")
+    parser.add_argument("--model-groups", metavar="PATH",
+                        help="write the model bias check's reported groups (Model-Development/config/slice_groups.csv) "
+                             "from the static layers and exit (#110)")
     args = parser.parse_args()
+    if args.model_groups:
+        table = model_groups(unit_attributes(args.static_dir), load_settings(args.config)["student_area_factor"])
+        table.to_csv(args.model_groups, index=False, lineterminator="\n")
+        print(f"wrote {len(table)} neighborhoods to {args.model_groups}")
+        return
 
     settings = load_settings(args.config)
     import pyarrow.parquet as pq

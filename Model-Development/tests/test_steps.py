@@ -37,6 +37,7 @@ import gates as G  # noqa: E402
 import selection  # noqa: E402
 import step_common as C  # noqa: E402
 import step_evaluate as s_evaluate  # noqa: E402
+import bias  # noqa: E402
 import step_notify as notify  # noqa: E402
 import step_pull_data as s_pull  # noqa: E402
 import step_registry_push as s_registry  # noqa: E402
@@ -173,8 +174,7 @@ def test_the_stub_helpers_are_gone():
     assert not (ROOT / "Model-Development" / "config" / "reload_fixture_row.json").exists()
 
 
-@pytest.mark.parametrize("module, owner", [(s_evaluate, "#110"), (s_rescore, "#111"), (s_registry, "#111"),
-                                           (s_champion, "#111")])
+@pytest.mark.parametrize("module, owner", [(s_rescore, "#111"), (s_registry, "#111"), (s_champion, "#111")])
 def test_stub_and_interim_steps_start_with_their_interface_block(module, owner):
     lines = module.__doc__.splitlines()
     assert lines[0].startswith(f"INTERFACE FOR {owner} (") and lines[0].endswith(
@@ -347,19 +347,19 @@ def test_gates_take_the_evaluate_steps_metrics(built, tmp_path):
 def test_reconciliation_failure_is_caught_here():
     groups = {"lower": {"positives": 6, "true_positives": 3}, "higher": {"positives": 4, "true_positives": 2}}
     excluded = {"Harbor Islands": {"positives": 0, "true_positives": 0, "reason": "ungrouped"}}
-    s_evaluate.check_reconciliation(groups, excluded, {"tp": 5, "fp": 9, "fn": 5})  # holds
-    with pytest.raises(C.StepError, match="positives 10 do not equal the candidate's tp \\+ fn 11"):
-        s_evaluate.check_reconciliation(groups, excluded, {"tp": 5, "fp": 9, "fn": 6})
-    with pytest.raises(C.StepError, match="true positives 5 do not equal the candidate's tp 4"):
-        s_evaluate.check_reconciliation(groups, excluded, {"tp": 4, "fp": 9, "fn": 6})
+    bias.check_reconciliation(groups, excluded, {"tp": 5, "fp": 9, "fn": 5})  # holds
+    with pytest.raises(bias.BiasError, match="positives 10 do not equal the candidate's tp \\+ fn 11"):
+        bias.check_reconciliation(groups, excluded, {"tp": 5, "fp": 9, "fn": 6})
+    with pytest.raises(bias.BiasError, match="true positives 5 do not equal the candidate's tp 4"):
+        bias.check_reconciliation(groups, excluded, {"tp": 4, "fp": 9, "fn": 6})
 
 
 def test_a_neighborhood_in_no_group_fails():
     rows = pd.DataFrame({"unit": ["Back Bay", "Atlantis"], "label": [1, 1], "prediction": [1, 0]})
     mapping = {"Back Bay": "lower", "Fenway": "higher", "Harbor Islands": "ungrouped"}
-    with pytest.raises(C.StepError, match="Atlantis"):
-        s_evaluate.group_counts(rows, mapping, ("lower", "higher"))
-    groups, excluded = s_evaluate.group_counts(rows[rows["unit"] == "Back Bay"], mapping, ("lower", "higher"))
+    with pytest.raises(bias.BiasError, match="Atlantis"):
+        bias.gate_counts(rows, mapping, ("lower", "higher"))
+    groups, excluded = bias.gate_counts(rows[rows["unit"] == "Back Bay"], mapping, ("lower", "higher"))
     assert groups == {"lower": {"positives": 1, "true_positives": 1}, "higher": {"positives": 0, "true_positives": 0}}
     assert excluded == {"Harbor Islands": {"positives": 0, "true_positives": 0, "reason": "ungrouped"}}
 
@@ -367,10 +367,10 @@ def test_a_neighborhood_in_no_group_fails():
 def test_a_group_file_with_an_unknown_group_fails(tmp_path):
     path = tmp_path / "groups.csv"
     path.write_text("neighborhood,poverty_share,group\nBack Bay,0.1,middle\n")
-    with pytest.raises(C.StepError, match="middle"):
-        s_evaluate.read_poverty_groups(path, ("lower", "higher"))
-    with pytest.raises(C.StepError, match="cannot read"):
-        s_evaluate.read_poverty_groups(tmp_path / "missing.csv", ("lower", "higher"))
+    with pytest.raises(bias.BiasError, match="middle"):
+        bias.read_poverty_groups(path, ("lower", "higher"))
+    with pytest.raises(bias.BiasError, match="cannot read"):
+        bias.read_poverty_groups(tmp_path / "missing.csv", ("lower", "higher"))
 
 
 def test_evaluate_reads_no_test_metric(copy):

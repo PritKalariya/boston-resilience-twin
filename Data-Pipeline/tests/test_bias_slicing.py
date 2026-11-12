@@ -180,6 +180,27 @@ def test_college_share_counts_undergraduates_and_graduate_students(tmp_path):
         acs_shares(table.drop(columns=SCHOOL_TOTAL), "name")
 
 
+REPO = Path(__file__).resolve().parents[2]
+REAL_STATIC = REPO / "Data-Pipeline" / "data" / "interim" / "static"
+MODEL_GROUPS = REPO / "Model-Development" / "config" / "slice_groups.csv"
+
+
+def test_the_model_groups_carry_each_reported_family(tmp_path):
+    table = bias_slicing.model_groups(unit_attributes(static_dir(tmp_path)), 2.0).set_index("neighborhood")
+    assert list(table.columns) == ["poc", "limited_english", "flood_zone", "student_area"]
+    assert table.loc["Poor", "student_area"] == "student area" and table.loc["Rich", "student_area"] == "other"
+    assert table.loc["Poor", "flood_zone"] == "in flood zone"
+
+
+@pytest.mark.skipif(not (REAL_STATIC / "population_2025_neighborhood.parquet").exists(),
+                    reason="static layers not loaded (static_layers.py)")
+def test_the_model_bias_groups_file_matches_this_code():
+    # Model-Development/config/slice_groups.csv is written by bias_slicing.py --model-groups (#110); a change
+    # to the ACS rule or the layers must rewrite it, or the model's report and #32's would disagree.
+    table = bias_slicing.model_groups(unit_attributes(REAL_STATIC), SETTINGS["student_area_factor"])
+    assert table.to_csv(index=False, lineterminator="\n") == MODEL_GROUPS.read_text(encoding="utf-8")
+
+
 def test_a_student_area_is_at_least_twice_the_city_college_share(tmp_path):
     units = unit_attributes(static_dir(tmp_path))
     slices, city = student_slices(units, 2.0)

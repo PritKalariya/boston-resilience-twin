@@ -10,6 +10,7 @@ pyarrow==25.0.1
 joblib==1.6.0
 PyYAML==6.0.3
 scikit-learn==1.9.1
+fairlearn==0.15.0
 # LightGBM loads the OpenMP runtime: the Dockerfile installs libgomp1 (ADR-032).
 lightgbm==4.7.0
 # selection.py draws its charts with it, and the steps import selection's ranking.

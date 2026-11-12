@@ -1,6 +1,6 @@
 # ADR-004: The modeling unit is neighborhood x day, a surge in any storm group
 
-- Status: proposed (team sign-off requested on the PR); amended by ADR-027 (flooding left the label)
+- Status: accepted (sign-off by Srikar, Prit and Punith on #66, 2026-10-21); amended by ADR-027 (flooding left the label)
 - Date: 2026-10-20
 - Owner: alekhyabulusu
 - Phase: data
