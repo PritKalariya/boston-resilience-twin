@@ -24,6 +24,16 @@ def test_the_committed_settings_load_with_the_adr_003_splits():
         "test": ("2025-01-01", "2026-06-30"),
     }
     assert settings.down_weight_years == (2020, 2021) and settings.down_weight == 0.5
+    assert settings.inner_fold_years == (2019, 2022, 2023) and settings.missing_gap_max_points == 10
+    assert settings.forecast_inputs == ("wx_precip_mm", "wx_snowfall_mm", "wx_tmax_c", "wx_tmin_c", "wx_gust_max_ms")
+    assert settings.model_params == D.ROOT / "Model-Development" / "config" / "model_params.yaml"
+    assert settings.tuned_params == D.ROOT / "Model-Development" / "config" / "tuned_params.yaml"
+    assert settings.mlflow_store == D.ROOT / "Model-Development" / "mlruns"
+    assert settings.mlflow_experiment == "model-training"
+    assert settings.reports_dir == D.ROOT / "Model-Development" / "reports"
+    assert settings.candidates == ("logreg", "xgboost", "lightgbm")
+    assert settings.slices == D.ROOT / "Model-Development" / "config" / "slices.csv"
+    assert (settings.bootstrap_resamples, settings.bootstrap_seed) == (1000, 0)
     assert settings.threshold_rule == "validation_f1_max"
     assert (settings.seasonal_years, settings.seasonal_half_width_days, settings.seasonal_min_days) == (3, 14, 20)
     assert settings.labels == D.ROOT / "Data-Pipeline" / "data" / "processed" / "labels.parquet"
@@ -39,6 +49,26 @@ def test_the_committed_settings_load_with_the_adr_003_splits():
     ({"down_weight": "half"}, "down_weight must be above 0"),
     ({"down_weight_years": "2020;2024"}, "2024 is outside the train window"),
     ({"down_weight_years": "2020;x"}, "down_weight_years must be a whole number"),
+    ({"inner_fold_years": ""}, "inner_fold_years needs at least one year"),
+    ({"inner_fold_years": "2019;x"}, "inner_fold_years must be a whole number"),
+    ({"inner_fold_years": "2019;2024"}, "inner_fold_years: 2024 is outside the train window"),
+    ({"inner_fold_years": "2015;2019"}, "inner_fold_years: 2015 has no train day before it"),
+    ({"inner_fold_years": "2019;2020"}, "inner_fold_years: 2020 is down-weighted"),
+    ({"inner_fold_years": "2023;2019"}, "inner_fold_years must increase with no year twice"),
+    ({"inner_fold_years": "2019;2019"}, "inner_fold_years must increase with no year twice"),
+    ({"forecast_inputs": "wx_tmin_c;wx_tmin_c"}, "forecast_inputs names an input twice"),
+    ({"missing_gap_max_points": "-1"}, "missing_gap_max_points must be a number from 0 to 100"),
+    ({"missing_gap_max_points": "101"}, "missing_gap_max_points must be a number from 0 to 100"),
+    ({"missing_gap_max_points": "ten"}, "missing_gap_max_points must be a number from 0 to 100"),
+    ({"model_params": ""}, "model_params needs a path"),
+    ({"tuned_params": ""}, "tuned_params needs a path"),
+    ({"mlflow_store": ""}, "mlflow_store needs a path"),
+    ({"mlflow_experiment": ""}, "mlflow_experiment needs a name"),
+    ({"candidates": ""}, "candidates needs at least one model name"),
+    ({"candidates": "logreg;xgboost;logreg"}, "candidates names a model twice"),
+    ({"reports_dir": ""}, "reports_dir needs a path"),
+    ({"bootstrap_resamples": "50"}, "bootstrap_resamples must be a whole number of 100 or more"),
+    ({"bootstrap_seed": "-1"}, "bootstrap_seed must be a whole number of 0 or more"),
     ({"threshold_rule": "fixed_half"}, "threshold_rule must be one of"),
     ({"seasonal_years": "0"}, "seasonal_years must be a whole number of 1 or more"),
     ({"seasonal_min_days": "88"}, "more than the window's 87 days"),
@@ -112,7 +142,9 @@ def test_check_splits_catches_a_day_in_two_splits(tmp_path):
 
 def test_the_table_keeps_labeled_days_in_a_split_and_down_weights_2020_and_2021(tmp_path):
     table, counts = D.load_table(D.load_settings(H.write_repo(tmp_path)))
-    assert list(table.columns) == ["unit", "date", "split", "label", "weight", "day_of_week"]
+    assert list(table.columns) == ["unit", "date", "split", "label", "weight", "scored", "day_of_week"]
+    assert table["scored"].all() and counts["validation days not scored"] == counts["test rows not scored"] == 0
+    assert D.unscored_note(counts, "validation") is None
     assert counts["unlabeled dropped"] == 12  # 6 days per unit with no baseline
     live = pd.date_range("2026-07-01", "2026-09-30")
     assert counts["outside every split dropped"] == 2 * len(live)
@@ -121,6 +153,73 @@ def test_the_table_keeps_labeled_days_in_a_split_and_down_weights_2020_and_2021(
     assert (table.loc[down, "weight"] == 0.5).all() and (table.loc[~down, "weight"] == 1.0).all()
     assert counts["down-weighted train rows"] == int(down.sum()) > 0
     assert counts["validation surges"] == int(table.loc[table["split"] == "validation", "label"].sum()) > 0
+
+
+def test_the_inputs_are_every_column_but_the_row_columns(tmp_path):
+    table, _ = D.load_table(D.load_settings(H.write_repo(tmp_path)))
+    assert D.input_columns(table) == ["day_of_week"]
+    assert D.input_columns(table.assign(extra=1.0)) == ["day_of_week", "extra"]
+
+
+def _sometimes_missing_in_train(tmp_path):
+    """The table with day_of_week missing on 1 train row in 100, so it is an input missing in train."""
+    table, _ = D.load_table(D.load_settings(H.write_repo(tmp_path)))
+    train = table.index[table["split"] == "train"]
+    table.loc[train[::100], "day_of_week"] = float("nan")
+    return table
+
+
+def test_an_input_missing_far_more_often_outside_train_is_refused(tmp_path):
+    table = _sometimes_missing_in_train(tmp_path)
+    validation = table.index[table["split"] == "validation"]
+    table.loc[validation[: len(validation) // 2], "day_of_week"] = float("nan")
+    with pytest.raises(ValueError, match="1 input\\(s\\) differ in missing share between train and validation by "
+                                         "more than missing_gap_max_points \\(10\\), worst day_of_week: missing on "
+                                         "50.0% of validation rows against 1.0% of train rows"):
+        D.check_missing_gaps(table, ["day_of_week"], 10)
+    D.check_missing_gaps(table, ["day_of_week"], 50)  # a gap within the limit passes
+
+
+def test_a_test_split_gap_is_refused_too_and_small_gaps_pass(tmp_path):
+    table = _sometimes_missing_in_train(tmp_path)
+    test = table.index[table["split"] == "test"]
+    table.loc[test[: len(test) // 20], "day_of_week"] = float("nan")  # 5 percent of test
+    D.check_missing_gaps(table, ["day_of_week"], 10)
+    table.loc[test[: len(test) // 4], "day_of_week"] = float("nan")  # 25 percent of test
+    with pytest.raises(ValueError, match="between train and test"):
+        D.check_missing_gaps(table, ["day_of_week"], 10)
+
+
+def test_an_input_never_missing_in_train_may_not_miss_one_scored_row(tmp_path):
+    table, _ = D.load_table(D.load_settings(H.write_repo(tmp_path)))
+    days = table.index[table["date"].isin(pd.to_datetime(["2025-03-02", "2025-03-09"]))]
+    table.loc[days, "day_of_week"] = float("nan")  # 4 test rows, far under the 10-point share limit
+    with pytest.raises(ValueError, match="1 input\\(s\\) never missing in train are missing on scored test rows, "
+                                         "first day_of_week: on 2 days from 2025-03-02 to 2025-03-09; fill the gap, "
+                                         "or name the input in forecast_inputs if those days have no forecast"):
+        D.check_missing_gaps(table, ["day_of_week"], 10)
+    table.loc[days, "scored"] = False  # unscored days are never checked
+    D.check_missing_gaps(table, ["day_of_week"], 10)
+
+
+def test_a_validation_day_with_no_forecast_stays_in_the_table_unscored(tmp_path):
+    table, counts = D.load_table(D.load_settings(H.forecast_repo(tmp_path)))
+    unscored = table[~table["scored"]]
+    assert sorted(unscored["date"].dt.date.astype(str).unique()) == ["2024-01-01", "2024-01-02", "2024-01-03"]
+    assert set(unscored["split"]) == {"validation"} and len(unscored) == 6 and unscored["label"].notna().all()
+    assert table.loc[table["date"] == "2021-05-05", "scored"].all()  # a train day is always fit on
+    assert (counts["validation rows not scored"], counts["validation days not scored"]) == (6, 3)
+    assert counts["validation days not scored, first and last"] == ["2024-01-01", "2024-01-03"]
+    assert counts["test days not scored, first and last"] is None
+    assert D.unscored_note(counts, "validation") == ("validation: 3 days not scored (6 rows, no day-before "
+                                                     "forecast), 2024-01-01 to 2024-01-03")
+    D.check_missing_gaps(table, D.input_columns(table), 10)  # the gaps are all on unscored rows
+
+
+def test_a_forecast_input_that_is_not_a_model_input_is_refused(tmp_path):
+    settings = D.load_settings(H.forecast_repo(tmp_path, forecast_inputs="wx_tmin_c;wx_gust"))
+    with pytest.raises(ValueError, match="forecast_inputs names \\['wx_gust'\\], not model inputs in feature_catalog.csv"):
+        D.load_table(settings)
 
 
 def test_only_the_catalog_model_inputs_are_kept():

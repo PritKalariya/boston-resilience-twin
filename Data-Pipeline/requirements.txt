@@ -11,15 +11,19 @@
 numpy==2.5.3
 pandas==3.0.5
 pyarrow==25.0.1
+# The candidate models, their parameters file and the saved models (Model-Development, #107).
+joblib==1.6.0
+PyYAML==6.0.3
+scikit-learn==1.9.1
 
 # Not in the constraints file: pinned to the versions the tests passed on.
 # pyproj comes in through geopandas, iniconfig through pytest, altair through
 # great-expectations (ADR-022 dry run). dvc-gs brings gcsfs and google-auth,
 # which the constraints file pins. pytest-cov reports test coverage (#38) and
-# needs coverage 7.10.6 or later. fairlearn (#32) brings scikit-learn and
-# scipy, which the constraints file pins. mlflow (#104) is the client of the
-# compose mlflow service, at its image's version (test_mlflow_service.py keeps
-# them equal); Model-Development's tests and the smoke check run in this image.
+# needs coverage 7.10.6 or later. fairlearn (#32) brings scipy, which the
+# constraints file pins. mlflow (#104) is the client of the compose mlflow
+# service, at its image's version (test_mlflow_service.py keeps them equal);
+# Model-Development's tests, training runs (#107) and the smoke check run in this image.
 altair==6.3.0
 coverage==7.16.2
 dvc==3.67.1
@@ -28,9 +32,19 @@ fairlearn==0.15.0
 geopandas==1.2.0
 great-expectations==1.24.1
 iniconfig==2.3.1
+# LightGBM (#107) loads the OpenMP runtime: libgomp1, which airflow.Dockerfile
+# installs. On macOS, run brew install libomp first.
+lightgbm==4.7.0
+# The selection charts (#107), drawn to PNG files with no screen.
+matplotlib==3.11.2
 mlflow==3.17.2
 pyogrio==0.13.0
 pyproj==3.8.0
 pytest==9.1.1
 pytest-cov==7.1.0
 shapely==2.2.0
+# XGBoost (#107): the CPU-only build on Linux, because the standard Linux wheel
+# pulls NVIDIA's NCCL GPU library (about 430 MB in the image). The Windows and
+# macOS wheels have no GPU parts, and xgboost-cpu has no macOS wheel.
+xgboost==3.4.1; sys_platform != "linux"
+xgboost-cpu==3.4.1; sys_platform == "linux"

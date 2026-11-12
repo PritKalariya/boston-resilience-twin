@@ -53,26 +53,39 @@ Every feature for day D uses only what is known at the cutoff, 18:00 Boston time
 **Self-relative 311 lags (#33, ADR-025).** `{group}_rel_last` and `{group}_rel3`, `rel7`, `rel28` divide the raw lag by the neighborhood's own ADR-005 baseline mean over the same days, as (requests + 1) / (baseline + 1). They are the default model 311 inputs; the raw lags stay in the table with `use_in_model = no`, because #32 found the raw counts carry a reporting gap (poorer and more diverse neighborhoods file fewer requests per resident). The baseline uses only the same weeks of the 3 previous years, so it is known before D, and `check_no_leakage` reads these by date too (`relative_by_date`). They start on 2016-01-08 (`rel_last`) to 2016-02-04 (`rel28`), just after the first labels on 2016-01-06: 696 of the 70,008 labeled training rows (0.99%), up to 2016-02-03, miss at least one window. Model Development compares them with the raw lags before the model inputs are fixed (ADR-025).
 
 **Alerts (`alert_history.py`, ADR-014 Option A+).**
-- An alert counts for D when all three hold:
+- An alert counts for D when all four hold:
   - its first bulletin came before the cutoff;
+  - as first announced, it begins before D ends (#107);
   - its first-announced end is after D begins;
   - it was not cancelled or upgraded before that same cutoff.
 - A cancellation or upgrade counts only when IEM records status `CAN` or `UPG` with `utc_expire` equal to `utc_updated`. Every other row keeps its first-announced end.
-- A cancellation at or after the cutoff changes nothing. Extensions and shortened ends are not used.
+- A cancellation at or after the cutoff changes nothing. Extensions, shortened ends and moved begins are not used.
 - One VTEC event counts once, even when it covers Boston's zone and county with different first bulletins.
-- **Announced, not necessarily in effect.**
-  - The alert features mean "announced before the cutoff and, as first announced, not over before D begins", not "in effect on D". The start time is not used, so a watch sent on D-1 for D+1 counts on D too.
-  - Why: IEM's bulk archive keeps only an alert's last state (`utc_issue`, which later bulletins can move), not the start as first announced, and using the final start could leak.
-  - Bounding by start in the evening run only, where #7's NWS snapshot has each bulletin's start, would make the evening run differ from the history, which ADR-003's live rule forbids. So nothing changes until a source of first-announced starts covers the history (the ADR-014 owner's call).
-  - Measured on the real build, 2015-01-01 to 2026-10-19 (2026-10-27). The table counts the way the features count (one VTEC event once) and uses `utc_issue` as an approximate start. An alert-day is one alert counted on one day.
+- **The begin as first announced (#107).** Until #107 the begin was not used, so a watch sent on D-1 for D+1 counted on D too (the CP1 review found 15.2% of snow and ice alert-days).
+  - IEM's bulk archive keeps only an alert's last state (`utc_issue`, which later bulletins can move), so that begin is never used.
+  - Each Boston row names the bulletin that first sent it (`product_id`). `--download` fetches that bulletin once from IEM's text service (`https://mesonet.agron.iastate.edu/api/1/nwstext/<product_id>`) into `raw/nws_alerts/bulletins/`.
+  - `first_begin_utc` is the begin of the alert's VTEC string in the bulletin's segment that names Boston's zone or county, or the bulletin's send time when it reads `000000T0000Z` (in effect when sent).
+  - The history and the evening run read the same bulletins with the same code, as ADR-003's live rule asks.
+  - **Checked on the 1,144 Boston rows of 2015 to 2026** (1,134 bulletins, fetched 2026-11-09):
+    - Every row's bulletin gives it exactly one begin.
+    - The alert's own VTEC string in Boston's segment is NEW in 974 rows, EXA (area added) in 93, EXB (area and time) in 74, and CON in 1, a 2026 coastal flood advisory whose first IEM record for Boston is a continuation. 65 begins read `000000T0000Z`.
+    - Two wind chill advisories of December 2017 carry other event numbers in their bulletins than in IEM's record (ADR-014). Each takes the one wind chill advisory its segment starts, and the run lists them.
+    - Five ids hold two products each, a resend or a correction; both give the same begin.
+    - 740 alerts were announced to begin after their first bulletin. `utc_issue` differs from the first-announced begin on 49.
+  - **Before and after,** on the stored pulls, 2015-01-01 to 2026-10-19 (2026-11-09). An alert-day is one alert counted on one day. "Beginning after D" uses `utc_issue`, the CP1 measure.
 
-  | storm group | alert-days that begin after D | days with an alert only from those | main types among them |
-  |---|---|---|---|
-  | snow_ice | 26 of 171 (15.2%) | 25 of 170 (14.7%) | winter storm watch 19, blizzard watch 3, winter storm warning 3 |
-  | tree | 15 of 178 (8.4%) | 15 of 178 (8.4%) | high wind watch 12, high wind warning 2, wind advisory 1 |
-  | flooding | 38 of 308 (12.3%) | 32 of 283 (11.3%) | coastal flood watch 22, coastal flood advisory 7, flood watch 6 |
+  | storm group | alert-days before #107 | of them beginning after D | alert-days after #107 | of them beginning after D | days with an alert, before and after |
+  |---|---|---|---|---|---|
+  | snow_ice | 171 | 26 (15.2%) | 145 | 0 | 170 and 145 |
+  | tree | 178 | 15 (8.4%) | 163 | 0 | 178 and 163 |
+  | flooding | 308 | 38 (12.3%) | 270 | 0 | 283 and 251 |
+
+  The 79 alert-days removed are exactly the CP1 ones:
+  - snow_ice: winter storm watch 19, blizzard watch 3, winter storm warning 3, winter weather advisory 1;
+  - tree: high wind watch 12, high wind warning 2, wind advisory 1;
+  - flooding: coastal flood watch 22, coastal flood advisory 7, flood watch 6, coastal flood warning 2, coastal flood statement 1.
 - From 15 December the next year's file is pulled too. A year is final once it was pulled at least 14 days after it ended.
-- When each year was pulled is kept in `Data-Pipeline/data/state/nws_alerts/_downloads.json`, so `raw/` holds the IEM files and nothing else, as with #7 and #8.
+- When each year was pulled is kept in `Data-Pipeline/data/state/nws_alerts/_downloads.json`, so `raw/` holds the IEM files (the year pulls and `bulletins/`) and nothing else, as with #7 and #8.
 - The evening freshness check (`--check-nws`) stops before writing if a Boston message sent before the cutoff is not in the pull yet.
 
 **Weather (`weather_features.py`, `open_meteo_forecast.py`, ADR-003).**
@@ -89,7 +102,8 @@ Every feature for day D uses only what is known at the cutoff, 18:00 Boston time
 - **How hours become days:**
   - forecast hours are combined over Logan's station day, midnight to midnight EST, the day GHCN-D values follow;
   - a day with a missing hour is blank;
-  - GFS has no values before 2024-01-21 and no snowfall before 2024-12-07 (first full day), and those gaps stay blank.
+  - GFS has no values before 2024-01-21, and that gap stays blank;
+  - GFS stored no snowfall before 2024-12-06. From 2024-01-21 those hours are estimated from the same forecast's precipitation and temperature, the GFS formula of 0.7 cm per mm when at or below 1 °C (#107, `open_meteo_forecast.fill_snowfall`). On 698 days with stored snowfall the estimate follows it with r = 0.978.
 - **Lags:** `obs_*_lag2` take Logan's day D-2 and stay out of the model.
 
 **Tides (`tide_features.py`).** `tide_pred_max_m` is the highest hourly prediction of the Boston local day (23, 24 or 25 hours with daylight saving), blank unless every hour is present. Observed water levels are never read.
@@ -133,12 +147,12 @@ Every feature for day D uses only what is known at the cutoff, 18:00 Boston time
 
 ## Missing values on the real build (2026-10-26)
 
-Kept missing, never filled (ADR-003). Counts are days, except for the 311 lags:
+Kept missing, never filled (ADR-003). The one exception is GFS snowfall from 2024-01-21 to 2024-12-06, which #107 estimates from the same forecast's precipitation and temperature; its 2024 count was rechecked on the stored GFS files on 2026-11-09. Counts are days, except for the 311 lags:
 
 | columns | train 2015 to 2023 (3,287 days) | validate 2024 (366) | 2025 onward (657) | why |
 |---|---|---|---|---|
 | `wx_precip_mm`, `wx_tmax_c`, `wx_tmin_c` | 0 | 20 | 0 | GFS has no values before 2024-01-21 |
-| `wx_snowfall_mm` | 0 | 341 | 0 | GFS snowfall starts 2024-12-06 (first full day 2024-12-07) |
+| `wx_snowfall_mm` | 0 | 20 (341 before #107) | 0 | GFS has no values before 2024-01-21; its missing snowfall from then to 2024-12-06 is estimated (#107) |
 | `wx_gust_max_ms` | 8 | 20 | 0 | Logan's WSF5 misses 8 training days; GFS as above |
 | `wx_known_by_utc` | 3,287 | 20 | 0 | set only when a row keeps a forecast |
 | `obs_*_lag2` (not model inputs) | 2 (WSF5 10) | 0 (WSF5 3) | snow 1, WSF5 5 | 2015-01-01 and 2015-01-02 have no day D-2 in the files; gaps in Logan's record |
@@ -234,7 +248,6 @@ More fairness slices (income, demographics, flood zones, the old and new 311 sys
 - Resolved by ADR-027 (#106), which froze `sd_k2_m5` unchanged and took flooding out of the label:
   - its cost to small neighborhoods and flooding was weighed, with m 4 as the alternative ("Surge rule recommendation");
   - the rule was not tightened, so the frozen surge rates stay above the spec's pre-scoping 1.3 to 2.9% (train 3.42%, validation 4.79%; Alekhya, PR #93).
-- The alert features count alerts that begin after D (Rules, "Announced, not necessarily in effect"). Bounding them by start needs the start as first announced for the history too; that is the ADR-014 owner's call.
 - Later: IEM files start in 2015, so on 2015-01-01 and 2015-01-02 an alert that started in 2014 is missing; `--first-year 2014` would add it.
 
 ## Assumptions still to verify

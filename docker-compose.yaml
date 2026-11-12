@@ -10,7 +10,8 @@ x-airflow-common:
   &airflow-common
   # Built from airflow.Dockerfile (ADR-022): the apache/airflow:3.3.2-python3.12
   # base image (Python 3.12 per ADR-013; the unsuffixed 3.3.2 tag is Python 3.13)
-  # plus Data-Pipeline/requirements.txt. Rebuild with `docker compose up -d --build --wait`
+  # plus Data-Pipeline/requirements.txt and libgomp1 for LightGBM (#107).
+  # Rebuild with `docker compose up -d --build --wait`
   # after changing that file; DAG and script changes need no rebuild.
   image: brt-airflow:local
   build:
@@ -31,7 +32,10 @@ x-airflow-common:
     AIRFLOW__API_AUTH__JWT_ISSUER: airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
-    # Sized for the 4 GB VM: LocalExecutor pre-forks this many workers (default 32).
+    # LocalExecutor pre-forks this many workers (default 32). The 4-wide legacy parse
+    # measured 1074 MiB available at its low on e2-medium, against a 500 MB floor; heavy
+    # tasks are serialized by the heavy_memory pool instead (runbook, "Memory budget
+    # on airflow-vm"; ADR-031).
     AIRFLOW__CORE__PARALLELISM: '4'
     # 1 is the 3.3.2 default; pinned so an upgrade cannot raise it.
     AIRFLOW__API__WORKERS: '1'
@@ -98,6 +102,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airflow}
       POSTGRES_DB: airflow
     # No ports: reachable only inside the compose network.
+    # No mem_limit; the OOM killer takes a task before the database (ADR-031).
+    oom_score_adj: -500
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
     healthcheck:
@@ -120,6 +126,9 @@ services:
       - |
         /entrypoint airflow db check-migrations
         status=$$?
+        # The heavy_memory pool (ADR-031). `pools set` updates an existing pool, so a rerun exits 0.
+        # Through /entrypoint: init runs as root, where a bare `airflow` cannot import airflow.
+        if [ $$status -eq 0 ]; then /entrypoint airflow pools set heavy_memory 1 "Heavy tasks run one at a time on airflow-vm (ADR-031)"; status=$$?; fi
         chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/logs /opt/airflow/repo/Data-Pipeline/data || echo "chown skipped"
         exit $$status
     environment:
@@ -129,9 +138,11 @@ services:
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
       _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
     user: "0:0"
+    mem_limit: 768m  # ADR-031
 
   airflow-apiserver:
     <<: *airflow-common
+    mem_limit: 512m  # ADR-031
     command: api-server
     # Localhost only. On the VM, reach it through an SSH tunnel.
     ports:
@@ -153,6 +164,7 @@ services:
     <<: *airflow-common
     # Also runs the tasks (LocalExecutor), so it waits for the Execution API.
     command: scheduler
+    mem_limit: 2560m  # ADR-031: tasks run here; sized above the build's anonymous-memory peak, page cache is reclaimed at the limit
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
       interval: 30s
@@ -171,6 +183,7 @@ services:
   airflow-dag-processor:
     <<: *airflow-common
     command: dag-processor
+    mem_limit: 640m  # ADR-031
     healthcheck:
       # A CLI check costs a few CPU seconds, so it runs once a minute.
       test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
