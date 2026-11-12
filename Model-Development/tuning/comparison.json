@@ -1,0 +1,252 @@
+{
+  "candidate": "Model-Development/tuning/best_params.yaml",
+  "candidate_sha256": "sha256:50030cd7657e9c72c5d527b16e271d1c70fff2e033e0265483bc9d2fbb4bcf74",
+  "comparison_id": "20261112T075022Z-tune-compare",
+  "created_utc": "2026-11-12T07:50:48+00:00",
+  "data_version": "sha256:a719afeb9695d4a2d8e9f3d00ee1069e52d1e41ea5f63aeadeaf72e5f42fd0ef",
+  "git": {
+    "commit": "d0f0782cf106afb8ea5536c3e874bc9846030d6b",
+    "uncommitted_changes": true
+  },
+  "models": {
+    "lightgbm": {
+      "bootstrap": {
+        "days": 346,
+        "draws": 1000,
+        "f1_gain_ci95": [
+          -0.016115838751547176,
+          0.014816030699995613
+        ],
+        "f1_tuned_higher_share": 0.496,
+        "log_loss_gain_ci95": [
+          4.842795970738045e-05,
+          0.002741165046084072
+        ],
+        "log_loss_tuned_lower_share": 0.023,
+        "rows": 8304,
+        "seed": 0
+      },
+      "default": {
+        "auc": 0.834110351830735,
+        "brier_skill": 0.1611255201033306,
+        "chosen": {
+          "trees": 88
+        },
+        "f1": 0.34352941176470586,
+        "fn": 233,
+        "fp": 325,
+        "log_loss": 0.14654446969124474,
+        "pr_auc": 0.3367624026642567,
+        "precision": 0.3099787685774947,
+        "recall": 0.38522427440633245,
+        "rows": 8304,
+        "run_folder": "20261112T075022Z-tune-compare-default-lightgbm",
+        "surges": 379,
+        "threshold": 0.0959946834206164,
+        "tp": 146
+      },
+      "difference": {
+        "auc": -0.0011106764439042793,
+        "brier_skill": -0.009362445622299487,
+        "f1": 0.00014600589639196526,
+        "log_loss": 0.001266273071277385,
+        "pr_auc": -0.012007093906334865,
+        "precision": 0.003746721618583748,
+        "recall": -0.005277044854881285
+      },
+      "same_call_share": 0.9913294797687862,
+      "tuned": {
+        "auc": 0.8329996753868307,
+        "brier_skill": 0.1517630744810311,
+        "chosen": {
+          "trees": 265
+        },
+        "f1": 0.3436754176610978,
+        "fn": 235,
+        "fp": 315,
+        "log_loss": 0.14781074276252212,
+        "pr_auc": 0.32475530875792186,
+        "precision": 0.3137254901960784,
+        "recall": 0.37994722955145116,
+        "rows": 8304,
+        "run_folder": "20261112T075022Z-tune-compare-tuned-lightgbm",
+        "surges": 379,
+        "threshold": 0.09221782239911762,
+        "tp": 144
+      },
+      "tuned_values": {
+        "colsample_bytree": 0.9629498988002458,
+        "learning_rate": 0.011070871616615597,
+        "min_child_samples": 24,
+        "num_leaves": 19,
+        "reg_lambda": 0.017500845808932783,
+        "subsample": 0.8441349453851072
+      }
+    },
+    "logreg": {
+      "default": {
+        "auc": 0.7995255653679365,
+        "brier_skill": 0.1367018807281476,
+        "chosen": {
+          "C": 0.0316
+        },
+        "f1": 0.2888086642599278,
+        "fn": 299,
+        "fp": 95,
+        "log_loss": 0.15330620765771566,
+        "pr_auc": 0.2888423551825879,
+        "precision": 0.45714285714285713,
+        "recall": 0.21108179419525067,
+        "rows": 8304,
+        "run_folder": "20261112T075022Z-tune-compare-default-logreg",
+        "surges": 379,
+        "threshold": 0.16795772936661868,
+        "tp": 80
+      },
+      "difference": {
+        "auc": 0.0,
+        "brier_skill": 0.0,
+        "f1": 0.0,
+        "log_loss": 0.0,
+        "pr_auc": 0.0,
+        "precision": 0.0,
+        "recall": 0.0
+      },
+      "tuned": {
+        "auc": 0.7995255653679365,
+        "brier_skill": 0.1367018807281476,
+        "chosen": {
+          "C": 0.0316
+        },
+        "f1": 0.2888086642599278,
+        "fn": 299,
+        "fp": 95,
+        "log_loss": 0.15330620765771566,
+        "pr_auc": 0.2888423551825879,
+        "precision": 0.45714285714285713,
+        "recall": 0.21108179419525067,
+        "rows": 8304,
+        "run_folder": "20261112T075022Z-tune-compare-tuned-logreg",
+        "surges": 379,
+        "threshold": 0.16795772936661868,
+        "tp": 80
+      },
+      "tuned_values": {}
+    },
+    "seasonal": {
+      "default": {
+        "auc": 0.6162756049041559,
+        "brier_skill": -0.01384146555517174,
+        "chosen": {},
+        "f1": 0.1219059405940594,
+        "fn": 182,
+        "fp": 2656,
+        "log_loss": 0.48031094558904486,
+        "pr_auc": 0.06249645908173947,
+        "precision": 0.06905012267788294,
+        "recall": 0.5197889182058048,
+        "rows": 8304,
+        "run_folder": "20261112T075022Z-tune-compare-default-seasonal",
+        "surges": 379,
+        "threshold": 0.034482758620689655,
+        "tp": 197
+      },
+      "difference": {
+        "auc": 0.0,
+        "brier_skill": 0.0,
+        "f1": 0.0,
+        "log_loss": 0.0,
+        "pr_auc": 0.0,
+        "precision": 0.0,
+        "recall": 0.0
+      },
+      "tuned": {
+        "auc": 0.6162756049041559,
+        "brier_skill": -0.01384146555517174,
+        "chosen": {},
+        "f1": 0.1219059405940594,
+        "fn": 182,
+        "fp": 2656,
+        "log_loss": 0.48031094558904486,
+        "pr_auc": 0.06249645908173947,
+        "precision": 0.06905012267788294,
+        "recall": 0.5197889182058048,
+        "rows": 8304,
+        "run_folder": "20261112T075022Z-tune-compare-tuned-seasonal",
+        "surges": 379,
+        "threshold": 0.034482758620689655,
+        "tp": 197
+      },
+      "tuned_values": {}
+    },
+    "xgboost": {
+      "default": {
+        "auc": 0.8303518307350407,
+        "brier_skill": 0.15340384493463977,
+        "chosen": {
+          "trees": 111
+        },
+        "f1": 0.336734693877551,
+        "fn": 247,
+        "fp": 273,
+        "log_loss": 0.14745072937266995,
+        "pr_auc": 0.3260980916041871,
+        "precision": 0.32592592592592595,
+        "recall": 0.3482849604221636,
+        "rows": 8304,
+        "run_folder": "20261112T075022Z-tune-compare-default-xgboost",
+        "surges": 379,
+        "threshold": 0.08996271342039108,
+        "tp": 132
+      },
+      "difference": {
+        "auc": 0.0,
+        "brier_skill": 0.0,
+        "f1": 0.0,
+        "log_loss": 0.0,
+        "pr_auc": 0.0,
+        "precision": 0.0,
+        "recall": 0.0
+      },
+      "tuned": {
+        "auc": 0.8303518307350407,
+        "brier_skill": 0.15340384493463977,
+        "chosen": {
+          "trees": 111
+        },
+        "f1": 0.336734693877551,
+        "fn": 247,
+        "fp": 273,
+        "log_loss": 0.14745072937266995,
+        "pr_auc": 0.3260980916041871,
+        "precision": 0.32592592592592595,
+        "recall": 0.3482849604221636,
+        "rows": 8304,
+        "run_folder": "20261112T075022Z-tune-compare-tuned-xgboost",
+        "surges": 379,
+        "threshold": 0.08996271342039108,
+        "tp": 132
+      },
+      "tuned_values": {}
+    }
+  },
+  "selections": {
+    "default": "20261112T075022Z-tune-compare-default",
+    "tuned": "20261112T075022Z-tune-compare-tuned"
+  },
+  "split": "validation",
+  "tuned_values": {
+    "lightgbm": {
+      "colsample_bytree": 0.9629498988002458,
+      "learning_rate": 0.011070871616615597,
+      "min_child_samples": 24,
+      "num_leaves": 19,
+      "reg_lambda": 0.017500845808932783,
+      "subsample": 0.8441349453851072
+    }
+  },
+  "winner": {
+    "default": "lightgbm",
+    "tuned": "lightgbm"
+  }
+}
