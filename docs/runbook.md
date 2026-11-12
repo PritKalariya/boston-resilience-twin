@@ -1298,6 +1298,8 @@ New DAGs start paused (`DAGS_ARE_PAUSED_AT_CREATION`), and a run triggered on a 
 
 A full build of `daily_pipeline` on a fresh airflow-vm (e2-medium, empty `Data-Pipeline/data/`, `main` at `1a46550`, started 2026-11-07 01:59 UTC) takes about 34 minutes: 4.5 to download everything (1.7 GB of 311 files), 7 for `validate_raw`, 5.5 for the 12 legacy years, 2 for merging, combining, `spatial_join` and `daily_counts`, 7 for labels, features and `validate_processed`, 7.5 for statistics and bias slicing, and under 1 for `push_data`. A second full build right after takes about 26 minutes, since the downloads skip what is settled, and writes byte-identical outputs to `interim/` and `processed/` (#39). Memory is tightest while `schema_and_statistics` and `bias_slicing` run together: 42 MB available at the low point of the first build, with no task killed.
 
+These times predate #107. A first build now also fetches the 1,134 alert bulletins ("Alert history" above), about 20 minutes by that estimate, not yet timed on the VM. The downloads run side by side before `validate_raw`, so `ingest_alert_history` becomes the longest of them, and a first build should take about 15 minutes more, roughly 50 in all. A second build fetches only new bulletins, so its time should not change.
+
 ### Troubleshooting
 
 - **Triggerer shows red in the UI's health panel.** Expected: the stack has no triggerer service (ADR-016).
