@@ -67,7 +67,7 @@ The budget covers today's stack only: Postgres plus the four Airflow services. m
 | Parallelism 1 or 3 | Parallelism 1 runs every task, the 4-wide legacy parse included, one at a time; the added time was not measured | One setting | Slower for tasks that were never a problem (the parse low was 1074 MiB), while the overlap that caused the 81 MiB low can still happen at 3 |
 | e2-standard-2 (8 GB) | About $56 a month with disk and IP (machine about $49), against about $31 for e2-medium (ADR-016): nearly double, against a $50 per-member budget | Resize in Terraform | No change in behavior except more room; the budget is the failure |
 | Swap | $0 beyond disk | Small | Slow paging on a 2-shared-vCPU VM instead of a clean kill; every task and service slows down while memory is short |
-| Trim `combine_311` and `validate_processed` | $0 | Medium: code changes in another owner's area | Their lows (623 and 723 MiB) are already above the floor and each runs alone, so there is nothing to fix |
+| Trim `combine_311` and `validate_processed` | $0 | Medium: code changes in another owner's area | Each runs alone, so trimming is the only lever on its low. Not chosen here: code changes in the Data-Pipeline area during freeze week. Run 2 measured `combine_311` at 463 MiB, accepted short of target (see Consequences); trimming it is on the Later list |
 
 ## Consequences
 
