@@ -11,18 +11,26 @@ from alert_history import (
     DOWNLOADS,
     LEAKY_COLUMNS,
     OUT_COLUMNS,
+    PREPARED_COLUMNS,
     UNMAPPED,
     FreshnessError,
     alert_features,
+    bulletin_path,
+    bulletin_url,
     check_freshness,
     check_raw,
     cutoff_utc,
     day_start_utc,
+    download_bulletins,
     download_years,
+    first_begin,
     load_alert_map,
     prepare,
     raw_path,
+    read_bulletin,
     read_raw,
+    ugc_codes,
+    with_first_begins,
     year_url,
     years_to_pull,
 )
@@ -79,13 +87,35 @@ def record_pulls(state_dir, pulls):
     (state_dir / DOWNLOADS).write_text(json.dumps({str(year): {"downloaded_at": at, "rows": 1} for year, at in pulls.items()}))
 
 
+def prepared(rows, begins=None):
+    """prepare's alerts with first_begin_utc: each begins at its first bulletin unless begins gives its
+    first-announced begin (UTC) by event number."""
+    alerts, _ = prepare(rows, boston_map())
+    begins = begins or {}
+    first = [pd.Timestamp(begins[event], tz="UTC") if event in begins else sent
+             for event, sent in zip(alerts["eventid"], alerts["first_bulletin_utc"])]
+    return alerts.assign(first_begin_utc=pd.to_datetime(pd.Series(first, index=alerts.index, dtype=object), utc=True))[OUT_COLUMNS]
+
+
+def bulletin_text(*segments):
+    """A first bulletin as IEM's text service serves it: one segment per (UGC block, VTEC strings)."""
+    body = "\n".join(f"\n{ugcs}\n{vtecs}\nSuffolk MA-\n358 PM EST Sun Jan 25 2015\n\n...an alert...\n\n$$" for ugcs, vtecs in segments)
+    return f"041 \nWWUS41 KBOX 252058\nWSWBOX\n\nURGENT - WINTER WEATHER MESSAGE\n{body}\n"
+
+
+def write_bulletin(raw_dir, product_id, *segments):
+    path = bulletin_path(raw_dir, product_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(bulletin_text(*segments), encoding="utf-8")
+
+
 # Prepare
 
 
 def test_prepare_keeps_boston_rows_and_only_safe_fields():
     alerts, report = prepare(raw(row(), row(ugc="MAC025", phenomena="SV", eventid=7), row(ugc="MAZ014"), row(ugc="")),
                              boston_map())
-    assert list(alerts.columns) == OUT_COLUMNS
+    assert list(alerts.columns) == PREPARED_COLUMNS
     assert not set(LEAKY_COLUMNS) & set(alerts.columns)
     assert sorted(alerts["ugc"]) == ["MAC025", "MAZ015"]
     assert dict(zip(alerts["ugc"], alerts["area"])) == {"MAZ015": "zone", "MAC025": "county"}
@@ -139,7 +169,7 @@ def test_missing_columns_and_empty_input():
     with pytest.raises(ValueError, match="missing columns"):
         prepare(raw(row()).drop(columns="status"), boston_map())  # A+ needs the last state to check
     alerts, report = prepare(raw(row(ugc="MAZ014")), boston_map())
-    assert alerts.empty and list(alerts.columns) == OUT_COLUMNS
+    assert alerts.empty and list(alerts.columns) == PREPARED_COLUMNS
 
 
 def test_eventid_must_be_a_number():
@@ -299,8 +329,8 @@ def test_an_alert_sent_on_31_december_that_starts_on_1_january_is_only_in_the_ne
     write_csv(raw_path(tmp_path, 2027), running(eventid=41, first="2026-12-31 15:00", first_end="202701021200", year=2026))
     new_year = pd.Series(pd.to_datetime(["2027-01-01"]))  # cutoff 2026-12-31 18:00 EST, 23:00 UTC
     years = years_to_pull(2026, date(2026, 12, 31))
-    with_next, _ = prepare(read_raw(tmp_path, years), boston_map())
-    without, _ = prepare(read_raw(tmp_path, [2026]), boston_map())
+    with_next = prepared(read_raw(tmp_path, years))
+    without = prepared(read_raw(tmp_path, [2026]))
     assert years == [2026, 2027]
     assert alert_features(with_next, new_year, "18:00", GROUPS).iloc[0]["alert_snow_ice_count"] == 1
     assert alert_features(without, new_year, "18:00", GROUPS).iloc[0]["alert_snow_ice_count"] == 0
@@ -321,7 +351,7 @@ def test_in_january_the_previous_year_is_pulled_again_for_its_late_cancellations
     report = download_years(raw_dir, [2026, 2027], evening, fetch=fake_fetch(bodies, calls), state_dir=state_dir)
     assert calls == [year_url(2026), year_url(2027)]
     assert [r["action"] for r in report] == ["updated", "unchanged"]
-    alerts, _ = prepare(read_raw(raw_dir, [2026, 2027]), boston_map())
+    alerts = prepared(read_raw(raw_dir, [2026, 2027]))
     day = alert_features(alerts, pd.Series(pd.to_datetime(["2027-01-03"])), "18:00", GROUPS).iloc[0]
     assert day["alert_snow_ice_count"] == 0  # cancelled at 15:00 UTC, before that evening's 23:00 UTC cutoff
 
@@ -359,9 +389,8 @@ def test_cutoff_and_day_start_on_daylight_saving_change_days():
     assert list(day_start_utc(days)) == [pd.Timestamp(t, tz="UTC") for t in starts]
 
 
-def features_for(alert_rows, day="2015-01-27", cutoff="18:00"):
-    alerts, _ = prepare(raw(*alert_rows), boston_map())
-    table = alert_features(alerts, pd.Series(pd.to_datetime([day])), cutoff, GROUPS)
+def features_for(alert_rows, day="2015-01-27", cutoff="18:00", begins=None):
+    table = alert_features(prepared(raw(*alert_rows), begins), pd.Series(pd.to_datetime([day])), cutoff, GROUPS)
     return table.iloc[0]
 
 
@@ -409,7 +438,7 @@ def test_none_and_unmapped_alerts_feed_no_group():
 
 
 def test_no_alerts_give_zeros_for_every_day():
-    alerts, _ = prepare(raw(row(ugc="MAZ014")), boston_map())
+    alerts = prepared(raw(row(ugc="MAZ014")))
     table = alert_features(alerts, pd.Series(pd.date_range("2015-01-01", periods=3)), "18:00", GROUPS)
     assert len(table) == 3 and (table.filter(like="alert_") == 0).all().all()
 
@@ -489,7 +518,8 @@ def test_history_and_the_evening_run_give_the_same_features():
 
 
 def test_features_are_the_same_after_a_parquet_round_trip(tmp_path):
-    alerts, _ = prepare(raw(running(), ended("CAN", "2015-01-26 12:00", eventid=2), running(ugc="MAC025")), boston_map())
+    alerts = prepared(raw(running(), ended("CAN", "2015-01-26 12:00", eventid=2), running(ugc="MAC025")),
+                      begins={2: "2015-01-26 05:00"})
     alerts.to_parquet(tmp_path / "alerts.parquet", index=False)
     back = pd.read_parquet(tmp_path / "alerts.parquet")
     days = pd.Series(pd.date_range("2015-01-25", periods=5))
@@ -497,9 +527,198 @@ def test_features_are_the_same_after_a_parquet_round_trip(tmp_path):
 
 
 def test_alerts_without_the_a_plus_column_are_rejected():
-    alerts, _ = prepare(raw(row()), boston_map())
+    alerts = prepared(raw(row()))
     with pytest.raises(ValueError, match="ended_early_utc"):
         alert_features(alerts.drop(columns="ended_early_utc"), pd.Series(pd.to_datetime(["2015-01-27"])), "18:00", GROUPS)
+
+
+def test_alerts_without_a_first_announced_begin_are_rejected():
+    day = pd.Series(pd.to_datetime(["2015-01-27"]))
+    alerts = prepared(raw(row()))
+    with pytest.raises(ValueError, match="first_begin_utc"):  # a parquet written before #107
+        alert_features(alerts.drop(columns="first_begin_utc"), day, "18:00", GROUPS)
+    with pytest.raises(ValueError, match="no first-announced begin"):  # never treated as "no alert"
+        alert_features(alerts.assign(first_begin_utc=pd.NaT), day, "18:00", GROUPS)
+
+
+# Begins after D (#107, the CP1 leak): an alert first announced to begin after D does not count for D.
+# For 2015-01-27 the day ends at 05:00 UTC on 28 January (midnight EST); for 2015-07-15 at 04:00 UTC (EDT).
+
+
+@pytest.mark.parametrize("day, first, begin, count", [
+    ("2015-01-27", "2015-01-26 12:00", "2015-01-28 04:59", 1),
+    ("2015-01-27", "2015-01-26 12:00", "2015-01-28 05:00", 0),
+    ("2015-07-15", "2015-07-14 12:00", "2015-07-16 03:59", 1),
+    ("2015-07-15", "2015-07-14 12:00", "2015-07-16 04:00", 0),
+])
+def test_an_alert_announced_to_begin_after_the_day_does_not_count_for_it(day, first, begin, count):
+    end = (pd.Timestamp(day) + pd.Timedelta(days=3)).strftime("%Y%m%d1200")
+    watch = running(significance="A", first=first, first_end=end)
+    assert features_for([watch], day=day, begins={1: begin})["alert_snow_ice_count"] == count
+
+
+def test_a_watch_sent_days_ahead_counts_for_the_storm_day_only():
+    # Sent 25 January, first announced to begin 28 January 06:00 UTC (01:00 EST) and end 29 January 12:00 UTC.
+    # Before #107 it counted for 26 and 27 January too, since only its end was compared with the day.
+    watch = running(significance="A", first="2015-01-25 20:58", first_end="201501291200")
+    days = ["2015-01-26", "2015-01-27", "2015-01-28"]
+    counts = [features_for([watch], day=day, begins={1: "2015-01-28 06:00"})["alert_snow_ice_count"] for day in days]
+    assert counts == [0, 0, 1]
+
+
+# First-announced begin (#107): read from the alert's VTEC string in its first bulletin, in Boston's segment.
+
+SENT = pd.Timestamp("2015-01-25 20:58", tz="UTC")
+# The 2015 blizzard warning's first bulletin, trimmed (IEM text service; NWS, public domain).
+BLIZZARD = """041
+WWUS41 KBOX 252058
+WSWBOX
+
+URGENT - WINTER WEATHER MESSAGE
+NATIONAL WEATHER SERVICE TAUNTON MA
+358 PM EST SUN JAN 25 2015
+
+...A CRIPPLING AND POTENTIALLY HISTORIC BLIZZARD TO IMPACT THE
+AREA MAINLY FROM LATE MONDAY INTO TUESDAY...LINGERING INTO EARLY
+WEDNESDAY...
+
+MAZ005>007-013>021-RIZ001>008-260500-
+/O.UPG.KBOX.BZ.A.0001.150127T0000Z-150128T0600Z/
+/O.NEW.KBOX.BZ.W.0001.150127T0000Z-150128T0600Z/
+CENTRAL MIDDLESEX MA-WESTERN ESSEX MA-EASTERN ESSEX MA-
+WESTERN NORFOLK MA-SOUTHEAST MIDDLESEX MA-SUFFOLK MA-
+358 PM EST SUN JAN 25 2015
+
+$$
+
+MAZ022-023-260500-
+/O.UPG.KBOX.WS.A.0003.150127T0000Z-150128T0600Z/
+/O.NEW.KBOX.BZ.W.0001.150127T0000Z-150127T1700Z/
+BARNSTABLE MA-DUKES MA-
+358 PM EST SUN JAN 25 2015
+
+$$
+
+MAZ002>004-008>011-026-260500-
+/O.UPG.KBOX.WS.A.0003.150127T0000Z-150128T0600Z/
+/O.NEW.KBOX.WS.W.0003.150127T0000Z-150128T0600Z/
+NORTHWEST MIDDLESEX MA-NORTH CENTRAL WORCESTER MA-
+358 PM EST SUN JAN 25 2015
+
+$$
+"""
+
+
+@pytest.mark.parametrize("block, codes", [
+    ("MAZ015-260500-", {"MAZ015"}),
+    ("MAZ005>007-013-RIZ001>002-260500-", {"MAZ005", "MAZ006", "MAZ007", "MAZ013", "RIZ001", "RIZ002"}),
+    ("MAC021-025-252230-", {"MAC021", "MAC025"}),
+    ("MAZ013>MAZ015-260500-", {"MAZ013", "MAZ014", "MAZ015"}),
+])
+def test_ugc_codes_expand_ranges_and_keep_the_state_and_type(block, codes):
+    assert ugc_codes(block) == codes
+
+
+def test_a_ugc_number_without_a_state_before_it_is_unreadable():
+    with pytest.raises(ValueError, match="unreadable UGC"):
+        ugc_codes("015-260500-")
+
+
+def test_the_begin_comes_from_the_segment_that_names_the_area():
+    assert first_begin(BLIZZARD, "MAZ015", "BZ", "W", 1, SENT) == (pd.Timestamp("2015-01-27 00:00", tz="UTC"), True)
+    # WS.W 3 went only to other zones, so Boston's bulletin has no begin for it and the run stops.
+    with pytest.raises(ValueError, match="0 begins for WS.W 3 in MAZ015"):
+        first_begin(BLIZZARD, "MAZ015", "WS", "W", 3, SENT)
+
+
+def test_each_area_takes_its_own_segments_begin():
+    text = bulletin_text(("MAZ015-260500-", "/O.NEW.KBOX.WS.W.0004.150127T1200Z-150128T0600Z/"),
+                         ("MAZ016>017-260500-", "/O.NEW.KBOX.WS.W.0004.150127T0000Z-150128T0600Z/"))
+    assert first_begin(text, "MAZ015", "WS", "W", 4, SENT)[0] == pd.Timestamp("2015-01-27 12:00", tz="UTC")
+    assert first_begin(text, "MAZ016", "WS", "W", 4, SENT)[0] == pd.Timestamp("2015-01-27 00:00", tz="UTC")
+
+
+def test_a_begin_of_zeros_means_the_alert_began_when_sent():
+    text = bulletin_text(("MAZ015-252300-", "/O.EXA.KBOX.WW.Y.0005.000000T0000Z-150125T2300Z/"))
+    assert first_begin(text, "MAZ015", "WW", "Y", 5, SENT) == (SENT, True)
+
+
+def test_a_ugc_block_can_run_over_several_lines():
+    text = bulletin_text(("CTZ002>004-MAZ002>004-008>012-\n014>016-RIZ001-260500-",
+                          "/O.NEW.KBOX.WW.Y.0002.150126T0300Z-150126T1500Z/"))
+    assert first_begin(text, "MAZ015", "WW", "Y", 2, SENT)[0] == pd.Timestamp("2015-01-26 03:00", tz="UTC")
+
+
+def test_an_event_iem_renumbered_takes_the_one_alert_of_its_type_the_segment_starts():
+    # IEM records this wind chill advisory as WC.Y 4; its first bulletin says WC.Y 1 (ADR-014, December 2017).
+    text = bulletin_text(("MAZ002-008-009-271200-", "/O.NEW.KBOX.WC.W.0001.171228T0000Z-171228T1700Z/"),
+                         ("MAZ003>007-012>024-271200-", "/O.NEW.KBOX.WC.Y.0001.171228T0000Z-171228T1700Z/"))
+    assert first_begin(text, "MAZ015", "WC", "Y", 4, SENT) == (pd.Timestamp("2017-12-28 00:00", tz="UTC"), False)
+    two = bulletin_text(("MAZ015-271200-", "/O.NEW.KBOX.WC.Y.0001.171228T0000Z-171228T1700Z/\n"
+                                           "/O.NEW.KBOX.WC.Y.0002.171229T0000Z-171229T1700Z/"))
+    continued = bulletin_text(("MAZ015-271200-", "/O.CON.KBOX.WC.Y.0001.171228T0000Z-171228T1700Z/"))
+    for text in (two, continued):  # two of the type, or one the segment does not start: no way to tell
+        with pytest.raises(ValueError, match="0 begins"):
+            first_begin(text, "MAZ015", "WC", "Y", 4, SENT)
+
+
+def test_with_first_begins_reads_each_alerts_own_bulletin(tmp_path):
+    alerts, _ = prepare(raw(row(), row(ugc="MAC025", phenomena="SV", eventid=7)), boston_map())
+    write_bulletin(tmp_path, "201501252058-KBOX-WWUS41-WSWBOX",
+                   ("MAZ015-260500-", "/O.NEW.KBOX.WS.W.0001.150127T0000Z-150128T0600Z/"),
+                   ("MAC025-252100-", "/O.NEW.KBOX.SV.W.0007.000000T0000Z-150125T2100Z/"))
+    begun, by_type = with_first_begins(alerts, lambda product_id: read_bulletin(tmp_path, product_id))
+    assert list(begun.columns) == OUT_COLUMNS and not set(LEAKY_COLUMNS) & set(begun.columns)
+    assert dict(zip(begun["phenomena"], begun["first_begin_utc"])) == {
+        "WS": pd.Timestamp("2015-01-27 00:00", tz="UTC"), "SV": SENT}
+    assert by_type == []
+    with pytest.raises(FileNotFoundError, match="--download"):
+        with_first_begins(alerts, lambda product_id: read_bulletin(tmp_path / "elsewhere", product_id))
+
+
+def test_with_first_begins_lists_renumbered_alerts_and_names_a_bulletin_it_cannot_read(tmp_path):
+    pid = "201501252058-KBOX-WWUS41-WSWBOX"
+    alerts, _ = prepare(raw(row(phenomena="WC", significance="Y", eventid=4)), boston_map())
+    write_bulletin(tmp_path, pid, ("MAZ015-260500-", "/O.NEW.KBOX.WC.Y.0001.150126T0000Z-150126T1200Z/"))
+    begun, by_type = with_first_begins(alerts, lambda product_id: read_bulletin(tmp_path, product_id))
+    assert by_type == [f"WC.Y 4 in {pid}"] and begun["first_begin_utc"].iloc[0] == pd.Timestamp("2015-01-26", tz="UTC")
+    write_bulletin(tmp_path, pid, ("MAZ016-260500-", "/O.NEW.KBOX.WC.Y.0004.150126T0000Z-150126T1200Z/"))
+    with pytest.raises(ValueError, match="0 begins") as failure:  # sent to another zone only
+        with_first_begins(alerts, lambda product_id: read_bulletin(tmp_path, product_id))
+    assert f"in bulletin {pid}" in " ".join(failure.value.__notes__)
+
+
+def fake_texts(texts, calls):
+    def fetch(url, dest):
+        calls.append(url)
+        Path(dest).write_text(texts[url.rsplit("/", 1)[1].split("?")[0]], encoding="utf-8")
+    return fetch
+
+
+def test_download_bulletins_fetches_each_missing_one_once(tmp_path):
+    ids = ["201501252058-KBOX-WWUS41-WSWBOX", "202012251926-KBOX-WGUS41-FLWBOX-RRA"]
+    texts = {pid: bulletin_text(("MAZ015-260500-", "/O.NEW.KBOX.WS.W.0001.150127T0000Z-150128T0600Z/")) for pid in ids}
+    calls = []
+    report = download_bulletins(tmp_path, [*ids, ids[0]], fetch=fake_texts(texts, calls), pause_s=0)
+    assert report == {"needed": 2, "already stored": 0, "downloaded": 2}
+    assert calls == [bulletin_url(pid) for pid in ids] and calls[0].endswith("?nolimit=true")
+    assert read_bulletin(tmp_path, ids[1]) == texts[ids[1]]
+    calls.clear()  # a bulletin never changes, so a stored one is never fetched again
+    assert download_bulletins(tmp_path, ids, fetch=fake_texts(texts, calls), pause_s=0)["downloaded"] == 0
+    assert calls == []
+
+
+def test_an_error_page_never_becomes_a_bulletin(tmp_path):
+    pid = "201501252058-KBOX-WWUS41-WSWBOX"
+    with pytest.raises(ValueError, match="no VTEC string") as failure:
+        download_bulletins(tmp_path, [pid], fetch=fake_texts({pid: '{"detail": "Not Found"}'}, []), pause_s=0)
+    assert "nothing was stored" in " ".join(failure.value.__notes__)
+    assert not bulletin_path(tmp_path, pid).exists() and not list((tmp_path / "bulletins").glob("*.download"))
+
+
+def test_a_product_id_must_look_like_iems(tmp_path):
+    with pytest.raises(ValueError, match="not an IEM product id"):
+        bulletin_path(tmp_path, "../../outside")
 
 
 # Freshness (ADR-014): the evening before 2015-01-27, whose cutoff is 23:00 UTC.
@@ -564,17 +783,25 @@ def test_main_prepares_the_pulled_years(tmp_path, monkeypatch, capsys):
     argv = ["alert_history.py", "--raw-dir", str(raw_dir), "--map", str(MAP), "--out", str(out),
             "--first-year", "2015", "--last-year", "2015"]
     monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(FileNotFoundError, match="--download"):  # no first bulletins stored yet
+        alert_history.main()
+    write_bulletin(raw_dir, "201501252058-KBOX-WWUS41-WSWBOX",
+                   ("MAZ015-260500-", "/O.NEW.KBOX.WS.W.0001.150127T0000Z-150128T0600Z/"),
+                   ("MAC025-252100-", "/O.NEW.KBOX.SV.W.0007.000000T0000Z-150125T2100Z/"))
     alert_history.main()
     written = pd.read_parquet(out)
     assert len(written) == 2 and not set(LEAKY_COLUMNS) & set(written.columns)
+    assert sorted(written["first_begin_utc"]) == [SENT, pd.Timestamp("2015-01-27 00:00", tz="UTC")]
     printed = capsys.readouterr().out
     assert "| 2015 | 1 | 1 |" in printed and "WARNING" not in printed
+    assert "1 of 2 alerts were first announced to begin after their first bulletin" in printed
 
 
 def test_main_checks_freshness_before_it_writes(tmp_path, monkeypatch, capsys):
     raw_dir, state_dir, nws_dir = tmp_path / "nws_alerts", tmp_path / "state", tmp_path / "nws"
     raw_dir.mkdir()
     write_csv(raw_path(raw_dir, 2015), running())
+    write_bulletin(raw_dir, "201501252058-KBOX-WWUS41-WSWBOX", ("MAZ015-260500-", WS_W_1))
     record_pulls(state_dir, {2015: "2015-01-26T23:30:00+00:00"})
     folder = nws_dir / "2015-01-26"
     folder.mkdir(parents=True)

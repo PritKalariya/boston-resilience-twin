@@ -32,8 +32,26 @@ Daily values (daily_forecasts): Boston Logan's station day, midnight to
 midnight Eastern standard time (05:00 to 05:00 UTC all year), the day GHCN-D's
 observed values follow (#7 data card), so the observed training values and
 these forecasts describe the same day. A day is missing unless all 24 of its
-hours have a usable value, so the known gaps (every value before 2024-01-21,
-snowfall before 2024-12-06) stay missing.
+hours have a usable value, so the gap before 2024-01-21, when nothing was
+stored, stays missing.
+
+Snowfall where GFS stored none (#107, fill_snowfall): Open-Meteo stored no GFS
+snowfall before 2024-12-06, while precipitation and temperature are complete
+from 2024-01-21. Open-Meteo began computing snowfall while downloading on
+2024-12-05 (its PR #1147) and did not refill the older archive. Left missing,
+the validation year's snowfall would be missing on 321 of its forecast days,
+and a model that never saw it missing in training misreads the gap (LightGBM,
+for one, treats it as zero). An hour without snowfall gets the GFS formula, frozen
+precipitation times 0.7 cm per mm (Open-Meteo GFS documentation), counting the
+precipitation as frozen when the hour's 2 m temperature is at or below
+SNOW_MAX_TEMP_C, 1 degree C, the mean rain-snow threshold over land (Jennings et
+al. 2018, Nature Communications 9:1148). Each forecast is filled from its own
+precipitation and temperature, so an estimated hour comes from the same run and
+is available exactly when a stored value would be. On the 698 days from
+2024-12-07 to 2026-11-04 with stored snowfall, the daily estimate follows it
+with r = 0.978 and a mean absolute error of 1.1 mm, and it reaches 25.4 mm on
+all 13 days that GFS does (and on 4 more). Thresholds of 0, 0.5, 1.5 and 2
+degrees fit worse: r 0.860, 0.930, 0.978 with a 1.4 mm error, and 0.959.
 
 Data: Open-Meteo.com (CC BY 4.0), forecasts from NOAA NCEP GFS; #8 keeps the
 attribution rows in docs/data/open-meteo.csv.
@@ -63,6 +81,8 @@ VALUES = {
     "tmin_c": ("temperature_2m", "°C", 1.0, "min"),
     "gust_max_ms": ("wind_gusts_10m", "m/s", 1.0, "max"),
 }
+SNOW_CM_PER_MM = 0.7  # GFS snowfall = frozen precipitation x 0.7 cm per mm (Open-Meteo GFS docs)
+SNOW_MAX_TEMP_C = 1.0  # an hour at or below this 2 m temperature counts as snow (Jennings et al. 2018)
 STATION_DAY_START = pd.Timedelta(hours=5)  # midnight EST in UTC: Logan's GHCN-D day (#7 data card)
 HOURS_PER_DAY = 24
 HOUR_NS = 3_600_000_000_000
@@ -143,14 +163,34 @@ def read_hourly(forecast_dir, years, today: date | None = None) -> pd.DataFrame:
     return hourly.sort_index()
 
 
+def fill_snowfall(hourly: pd.DataFrame) -> pd.DataFrame:
+    """hourly with every missing snowfall value estimated from the same forecast (module docstring).
+
+    For each of previous_day1 and previous_day2 on its own: precipitation times
+    SNOW_CM_PER_MM when that forecast's temperature is at or below
+    SNOW_MAX_TEMP_C, else 0. A stored snowfall value is never replaced, and an
+    hour that also lacks precipitation or temperature stays missing.
+    """
+    out = hourly.copy()
+    for n in DAYS_BEFORE:
+        precipitation = out[f"precipitation_previous_day{n}"]
+        temperature = out[f"temperature_2m_previous_day{n}"]
+        frozen = np.where(temperature <= SNOW_MAX_TEMP_C, precipitation * SNOW_CM_PER_MM, 0.0)
+        estimate = pd.Series(frozen, index=out.index).where(precipitation.notna() & temperature.notna())
+        out[f"snowfall_previous_day{n}"] = out[f"snowfall_previous_day{n}"].fillna(estimate)
+    return out
+
+
 def daily_forecasts(hourly: pd.DataFrame, days, cutoffs, margin_hours: float) -> pd.DataFrame:
     """Per day D: the VALUES over Logan's station day from forecasts available by D's cutoff.
 
     days are dates (midnight, no time zone); cutoffs are their forecast cutoffs
     in UTC, in the same order. known_by_utc is the latest availability time of
     any hour behind a daily value the row keeps (none for a day left missing),
-    so a check can prove that none came after the cutoff.
+    so a check can prove that none came after the cutoff. Snowfall that GFS did
+    not store is estimated first (fill_snowfall).
     """
+    hourly = fill_snowfall(hourly)
     days = pd.DatetimeIndex(days)
     cut = np.repeat(pd.DatetimeIndex(cutoffs).tz_convert("UTC").as_unit("ns").asi8, HOURS_PER_DAY)
     starts = days.as_unit("ns").asi8 + STATION_DAY_START.value

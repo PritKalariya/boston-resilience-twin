@@ -119,6 +119,48 @@ def test_daily_values_and_units(tmp_path):
     assert (day["tmax_c"], day["tmin_c"]) == (10.0, -5.0)
 
 
+# Snowfall GFS did not store (#107): estimated from the same forecast's precipitation and temperature
+
+
+def snow_gap(precipitation, temperature):
+    """No stored snowfall; precipitation and temperature as functions of (days_before, hour)."""
+    return by_value(snowfall=lambda n, hour: None, precipitation=precipitation, temperature_2m=temperature)
+
+
+def test_missing_snowfall_is_estimated_from_precipitation_when_it_freezes(tmp_path):
+    day = one_day(tmp_path, WINTER, snow_gap(lambda n, hour: 1.0, lambda n, hour: -2.0))
+    assert day["snowfall_mm"] == 24 * 7.0  # 1 mm of water at -2 degrees is 0.7 cm, 7 mm, of snow
+
+
+def test_rain_above_one_degree_adds_no_snow(tmp_path):
+    day = one_day(tmp_path, WINTER, snow_gap(lambda n, hour: 1.0, lambda n, hour: 1.5))
+    assert (day["snowfall_mm"], day["precip_mm"]) == (0.0, 24.0)
+
+
+def test_one_degree_itself_counts_as_snow(tmp_path):
+    day = one_day(tmp_path, WINTER, snow_gap(lambda n, hour: 1.0, lambda n, hour: 1.0))
+    assert day["snowfall_mm"] == 24 * 7.0
+
+
+def test_the_estimate_comes_from_the_forecast_the_hour_takes(tmp_path):
+    # In January 12 hours take the one-day forecast (1 mm) and 12 the two-day one (3 mm).
+    day = one_day(tmp_path, WINTER, snow_gap(lambda n, hour: [1.0, 3.0][n - 1], lambda n, hour: -2.0))
+    assert day["snowfall_mm"] == 12 * 7.0 + 12 * 21.0
+    # The same runs as a stored value, so nothing becomes known later than before.
+    assert day["known_by_utc"] == pd.Timestamp("2025-01-14 19:00", tz="UTC")
+
+
+def test_stored_snowfall_is_never_replaced(tmp_path):
+    value = by_value(snowfall=lambda n, hour: 0.1, precipitation=lambda n, hour: 5.0, temperature_2m=lambda n, hour: -2.0)
+    assert one_day(tmp_path, WINTER, value)["snowfall_mm"] == 24.0
+
+
+def test_an_hour_without_precipitation_stays_missing(tmp_path):
+    early = pd.Timestamp("2025-01-15 07:00")
+    day = one_day(tmp_path, WINTER, snow_gap(lambda n, hour: None if hour == early else 1.0, lambda n, hour: -2.0))
+    assert pd.isna(day["snowfall_mm"]) and pd.isna(day["precip_mm"])
+
+
 def test_a_day_past_the_stored_hours_is_missing(tmp_path):
     folder = write(tmp_path / "set_c", 2025, answer("2025-01-01", "2025-01-15"))
     days = pd.DatetimeIndex(["2025-01-15"])  # its last hours fall on 2025-01-16, not stored

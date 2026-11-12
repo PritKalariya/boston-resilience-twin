@@ -91,7 +91,7 @@ First full day of each set c value (one-day checks, 2026-10-22):
 | precipitation, showers, temperature_2m, wind_gusts_10m | 2024-01-21 (2024-01-20 has the 1-day values but only 12 of 24 hours of the 2-day values) | 2024-01-21 |
 | rain, snowfall | 2024-12-07 (first hour 2024-12-06 18:00) | 2024-12-08 (first hour 2024-12-07 18:00) |
 
-Set c from 2024-01-21 to early December 2024 has no rain or snowfall, only precipitation, so #16 must decide how to handle snow there, for example from precipitation and temperature.
+Set c from 2024-01-21 to early December 2024 has no rain or snowfall, only precipitation, so #16 must decide how to handle snow there, for example from precipitation and temperature. #107 does that: `open_meteo_forecast.fill_snowfall` estimates each missing snowfall hour from the same forecast's precipitation and temperature.
 
 In sets a and b, rain plus showers plus snowfall as water (cm times 10 / 7) adds up to precipitation in every year. ECMWF moves shower rain out of `rain` into `showers` during 2025, so `precipitation`, or rain plus showers, is the value that means the same in every year. NOAA's PRCP, used in training, is total precipitation.
 

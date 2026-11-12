@@ -24,9 +24,10 @@ out of the model:
   They are the default model inputs in place of the raw counts
   (feature_catalog.csv), until Model Development compares the two.
 - NWS alerts (ADR-014, Option A+): per storm group, the alerts whose first
-  bulletin came before the cutoff, whose first-announced end is after D begins
-  and that were not cancelled or upgraded before the cutoff, and whether one of
-  them is a warning (alert_history.py). One VTEC event counts once. Alerts
+  bulletin came before the cutoff, that as first announced begin before D ends
+  (#107) and end after D begins, and that were not cancelled or upgraded before
+  the cutoff, and whether one of them is a warning (alert_history.py). One VTEC
+  event counts once. Alerts
   exist live (the evening IEM pull, checked against #7's NWS snapshot), so
   flooding alerts are kept.
 - calendar: day of week, month and day of year.

@@ -15,8 +15,9 @@ since a deferred task waits forever without one.
 Every Airflow service runs `brt-airflow:local`, built from `airflow.Dockerfile`
 at the repo root: the `apache/airflow:3.3.2-python3.12` base image (ADR-013)
 plus `Data-Pipeline/requirements.txt` installed under Airflow's constraints for
-that image (ADR-022). The requirements file is the only thing copied in; DAG
-and script code is bind-mounted (ADR-017).
+that image (ADR-022), and one system package, `libgomp1`, the OpenMP runtime
+LightGBM needs to load (#107). The requirements file is the only thing copied
+in; DAG and script code is bind-mounted (ADR-017).
 
 ### Rebuild the image
 
@@ -629,13 +630,13 @@ python Data-Pipeline/scripts/feature_table.py --noaa-dir Data-Pipeline/data/raw/
   --tides-dir Data-Pipeline/data/raw/tides/predicted       # with weather and tides, as the feature_table task runs it
 ```
 
-**Alert history.** `alert_history.py` pulls the Iowa Environmental Mesonet bulk VTEC download for NWS office BOX one year at a time into `Data-Pipeline/data/raw/nws_alerts/box_<year>.csv`, as published. IEM files an alert under the year it starts, so from 15 December the next year is pulled too. A year is final once it was pulled at least 14 days after it ended, because alerts that start late in December are still cancelled or upgraded in January; until then every `--download` pulls it again, and `--refresh` pulls every year. `_downloads.json` in `Data-Pipeline/data/state/nws_alerts/` (`--state-dir`) records when each year was pulled, so `raw/nws_alerts/` holds the IEM files and nothing else, as with #7 and #8; a pull that brings the same bytes leaves the stored file as it was. The first `--download` after the A+ change pulls every year once. A pull without IEM's columns (an error page) never replaces a stored year. It writes `Data-Pipeline/data/interim/nws_alerts.parquet`: one row per area and first bulletin for zone MAZ015 and county MAC025, with the first bulletin (`utc_prodissue`), the first-announced end (`utc_init_expire`) and `ended_early_utc`, the time IEM records a cancellation or upgrade (status CAN or UPG with `utc_expire` equal to `utc_updated`). The other last-state fields are dropped, so no feature can use them (ADR-014, Option A+). The run prints alerts per year and area, to compare with ADR-014, how many alerts ended early, a warning for any CAN or UPG row that fails the check, and any alert type missing from `docs/data/alert-map.csv`; add a row for it in a reviewed PR.
+**Alert history.** `alert_history.py` pulls the Iowa Environmental Mesonet bulk VTEC download for NWS office BOX one year at a time into `Data-Pipeline/data/raw/nws_alerts/box_<year>.csv`, as published. IEM files an alert under the year it starts, so from 15 December the next year is pulled too. A year is final once it was pulled at least 14 days after it ended, because alerts that start late in December are still cancelled or upgraded in January; until then every `--download` pulls it again, and `--refresh` pulls every year. `_downloads.json` in `Data-Pipeline/data/state/nws_alerts/` (`--state-dir`) records when each year was pulled, so `raw/nws_alerts/` holds the IEM files and nothing else, as with #7 and #8; a pull that brings the same bytes leaves the stored file as it was. The first `--download` after the A+ change pulls every year once. A pull without IEM's columns (an error page) never replaces a stored year. `--download` also fetches the first bulletin of each Boston alert from IEM's text service into `Data-Pipeline/data/raw/nws_alerts/bulletins/<product_id>.txt` (#107), one request at a time with a 0.5 s pause: about 20 minutes for the 1,134 bulletins of 2015 to 2026 on a first run, then only new ones, since a stored bulletin never changes. An answer without a VTEC string (an error page) is never stored. Without `--download`, a missing bulletin stops the run and names the file. It writes `Data-Pipeline/data/interim/nws_alerts.parquet`: one row per area and first bulletin for zone MAZ015 and county MAC025, with the first bulletin (`utc_prodissue`), the first-announced begin (`first_begin_utc`, from the alert's VTEC string in that bulletin's segment for Boston), the first-announced end (`utc_init_expire`) and `ended_early_utc`, the time IEM records a cancellation or upgrade (status CAN or UPG with `utc_expire` equal to `utc_updated`). The other last-state fields are dropped, so no feature can use them (ADR-014, Option A+). The run prints alerts per year and area, to compare with ADR-014, how many alerts ended early, a warning for any CAN or UPG row that fails the check, and any alert type missing from `docs/data/alert-map.csv`; add a row for it in a reviewed PR.
 
 **Evening freshness check (pending #39).** In the evening run, after 18:00 and after #7's `ingest_nws_alerts` has saved a snapshot, `alert_history.py --download --check-nws Data-Pipeline/data/raw/weather/nws_alerts --settings Data-Pipeline/config/labels_features.csv` stops with `FreshnessError` before writing when the IEM pull or the newest snapshot is older than the cutoff, or when a Boston alert message the NWS sent before 18:00 (or its cancellation or upgrade) is not in the pull yet. The task retries on its own; if it keeps failing, check https://mesonet.agron.iastate.edu and run the task again later. Never build the features without the check: a missing alert would count as zero. It logs how many minutes IEM's newest update is older than the pull, the most IEM can have lagged. The daily DAG does not run the check yet: the evening schedule is #39 and the snapshots come from #7.
 
 **Labels.** `surge_labels.py` compares each storm group's requests with its ADR-005 baseline (built from `baseline_requests`) under the rule marked `chosen` in `Data-Pipeline/config/surge_rules.csv`. A cell is a surge when any group in `label_groups` (`Data-Pipeline/config/labels_features.csv`) surges (ADR-004). With fewer than 20 history days there is no label: `surge` is blank, not false, so labels start on 2016-01-06. ADR-027 froze the rule (`sd_k2_m5`) and the label groups (`snow_ice;tree`, flooding out), so changing either takes a new ADR first, then a reviewed PR that marks another row `chosen` or edits `label_groups`.
 
-**Features.** `feature_table.py` writes `Data-Pipeline/data/processed/features.parquet`, one row per unit and day: 311 lags up to day D minus `feature_min_lag_days`; NWS alerts first sent before `forecast_cutoff_local` (18:00 Boston time) the evening before D whose first-announced end is after D begins and that were not cancelled or upgraded before that cutoff, one count per alert even when it covers both zone and county; calendar fields; static attributes from `Data-Pipeline/data/interim/static/`. With `--noaa-dir` and `--forecast-dir` it adds weather: Logan's observed values of day D up to 2023-12-31, and after that the GFS day-before forecasts known at the cutoff (ADR-003), with `wx_source` saying which. With `--tides-dir` it adds the highest predicted water level of the Boston day. Missing weather and tide values stay blank, and the run prints how many forecast days are missing. If this year's NOAA or GFS file or this half-year's tide file is not stored yet, its days stay blank and the task log has a warning naming the file and the features left blank; a missing earlier file stops the task. It stops if a row uses a later 311 day, a 311 feature differs from the counts read by date, a cutoff is not before D, a row after 2023 has observed weather of its own day or a forecast available only after the cutoff, or a day has no weather or tide row at all. `Data-Pipeline/config/feature_catalog.csv` lists every column and whether the model may use it. The `feature_table` task passes the three folders the ingest tasks fill and stops before it runs, naming the folder, if one is missing (for example when `ingest_noaa_logan` has never run because `NOAA_CDO_TOKEN` is not set). A GFS value counts as available 7 hours after its run started (`forecast_issue_margin_hours`), so day D takes 1-day values only from runs up to 12 UTC on D-1 and 2-day values for its later hours; the evidence is in `docs/feature-table.md`.
+**Features.** `feature_table.py` writes `Data-Pipeline/data/processed/features.parquet`, one row per unit and day: 311 lags up to day D minus `feature_min_lag_days`; NWS alerts first sent before `forecast_cutoff_local` (18:00 Boston time) the evening before D that as first announced begin before D ends and end after D begins (#107), and that were not cancelled or upgraded before that cutoff, one count per alert even when it covers both zone and county; calendar fields; static attributes from `Data-Pipeline/data/interim/static/`. With `--noaa-dir` and `--forecast-dir` it adds weather: Logan's observed values of day D up to 2023-12-31, and after that the GFS day-before forecasts known at the cutoff (ADR-003), with `wx_source` saying which. With `--tides-dir` it adds the highest predicted water level of the Boston day. Missing weather and tide values stay blank, and the run prints how many forecast days are missing. If this year's NOAA or GFS file or this half-year's tide file is not stored yet, its days stay blank and the task log has a warning naming the file and the features left blank; a missing earlier file stops the task. It stops if a row uses a later 311 day, a 311 feature differs from the counts read by date, a cutoff is not before D, a row after 2023 has observed weather of its own day or a forecast available only after the cutoff, or a day has no weather or tide row at all. `Data-Pipeline/config/feature_catalog.csv` lists every column and whether the model may use it. The `feature_table` task passes the three folders the ingest tasks fill and stops before it runs, naming the folder, if one is missing (for example when `ingest_noaa_logan` has never run because `NOAA_CDO_TOKEN` is not set). A GFS value counts as available 7 hours after its run started (`forecast_issue_margin_hours`), so day D takes 1-day values only from runs up to 12 UTC on D-1 and 2-day values for its later hours; the evidence is in `docs/feature-table.md`.
 
 **Slices.** A label needs the 3 years before its day and a feature the 28 days before, so in a slice both tasks read the full build's `Data-Pipeline/data/processed/daily_counts.parquet` and write only the slice's days. Run the full build once before a slice. If its counts end before the slice does, both tasks stop before writing and name the missing days (`daily counts cover ... have no counts`); run the full build again, then the slice.
 
@@ -674,14 +675,113 @@ Every model trains and is scored through `Model-Development/scripts/train.py`, o
 
 ```bash
 python Model-Development/scripts/train.py --model seasonal                          # about 2 s; prints the metrics
+python Model-Development/scripts/train.py --model logreg                            # about 12 s; also prints the C it chose
+python Model-Development/scripts/train.py --model xgboost                           # about 12 s; also prints the trees it chose
+python Model-Development/scripts/train.py --model lightgbm                          # about 6 s; also prints the trees it chose
+python Model-Development/scripts/model_params.py                                    # check the parameter files; print every value, tuned ones marked
 python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run id>   # recompute and check
 python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run id> --gates-block
 ```
 
-- **Writes** `Model-Development/runs/<UTC time>-<model>/` (gitignored): `predictions.parquet` (the contract in `predictions.py`), `metrics.json` (per split), `validation_counts.json` (validation tp, fp and fn with the data version, for the gates) and `run.json` (threshold, data version, git commit, inputs, settings, row counts).
+- **Writes** `Model-Development/runs/<UTC time>-<model>/` (gitignored): `predictions.parquet` (the contract in `predictions.py`), `metrics.json` (per split), `validation_counts.json` (validation tp, fp and fn with the data version, for the gates) and `run.json` (threshold, data version, git commit, inputs, settings, row counts, and in `model_details` what a candidate chose on the inner folds).
 - **The threshold** is picked on validation with the shared rule (highest F1, the higher one on a tie) and reused on test.
-- **Settings** live in `training.csv`, never in code. That covers the split dates, the 2020 and 2021 weight, the threshold rule and the seasonal window.
+- **Days with no forecast are not scored** (#107 review).
+  - Validation and test take their weather from the day-before forecast. A day of theirs missing any input in `forecast_inputs` (`training.csv`: the five `wx_` inputs) has no forecast, and the evening run could not forecast it either.
+  - Its rows get no prediction, no metric and no say in the threshold. They stay in the table as labels, since the seasonal baseline reads them as history.
+  - `train.py` prints them, for example `validation: 20 days not scored (480 rows, no day-before forecast), 2024-01-01 to 2024-01-20` on this data version. `run.json` counts them under `rows`.
+- **Reading the metrics** (`metrics.json`, per split; #107):
+  - F1, precision and recall depend on the threshold.
+  - AUC, PR-AUC, log loss, Brier score and Brier skill do not, so they show ranking and probability quality apart from the threshold.
+  - Read PR-AUC against `surge_rate`, since a random ranking scores about the surge rate, not 0.5.
+  - Brier skill is 1 for a perfect forecast, 0 for always forecasting the split's surge rate, and below 0 for worse.
+  - A value that cannot be computed is `null`, never 0, and the counts beside it show why.
+- **Inner folds (#107).** A candidate picks its own settings on the train years only, never on 2024.
+  - Each fold year in `inner_fold_years` (2019, 2022, 2023) is checked by a fit on every train day before it. The 2020 and 2021 rows are fit on, never checked on.
+  - Logistic regression takes the C with the lowest mean log loss over the folds, then refits on every train day.
+  - XGBoost and LightGBM each grow one model per fold a tree at a time and keep the tree count with the lowest mean log loss, stopping 100 trees after the best (`stopping_rounds`). The final model grows that many trees on every train day. If the search reaches `max_rounds` first, `train.py` says so: raise `max_rounds` in `model_params.yaml`.
+  - 2024 then picks only the threshold and the winner.
+- **A candidate run stops** on the scored rows in either of two cases. The message names the input; check that input's source in the feature table before anything else. The seasonal baseline reads no input and still runs.
+  - An input never missing in train is missing on a scored validation or test row. No model has learned what a missing value means there: LightGBM would read it as 0, XGBoost would take a branch no row trained, and logistic regression would take the median with no flag. Fill the gap at its source. If those days have no forecast at all, name the input in `forecast_inputs`.
+  - An input's missing share in validation or test is more than `missing_gap_max_points` (10) percentage points from train.
+- **Settings** live in config files, never in code.
+  - `training.csv` covers the split dates, the 2020 and 2021 weight, the inner fold years, the forecast inputs, the missing-share limit, the threshold rule and the seasonal window.
+  - `model_params.yaml` holds the candidates' starting parameters (#107). It is checked on load: write decimals with a point (`0.001`, not `1e-3`, which YAML reads as text).
+  - `tuned_params.yaml` (M6, #109) has the same format but names only what was tuned; each value replaces its starting one when the file exists. The number of trees is not a parameter, since the inner-fold search always picks it. A run prints which values were tuned, and `run.json` records them under `parameters` with the file's sha256. Check a new tuned file with `model_params.py` before committing it.
 - **On Windows** with `core.autocrlf`, run DVC itself (`dvc status`, `dvc repro`) from a checkout with LF line endings or in the Airflow image: `dvc.lock` hashes the scripts and configs with LF endings, so a CRLF checkout shows every stage as changed. `train.py` and `evaluate.py` are not affected, and the data version they record ignores line endings.
+
+### Model selection (#107)
+
+```bash
+python Model-Development/scripts/selection.py   # about 40 s; trains the baseline and the 3 candidates, then decides
+```
+
+- **What it does.**
+  - Trains the baseline (`f1_baseline` in `gates.csv`, the seasonal model) and every model in `candidates` (`training.csv`), each a child of one MLflow selection run.
+  - Ranks the candidates by validation F1, compared as exact fractions like the gates; a tie goes to the lower validation log loss.
+  - The best one wins only if its F1 is at least the baseline's plus `f1_min_margin` (0.05, inclusive; ADR-026).
+- **Exit codes.** 0 with a winner, 1 when no candidate beats the baseline by the margin, 2 on an error (an undefined baseline F1 is an error, ADR-026 `on_undefined = fail`).
+- **Writes** `Model-Development/reports/` (`reports_dir`, gitignored; also logged to the selection run):
+  - `selection.json`: the decision, the rule and every model's numbers, run folder and MLflow ids.
+  - `comparison.csv` and `comparison.png`: validation F1 against the gate, with each model's training time, scoring time for one evening's rows and saved model size beside it.
+  - `confusion_matrix.png`: the winner's validation counts at its threshold.
+  - `test_slices.csv`, also in `selection.json`: the winner against the baseline on the test window, overall and on storm, freeze and heat days.
+- **Test results by kind of day** (`slices.py`, rules in `Model-Development/config/slices.csv`).
+  - The rules read the inputs known at the 18:00 cutoff, so a kind of day is what the model saw the evening before:
+    - storm: an alert in effect and known by then, 1 inch of forecast snow or rain, or a 46 mph gust;
+    - freeze: a forecast low at or below 32 F;
+    - heat: a forecast high of 90 F or more.
+  - The F1 gain over the baseline has a 95% bootstrap interval that resamples whole days (`bootstrap_resamples`, `bootstrap_seed`).
+  - A kind of day with no surge has no recall, and with no surge and no alarm no F1 either. Those are reported as `null`, never 0.
+  - On this data version the test window has 72 storm, 157 freeze and 9 heat days (3 heat-day surges), so the heat numbers carry little weight.
+- **Each model's run folder** is `Model-Development/runs/<selection id>-<model>/`, as `train.py` writes it.
+
+### Training stage (DVC, #107)
+
+The selection is also a DVC stage, `select` in `Model-Development/dvc.yaml`. It has its own `Model-Development/dvc.lock`, so it never rewrites `Data-Pipeline/dvc.lock`, whose sha256 is the data version.
+
+- **Its dependencies:**
+  - `Data-Pipeline/config/feature_catalog.csv`;
+  - the labels and features;
+  - `Data-Pipeline/dvc.lock` (a new data version reruns it);
+  - the `Model-Development/config` folder (a new `tuned_params.yaml` reruns it too);
+  - every script `selection.py` loads (`tests/test_dvc_stage.py` checks the list).
+- **Its output** is `Model-Development/reports/`.
+- **Run it** from an LF checkout or the Airflow image, as for the Data-Pipeline stages (the lock hashes the scripts with LF endings):
+
+  ```bash
+  cd Data-Pipeline && dvc pull      # the data version's labels and features
+  cd ../Model-Development && dvc repro --single-item select   # about a minute; --single-item leaves the data stages alone
+  python ../Data-Pipeline/scripts/dvc_push.py                 # store the reports
+  ```
+
+  Commit `Model-Development/dvc.lock`. On a later checkout, `dvc pull` brings the reports back.
+- **It fails and records nothing** when no candidate beats the baseline by the margin (`selection.py` exits 1).
+- **The numbers are from the Linux image.** XGBoost's model differs slightly between platforms: the Linux `xgboost-cpu` build and the Windows build sum some floating-point values in a different order, so the tree count and the F1 move in the third or fourth decimal (validation F1 0.3229 in the image, 0.3222 on a Windows laptop, on data `a719afeb`). Each platform repeats itself exactly. Logistic regression and LightGBM match across platforms. Quote the numbers of a run in the Airflow image, as the locked reports are.
+
+### MLflow tracking (#107)
+
+Every `train.py` run is also an MLflow run in the experiment `model-training` (`mlflow_experiment` in `training.csv`).
+
+- **Where runs go** is M1's `tracking.setup` (#104).
+  - When `MLFLOW_TRACKING_URI` names a server, runs go there, once it answers `/health`. From the host that is `http://127.0.0.1:5000` after `docker compose up -d --wait mlflow`.
+  - Otherwise they go to the local store `Model-Development/mlruns/` (gitignored): `mlflow.db` (SQLite) with the artifacts beside it.
+  - `run.json` says which under `mlflow.where`. It never writes a server's address, which can hold a token.
+  - What a run logs is `Model-Development/scripts/mlflow_runs.py`.
+- **What a run logs.**
+  - Tags: model, data version, git commit, split days.
+  - Params: the threshold, what the model chose on the inner folds, every parameter used and the training settings.
+  - Metrics: both splits, the inner-fold log loss, and the costs (training time, scoring time for one evening's rows, the saved model's size).
+  - Files: the run folder's files and `inputs.json` (the feature list).
+  - For a candidate, the model with its threshold.
+  - A run that fails partway stays in MLflow as `FAILED`. A metric that cannot be computed is left out and named in the tag `undefined_metrics`.
+- **Browse the runs.** Runs on the server show in its UI at http://127.0.0.1:5000. To browse the local store, run this from the repo root, with `mlflow` from `requirements.txt` (3.17.2, the server's version) installed:
+
+  ```bash
+  mlflow ui --backend-store-uri sqlite:///Model-Development/mlruns/mlflow.db   # http://localhost:5000
+  ```
+
+  When the compose server already holds port 5000, or on macOS, where AirPlay Receiver may hold it, add `--port 5001`.
+- **Load a saved model.** Use `mlflow.sklearn.load_model("models:/<id>")` (the id is in `run.json` under `mlflow.model_uri`), or `joblib.load("Model-Development/runs/<run id>/model.joblib")`. `predict` gives the surge flag at the run's threshold and `predict_proba` the probability. Both need scikit-learn and the model's own library, not this repo's code. Load models only from this project's own store: cloudpickle and joblib can run code while loading.
 
 ## Versioned data (DVC)
 

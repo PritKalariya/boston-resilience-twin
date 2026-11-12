@@ -3,6 +3,8 @@ labels,Data-Pipeline/data/processed/labels.parquet,path from the repo root,the f
 features,Data-Pipeline/data/processed/features.parquet,path from the repo root,the model inputs from feature_table.py; the version Data-Pipeline/dvc.lock names
 feature_catalog,Data-Pipeline/config/feature_catalog.csv,path from the repo root,a column is a model input when its use_in_model is yes
 dvc_lock,Data-Pipeline/dvc.lock,path from the repo root,its sha256 with line endings as LF is the run's data version
+model_params,Model-Development/config/model_params.yaml,path from the repo root,the candidates' starting parameters (model_params.py; #107); M6 tunes them
+tuned_params,Model-Development/config/tuned_params.yaml,path from the repo root,M6's tuned values (#109) in the model_params.yaml format; each replaces its starting value when this file exists; absent until M6 writes it
 train_start,2015-01-01,YYYY-MM-DD,ADR-003 train years 2015 to 2023; the first labeled day is 2016-01-06 (ADR-005 needs 20 history days)
 train_end,2023-12-31,YYYY-MM-DD,ADR-003
 validation_start,2024-01-01,YYYY-MM-DD,ADR-003 validation year; the shared threshold and the gates use it (ADR-026)
@@ -11,8 +13,18 @@ test_start,2025-01-01,YYYY-MM-DD,ADR-003 test window
 test_end,2026-06-30,YYYY-MM-DD,ADR-003 says mid-2026; ADR-027 fixes it to June 30; later days are live and not used here
 down_weight_years,2020;2021,whole years separated by ;,train years flagged and down-weighted (ADR-003 and the spec); empty for none
 down_weight,0.5,number above 0 and at most 1,sample weight of a train row in a down-weighted year; every other row weighs 1; a starting value M6 may tune
+inner_fold_years,2019;2022;2023,increasing train years separated by ; with none down-weighted and the first after train_start,the inner time folds (inner_folds.py; #107): fold Y fits on every train day before Y and is checked on Y; a candidate picks its own settings such as its number of trees on them so validation 2024 only picks the threshold and the winner
+forecast_inputs,wx_precip_mm;wx_snowfall_mm;wx_tmax_c;wx_tmin_c;wx_gust_max_ms,model inputs separated by ; or empty for none,the inputs validation and test take from the day-before forecast (ADR-003); a validation or test row missing any of them is not scored (no threshold or metric uses it) because a day with no forecast cannot be forecast live either; its label stays as seasonal baseline history (#107 review); on this data version that is 2024-01-01 to 2024-01-20 when no GFS forecast is stored
+missing_gap_max_points,10,number from 0 to 100,a candidate run stops when an input never missing in train is missing on a scored validation or test row; or when an input's missing share there is more than this many percentage points from train (#107); the largest gap on this data version is 1.0 (snow_ice_rel28 and tree_rel28)
 threshold_rule,validation_f1_max,validation_f1_max,the shared threshold rule (ADR-026 threshold_rule = shared): the threshold with the highest F1 on validation and the higher one on a tie; reused unchanged on test
 seasonal_years,3,whole number of 1 or more,the seasonal baseline window: the same days in this many previous years (ADR-005)
 seasonal_half_width_days,14,whole number of 0 or more,the seasonal baseline window: D plus or minus this many days in each previous year (ADR-005)
 seasonal_min_days,20,whole number of 1 or more,a day with fewer labeled days in its window has no seasonal probability (ADR-005's 20 history days)
 runs_dir,Model-Development/runs,path from the repo root,where train.py writes each run; gitignored
+mlflow_store,Model-Development/mlruns,path from the repo root,the local MLflow store when MLFLOW_TRACKING_URI is unset (mlflow_runs.py; #107): mlflow.db (SQLite) and artifacts/; gitignored
+mlflow_experiment,model-training,a name,the MLflow experiment every training run is logged to (mlflow_runs.py; #107)
+reports_dir,Model-Development/reports,path from the repo root,where selection.py writes selection.json and the charts (#107)
+candidates,logreg;xgboost;lightgbm,model names separated by ;,the models selection.py trains and ranks against the f1_baseline of gates.csv (#107)
+slices,Model-Development/config/slices.csv,path from the repo root,the kinds of test day (storm; freeze; heat) selection.py also scores the selected model on (slices.py; #107)
+bootstrap_resamples,1000,whole number of 100 or more,draws of whole test days for the 95% interval of the F1 gain over the baseline (slices.py; #107)
+bootstrap_seed,0,whole number of 0 or more,the seed of those draws so a rerun gives the same interval
