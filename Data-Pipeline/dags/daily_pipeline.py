@@ -37,6 +37,12 @@ import pipeline_steps as steps
 
 log = logging.getLogger("airflow.task")
 
+# Tasks that share the one-slot heavy_memory pool: runbook "Memory budget on airflow-vm", ADR-031.
+HEAVY_MEMORY_TASKS = frozenset(
+    {"ingest_alert_history", "ingest_static_layers", "schema_and_statistics", "bias_slicing"}
+)
+HEAVY_MEMORY_POOL = "heavy_memory"
+
 
 def run_range() -> steps.DateRange:
     """The run's date range. Conf keys are checked too, so a misspelled key fails the run."""
@@ -125,7 +131,8 @@ def daily_pipeline():
             doc = f"Runs {steps.SCRIPTS[step]}.py."
         else:
             doc = "Joins the per-year legacy files with legacy_311.read_years' rule (#37)."
-        return run.override(task_id=step, doc_md=doc, **retries(step))(step)
+        pool = {"pool": HEAVY_MEMORY_POOL} if step in HEAVY_MEMORY_TASKS else {}
+        return run.override(task_id=step, doc_md=doc, **retries(step), **pool)(step)
 
     def todo(step: str):
         issue = steps.PLANNED[step]

@@ -1,5 +1,5 @@
 # Local Airflow stack: Airflow 3.3.2 with LocalExecutor and a Postgres 16 metadata DB,
-# and the MLflow tracking server (#104).
+# and the MLflow tracking server (#104), which starts only when asked for (profile mlflow).
 # macOS and Windows: works on a clean clone with no .env. Linux: put AIRFLOW_UID in
 # .env first (README). Defaults are for local use only. The VM runs on them until
 # W4-3 (#64) moves its secrets to Secret Manager (ADR-016).
@@ -32,7 +32,10 @@ x-airflow-common:
     AIRFLOW__API_AUTH__JWT_ISSUER: airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
-    # Sized for the 4 GB VM: LocalExecutor pre-forks this many workers (default 32).
+    # LocalExecutor pre-forks this many workers (default 32). The 4-wide legacy parse
+    # measured 1074 MiB available at its low on e2-medium, against a 500 MB floor; heavy
+    # tasks are serialized by the heavy_memory pool instead (runbook, "Memory budget
+    # on airflow-vm"; ADR-031).
     AIRFLOW__CORE__PARALLELISM: '4'
     # 1 is the 3.3.2 default; pinned so an upgrade cannot raise it.
     AIRFLOW__API__WORKERS: '1'
@@ -99,6 +102,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airflow}
       POSTGRES_DB: airflow
     # No ports: reachable only inside the compose network.
+    # No mem_limit; the OOM killer takes a task before the database (ADR-031).
+    oom_score_adj: -500
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
     healthcheck:
@@ -121,6 +126,9 @@ services:
       - |
         /entrypoint airflow db check-migrations
         status=$$?
+        # The heavy_memory pool (ADR-031). `pools set` updates an existing pool, so a rerun exits 0.
+        # Through /entrypoint: init runs as root, where a bare `airflow` cannot import airflow.
+        if [ $$status -eq 0 ]; then /entrypoint airflow pools set heavy_memory 1 "Heavy tasks run one at a time on airflow-vm (ADR-031)"; status=$$?; fi
         chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/logs /opt/airflow/repo/Data-Pipeline/data || echo "chown skipped"
         exit $$status
     environment:
@@ -130,9 +138,11 @@ services:
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
       _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
     user: "0:0"
+    mem_limit: 768m  # ADR-031
 
   airflow-apiserver:
     <<: *airflow-common
+    mem_limit: 512m  # ADR-031
     command: api-server
     # Localhost only. On the VM, reach it through an SSH tunnel.
     ports:
@@ -154,6 +164,7 @@ services:
     <<: *airflow-common
     # Also runs the tasks (LocalExecutor), so it waits for the Execution API.
     command: scheduler
+    mem_limit: 2560m  # ADR-031: tasks run here; sized above the build's anonymous-memory peak, page cache is reclaimed at the limit
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
       interval: 30s
@@ -172,6 +183,7 @@ services:
   airflow-dag-processor:
     <<: *airflow-common
     command: dag-processor
+    mem_limit: 640m  # ADR-031
     healthcheck:
       # A CLI check costs a few CPU seconds, so it runs once a minute.
       test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
@@ -188,14 +200,17 @@ services:
 
   # MLflow tracking server (#104, ADR-006): parameters, metrics and artifacts of every
   # training and tuning run, and later the agents' traces; MLflow's model registry is not
-  # used. The same service on laptops and the VM (spec, 2026-10-30). Nothing depends on it:
-  # with MLFLOW_TRACKING_URI unset, runs go to Model-Development/mlruns/ instead
-  # (Model-Development/scripts/tracking.py).
+  # used. Off by default, so `docker compose up` and airflow-vm do not start it (#61):
+  # `docker compose --profile mlflow up -d --wait` or `docker compose up -d --wait mlflow`
+  # does, and so does the smoke check below. Nothing depends on it: with MLFLOW_TRACKING_URI
+  # unset, runs go to Model-Development/mlruns/ instead (Model-Development/scripts/tracking.py).
   mlflow:
     # The official image, the same version as the mlflow client in
     # Data-Pipeline/requirements.txt (Model-Development/tests/test_mlflow_service.py keeps them
     # equal). Its Python is 3.11; it runs no project code, so ADR-013 does not apply, as for Postgres.
     image: ghcr.io/mlflow/mlflow:v3.17.2
+    # In smoke too, so `docker compose run mlflow-smoke` can start it.
+    profiles: ["mlflow", "smoke"]
     command:
       - mlflow
       - server
@@ -226,7 +241,7 @@ services:
     # The image runs as root; as with Airflow, the files it writes belong to AIRFLOW_UID (ADR-029).
     user: "${AIRFLOW_UID:-50000}:0"
     # Measured on 2026-11-09: 365 MiB idle, 380 MiB at peak while 3 runs logged 600 metric
-    # values and 60 MB of artifacts. #61 sets the VM's budget; re-measure there after a change.
+    # values and 60 MB of artifacts.
     mem_limit: 512m
     healthcheck:
       # The image has no curl.

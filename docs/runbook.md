@@ -1307,6 +1307,112 @@ These times predate #107. A first build now also fetches the 1,134 alert bulleti
 - **A task is OOM-killed or the scheduler restarts.** With the stack idle, the VM has about 2.5 GB free and no swap. Check `sudo docker inspect -f '{{.Name}} restarts={{.RestartCount}} oom={{.State.OOMKilled}}' $(sudo docker compose ps -aq)` and `free -m`.
 - **`gcloud compute ssh` offers to create an SSH key.** You ran it on the VM itself. The prompt shows where you are: `@airflow-vm` is the VM.
 
+### Memory budget on airflow-vm
+
+The budget and its reasons: ADR-031 (it amends ADR-016's parallelism note by reference). Measured in run `mem-baseline-20261110` on airflow-vm (e2-medium, us-east1-b) at main `e200b8c`: a full build from 2026-11-10 01:59:37 to 02:25:16 UTC (25 min 39 s).
+
+**The budget.** Limits are set per service in `docker-compose.yaml`, so laptops get them too:
+
+| Service | Setting |
+|---|---|
+| airflow-scheduler | `mem_limit: 2560m` (tasks run here) |
+| airflow-dag-processor | `mem_limit: 640m` |
+| airflow-apiserver | `mem_limit: 512m` |
+| airflow-init | `mem_limit: 768m` |
+| postgres | no limit; `oom_score_adj: -500`, so the kernel kills a task before the database |
+
+`AIRFLOW__CORE__PARALLELISM` stays 4. Four tasks share the one-slot pool `heavy_memory`: `ingest_alert_history`, `ingest_static_layers`, `schema_and_statistics` and `bias_slicing` (the constant `HEAVY_MEMORY_TASKS` in `daily_pipeline.py`). `airflow-init` creates the pool on every start (`airflow pools set` updates an existing pool). With the pool, run 2 took 25 min 00 s, 39 s faster than the baseline, because the heavy tasks no longer contend.
+
+If the pool does not exist, the scheduler does not run the tasks that name it: it logs `Tasks using non-existent pool 'heavy_memory' will not be scheduled` (Airflow 3.3.2, `jobs/scheduler_job_runner.py`, line 788), and the run waits without failing. Fix: `docker compose run --rm airflow-init`.
+
+Baseline lows, before the pool and the limits (MiB available, 3908 MiB host, no swap):
+
+| Stage | Low |
+|---|---|
+| ingest, 4 downloads in parallel | 509 |
+| validate_raw | 1807 |
+| legacy parse, 4-wide | 1074 |
+| merge, combine, join, counts | 623 (combine_311) |
+| labels and features | 1726 |
+| validate_processed | 723 |
+| schema_and_statistics and bias_slicing overlapping (before the pool) | 81 |
+| bias_slicing alone | 1514 |
+| push_data | 2211 |
+
+Container peaks before the limits (`memory.peak`, includes page cache): scheduler 2805 MiB, dag-processor 446, apiserver 380, postgres 89. With the limits in place, the scheduler's `memory.peak` reads about its limit once page cache fills, so judge it by the anonymous peak. With the pool and the limits (run `mem-20261110`, `ba08086`, 2026-11-10): host low 463 MiB (485 MB) for about 3 s during `combine_311` alone, 15 MB short of the 500 MB target and accepted (ADR-031); scheduler anonymous peak 2219 MiB; `oom_kill 0` in every container; 1.58 s stalled for memory. The `combine_311` window varies by about 160 MiB between runs (623 MiB in the baseline).
+
+**When to re-measure.** A service or DAG joins the VM, a task becomes heavy (it needs about 1 GiB or more), or a check below fails. A new heavy task also joins the pool and its constant.
+
+**Pass rule.** All of these:
+
+- a host low of at least 450 MiB available (the target is 500 MB; run 2 measured 463 MiB, accepted short of target in ADR-031)
+- the scheduler's anonymous peak below its 2560m limit (flag it if it is within 250 MiB)
+- `oom_kill 0` in every container
+- the scheduler's `memory.pressure` full total under 10 s for the build
+
+A single low under 450 MiB is re-run once before it counts, because the `combine_311` window varied by about 160 MiB between runs.
+
+`docker inspect`'s `OOMKilled` reports only a container's main process. A task killed inside the scheduler shows up only as `oom_kill` in the scheduler's `memory.events`.
+
+**How to re-measure.** On the VM, from `/opt/boston-resilience-twin`. Start from freshly created containers, so `memory.peak`, `memory.events` and `memory.pressure` cover this build only:
+
+```bash
+sudo docker compose up -d --force-recreate --wait
+```
+
+Start the sampler. Every 1 s it logs host available memory and the scheduler's anonymous memory, plus the top processes when available memory is low. Every ~5 s it logs each container. Times are UTC.
+
+```bash
+cat > /tmp/memsample.sh <<'EOF'
+#!/bin/bash
+S=/sys/fs/cgroup/system.slice/docker-$(docker inspect -f '{{.Id}}' boston-resilience-twin-airflow-scheduler-1).scope
+( while true; do
+    a=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+    n=$(awk '/^anon / {print int($2/1048576)}' "$S/memory.stat")
+    echo "$(date -u +%T) avail=$a sched_anon=$n"
+    if [ "$a" -lt 1500 ]; then
+      echo "$(date -u +%T) top $(ps -eo rss=,args= --sort=-rss | head -5 | awk '{printf "%dMiB:%s | ", $1/1024, substr($0, index($0,$2), 60)}')"
+    fi
+    sleep 1
+  done ) &
+while true; do
+  echo "$(date -u +%T) $(docker stats --no-stream --format '{{.Name}}={{.MemUsage}}' \
+    | sed -e 's/boston-resilience-twin-//' -e 's/-1=/=/' -e 's| / .*||' | tr '\n' ' ')"
+  sleep 3
+done
+EOF
+chmod +x /tmp/memsample.sh
+sudo nohup /tmp/memsample.sh > /tmp/mem.log 2>&1 &
+```
+
+Trigger a full build:
+
+```bash
+sudo docker compose exec -T airflow-scheduler airflow dags unpause daily_pipeline
+sudo docker compose exec -T airflow-scheduler airflow dags trigger daily_pipeline -r mem-<yyyymmdd>
+```
+
+When every task shows success: stop the sampler, keep its log, then read the host low, the scheduler's anonymous peak, each container's counters, and the task timeline that pins which tasks were running at the low:
+
+```bash
+sudo pkill -f memsample.sh
+cp /tmp/mem.log ~/                  # /tmp is cleared on every boot
+grep -o '^[0-9:]* avail=[0-9]*' ~/mem.log | sort -t= -k2 -n | head -5
+grep -o 'sched_anon=[0-9]*' ~/mem.log | cut -d= -f2 | sort -n | tail -1
+for c in $(sudo docker compose ps -q); do
+  s=/sys/fs/cgroup/system.slice/docker-$(sudo docker inspect -f '{{.Id}}' $c).scope
+  echo "$(sudo docker inspect -f '{{.Name}}' $c) peak=$(( $(cat $s/memory.peak) / 1048576 ))MiB $(grep -E '^(max|oom_kill) ' $s/memory.events | tr '\n' ' ')stall_full_us=$(awk '/^full/ {sub("total=","",$5); print $5}' $s/memory.pressure)"
+done
+sudo docker compose exec -T airflow-scheduler airflow tasks states-for-dag-run daily_pipeline mem-<yyyymmdd> \
+  | awk -F'|' 'NR>2 && $4 ~ /[a-z]/ {gsub(/ /,"",$3); gsub(/ /,"",$5); gsub(/ /,"",$6); gsub(/ /,"",$7); print substr($5,12,8), substr($6,12,8), $3, $7}' | sort
+```
+
+`memory.peak` resets when a container restarts, so read it before any restart (`docker compose up`, `down` or a VM stop). Stop the VM afterwards (ADR-029):
+
+```bash
+gcloud compute instances stop airflow-vm --zone=us-east1-b
+```
+
 ## 311 ingestion (issue #6)
 
 Code: `Data-Pipeline/scripts/ingest_311.py`. Schedule: `Data-Pipeline/config/ingest_311_sources.csv`. In Airflow it is two tasks of `daily_pipeline` (Run the data pipeline DAG above): `ingest_legacy_311` runs the script with `--system legacy`, then `ingest_new_311` with `--system new_system`. They run one after the other because both write the same schedule state.
