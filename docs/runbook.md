@@ -813,9 +813,20 @@ python Model-Development/scripts/tune.py --models lightgbm --trials 2   # one sh
 - **Promote tuned values** only after the comparison is reviewed in a PR:
   1. `python Model-Development/scripts/tune.py --activate` runs the studies again and writes `best_params.yaml`'s values into `tuned_params.yaml` (the same seed, platform and data version give the same studies).
   2. `python Model-Development/scripts/model_params.py` checks the file and marks the tuned values.
-  3. `cd Model-Development && dvc repro --single-item select`, then `python ../Data-Pipeline/scripts/dvc_push.py`. Commit `tuned_params.yaml` with `Model-Development/dvc.lock`.
+  3. Run the training stage in the training image (next bullet). Commit `tuned_params.yaml` with `Model-Development/dvc.lock`.
+- **Run the training stage in the training image**, as CI does, so the locked reports are CI's numbers. The image has no DVC and no git (ADR-032): it runs the stage's command, and DVC on the host records the result. From the repo root, after the data pull:
+
+  ```bash
+  docker build -f Model-Development/Dockerfile -t brt-train:local .
+  A=$(mktemp -d); ARTIFACTS_DIR=$A IMAGE=brt-train:local bash .github/scripts/in_image.sh python Model-Development/scripts/selection.py
+  rsync -a --delete "$A/reports/" Model-Development/reports/
+  cd Model-Development && dvc commit -f select && dvc status select   # writes dvc.lock; then "Data and pipelines are up to date."
+  python ../Data-Pipeline/scripts/dvc_push.py                         # store the reports
+  ```
+
+  `-f` skips DVC's question about the changed inputs. The image's `selection.json` records no commit, as in CI; the lock ties the reports to the code.
 - **Current state** (data `a719afeb`, 2026-11-12): `tuned_params.yaml` sets nothing, so every candidate trains with its starting values. Only LightGBM's confirmation found an improvement on the train years, and on 2024 it tied the starting values: F1 0.343675 against 0.343529, with the gain's 95% interval [-0.0161, +0.0148] (`comparison.json`). The studies belong to that data version: run both scripts again on a new one.
-- **Platforms.** The committed studies come from macOS (arm64). XGBoost's fits differ slightly between platforms ("Training stage" above), so its study repeats exactly only on the same platform. LightGBM and logistic regression match across platforms in the selection; their studies were not rerun in the Airflow image.
+- **Platforms.** The committed studies come from macOS (arm64). XGBoost's fits differ slightly between platforms ("Training stage" above), so its study repeats exactly only on the same platform. LightGBM and logistic regression match across platforms in the selection; their studies were not rerun in the Airflow image. The locked reports come from the training image: XGBoost's 2024 F1 is 0.331683 there and 0.336735 on macOS, and LightGBM's is 0.343529 on both. `compare_tuned.py` runs on the host, where git can record the commit, so the XGBoost rows of `comparison.json` are the macOS value.
 
 ## Versioned data (DVC)
 
