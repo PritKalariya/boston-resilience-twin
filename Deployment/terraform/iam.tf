@@ -15,6 +15,25 @@ resource "google_secret_manager_secret_iam_member" "vm_sa_secrets" {
   member    = "serviceAccount:${google_service_account.airflow_vm.email}"
 }
 
+# --- Project 2 CI identities ------------------------------------------------
+
+# #112, ADR-030: CI reads the DVC remote in this project. The identities live in
+# project 2 (#131), so the grant is made here, on the bucket only, read-only.
+locals {
+  ci_reader_emails = [
+    "ci-reader@boston-resilience-twin-p2.iam.gserviceaccount.com",
+    "ci-writer@boston-resilience-twin-p2.iam.gserviceaccount.com",
+  ]
+}
+
+resource "google_storage_bucket_iam_member" "ci_data_bucket_reader" {
+  for_each = toset(local.ci_reader_emails)
+
+  bucket = google_storage_bucket.data.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${each.value}"
+}
+
 # --- Team members -----------------------------------------------------------
 
 locals {
