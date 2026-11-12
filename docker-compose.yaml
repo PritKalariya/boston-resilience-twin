@@ -1,5 +1,5 @@
 # Local Airflow stack: Airflow 3.3.2 with LocalExecutor and a Postgres 16 metadata DB,
-# and the MLflow tracking server (#104).
+# and the MLflow tracking server (#104), which starts only when asked for (profile mlflow).
 # macOS and Windows: works on a clean clone with no .env. Linux: put AIRFLOW_UID in
 # .env first (README). Defaults are for local use only. The VM runs on them until
 # W4-3 (#64) moves its secrets to Secret Manager (ADR-016).
@@ -200,14 +200,17 @@ services:
 
   # MLflow tracking server (#104, ADR-006): parameters, metrics and artifacts of every
   # training and tuning run, and later the agents' traces; MLflow's model registry is not
-  # used. The same service on laptops and the VM (spec, 2026-10-30). Nothing depends on it:
-  # with MLFLOW_TRACKING_URI unset, runs go to Model-Development/mlruns/ instead
-  # (Model-Development/scripts/tracking.py).
+  # used. Off by default, so `docker compose up` and airflow-vm do not start it (#61):
+  # `docker compose --profile mlflow up -d --wait` or `docker compose up -d --wait mlflow`
+  # does, and so does the smoke check below. Nothing depends on it: with MLFLOW_TRACKING_URI
+  # unset, runs go to Model-Development/mlruns/ instead (Model-Development/scripts/tracking.py).
   mlflow:
     # The official image, the same version as the mlflow client in
     # Data-Pipeline/requirements.txt (Model-Development/tests/test_mlflow_service.py keeps them
     # equal). Its Python is 3.11; it runs no project code, so ADR-013 does not apply, as for Postgres.
     image: ghcr.io/mlflow/mlflow:v3.17.2
+    # In smoke too, so `docker compose run mlflow-smoke` can start it.
+    profiles: ["mlflow", "smoke"]
     command:
       - mlflow
       - server
@@ -238,7 +241,7 @@ services:
     # The image runs as root; as with Airflow, the files it writes belong to AIRFLOW_UID (ADR-029).
     user: "${AIRFLOW_UID:-50000}:0"
     # Measured on 2026-11-09: 365 MiB idle, 380 MiB at peak while 3 runs logged 600 metric
-    # values and 60 MB of artifacts. #61 sets the VM's budget; re-measure there after a change.
+    # values and 60 MB of artifacts.
     mem_limit: 512m
     healthcheck:
       # The image has no curl.
@@ -307,6 +310,7 @@ services:
     volumes:
       - ./Data-Pipeline:/opt/airflow/repo/Data-Pipeline:ro
       - ./Model-Development:/opt/airflow/repo/Model-Development:ro
+      - ./.github:/opt/airflow/repo/.github:ro  # model.yml and in_image.sh, for test_steps_workflow.py (#112)
       - ./docs/data:/opt/airflow/repo/docs/data:ro
       - ./.coveragerc:/opt/airflow/repo/.coveragerc:ro
       - ./.env.example:/opt/airflow/repo/.env.example:ro
