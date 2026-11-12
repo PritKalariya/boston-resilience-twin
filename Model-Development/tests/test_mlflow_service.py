@@ -1,5 +1,5 @@
-"""The mlflow service in docker-compose.yaml (#104): the client's version, localhost only, small
-enough for the VM, writing as the checkout's owner, and needed by nothing but its smoke check."""
+"""The mlflow service in docker-compose.yaml (#104): the client's version, localhost only, off unless
+asked for, small, writing as the checkout's owner, and needed by nothing but its smoke check."""
 
 from __future__ import annotations
 
@@ -41,15 +41,21 @@ def test_every_published_port_binds_localhost_only(services):
 def test_nothing_waits_for_the_server_but_its_smoke_check(services):
     waiting = {name for name, service in services.items() if "mlflow" in (service.get("depends_on") or {})}
     assert waiting == {"mlflow-smoke"}
-    assert "profiles" not in services["mlflow"] and services["mlflow-smoke"]["profiles"] == ["smoke"]
+    assert services["mlflow-smoke"]["profiles"] == ["smoke"]
     assert services["mlflow-smoke"]["environment"]["MLFLOW_TRACKING_URI"] == "http://mlflow:5000"
     for name in AIRFLOW_SERVICES:  # empty unless .env sets it: tasks then log to the local store
         assert services[name]["environment"]["MLFLOW_TRACKING_URI"] == "${MLFLOW_TRACKING_URI:-}", name
 
 
+def test_the_server_starts_only_when_asked_for(services):
+    # #61: airflow-vm runs a plain `docker compose up`, and a full build has no room for mlflow.
+    # The smoke profile lets `docker compose run mlflow-smoke` start it.
+    assert services["mlflow"]["profiles"] == ["mlflow", "smoke"]
+
+
 def test_the_server_stays_small_and_answers_other_containers(services):
     mlflow = services["mlflow"]
-    assert mlflow["mem_limit"]  # #61's budget for the VM
+    assert mlflow["mem_limit"] == "512m"
     assert flag(mlflow, "workers") == "1"
     assert mlflow["environment"]["MLFLOW_SERVER_ENABLE_JOB_EXECUTION"] == "false"  # else 7 more processes, 1.6 GiB
     assert {"mlflow", "localhost:*", "127.0.0.1:*"} <= set(flag(mlflow, "allowed-hosts").split(","))
