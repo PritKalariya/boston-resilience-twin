@@ -1,6 +1,6 @@
 # ADR-027: The training interface: frozen target, fixed splits, one prediction contract, a shared threshold and the seasonal baseline
 
-- Status: proposed
+- Status: Accepted
 - Date: 2026-11-03
 - Owner: Pu1ni2
 - Phase: model
