@@ -190,3 +190,10 @@ def test_every_task_sends_the_failure_alert(dag):
         callbacks = task.on_failure_callback
         callbacks = callbacks if isinstance(callbacks, (list, tuple)) else [callbacks]
         assert alerts.on_task_failure in callbacks, task.task_id
+
+
+def test_exactly_the_four_heavy_tasks_use_the_heavy_memory_pool(dag):
+    # ADR-031: one slot, so these never overlap. The pool itself is created by airflow-init.
+    heavy = {"ingest_alert_history", "ingest_static_layers", "schema_and_statistics", "bias_slicing"}
+    assert {task.task_id for task in dag.tasks if task.pool == "heavy_memory"} == heavy
+    assert all(task.pool != "heavy_memory" for task in dag.tasks if task.task_id not in heavy)
