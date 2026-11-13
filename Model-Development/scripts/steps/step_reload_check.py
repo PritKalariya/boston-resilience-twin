@@ -27,6 +27,7 @@ def step(argv: list[str] | None) -> None:
     import joblib
     import numpy as np
     import pandas as pd
+    import predictions
     import training_data
 
     settings = C.load_settings(config)
@@ -39,7 +40,8 @@ def step(argv: list[str] | None) -> None:
     try:
         table, _ = training_data.load_table(settings)
         rows = table[(table["split"] == "validation") & table["scored"]].reset_index(drop=True)
-        trained = pd.read_parquet(folder / "predictions.parquet", filters=[("split", "==", "validation")])
+        trained = predictions.read_predictions(folder / "predictions.parquet")  # the contract checks
+        trained = trained[trained["split"] == "validation"]
         model = joblib.load(folder / "model.joblib")
         probability = np.asarray(model.predict_proba(rows[inputs]), dtype="float64")[:, 1]
         flag = np.asarray(model.predict(rows[inputs]), dtype="int64")

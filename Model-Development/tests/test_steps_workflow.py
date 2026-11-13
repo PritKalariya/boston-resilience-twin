@@ -100,11 +100,14 @@ def test_every_step_runs_in_the_image_through_the_one_script(steps):
     assert len(runs) == 8 and not any("docker run" in s.get("run", "") for s in steps)
     script = SCRIPT.read_text(encoding="utf-8")
     assert script.count("docker run") == 1 and "MLFLOW_TRACKING_URI" in script
+    # --mount, not -v: a missing source fails instead of Docker creating a root-owned directory
+    assert " -v " not in script and script.count("--mount") >= 9
     for source in ("labels.parquet", "features.parquet", "feature_catalog.csv", "dvc.lock"):
-        assert re.search(rf"{re.escape(source)}:/app/\S*{re.escape(source)}:ro", script), source
-    assert "Model-Development/config:/app/Model-Development/config:ro" in script
+        assert re.search(rf"source=\S*{re.escape(source)},target=/app/\S*{re.escape(source)},readonly", script), source
+    assert "source=$PWD/Model-Development/config,target=/app/Model-Development/config,readonly" in script
     for folder in ("runs", "mlruns", "reports"):
-        assert f'"$art/{folder}:/app/Model-Development/{folder}"' in script
+        assert f"source=$art/{folder},target=/app/Model-Development/{folder}" in script
+    assert script.index('mkdir -p "${ARTIFACTS_DIR') < script.index("realpath")
     assert "--password" not in script and "TOKEN" not in script  # the image gets no credential
 
 

@@ -98,10 +98,16 @@ def read_data_version(artifacts: Path) -> str:
 
 
 def run(step, argv: list[str] | None) -> int:
-    """Run a step body, turning a StepError or an I/O problem into exit 2."""
+    """Run a step body; any exception is a pipeline failure, exit 2 (exit 1 is the gates').
+
+    argparse exits through SystemExit, which is not an Exception and passes through.
+    """
     try:
         step(argv)
-    except (StepError, OSError) as exc:
+    except StepError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return PIPELINE_FAILED
+    except Exception as exc:  # a bug or a damaged input must not escape as a traceback with exit 1
+        print(f"error: pipeline failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return PIPELINE_FAILED
     return OK
