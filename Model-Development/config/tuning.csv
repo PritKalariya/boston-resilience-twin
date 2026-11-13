@@ -1,0 +1,11 @@
+setting,value,options,note
+models,logreg;xgboost;lightgbm,model names from training.csv's candidates separated by ;,the candidates tune.py tunes (#109); one Optuna study each
+trials,80,whole number of 1 or more,trials per study; trial 0 is always the starting values of model_params.yaml so the study compares tuning with them; the first 10 are TPE's random start
+seed,0,whole number of 0 or more,the seed of Optuna's TPE sampler and of the fANOVA importance so a rerun on the same data version gives the same trials and the same best_params.yaml
+trial_seeds,0;1;2,whole numbers of 0 or more separated by ;,the model seeds each trial of a candidate with a seed (xgboost and lightgbm) is fitted with; the trial's value is the mean of their fold F1 because the seed alone moves one fit's fold F1 by a standard deviation of 0.0048 (lightgbm) and 0.0039 (xgboost) over 10 seeds on data version a719afeb; logreg has no seed and is fitted once
+confirm_seeds,10;11;12;13;14,at least 2 whole numbers of 0 or more separated by ; and none in trial_seeds,the fresh seeds the confirmation refits trial 0 and the best trials with; the paired gains over trial 0 on them give a gain's standard error
+confirm_top,5,whole number of 1 or more,the best trials besides trial 0 the confirmation scores again
+guard_ratio,1.005,number of 1 or more,a confirmed setting is eligible only when its mean inner-fold log loss (M4's early stopping score) is at most this times trial 0's on the same seeds
+stable_se,2,number above 0,the eligible setting with the highest mean fold F1 counts as an improvement only when its mean paired gain over trial 0 is more than this many standard errors; otherwise the starting values are kept
+study_dir,Model-Development/tuning,path from the repo root,where tune.py writes each study (<model>.json); importance.csv for M10 (#113); summary.json; best_params.yaml (the confirmed candidates; not active) and compare_tuned.py's comparison.json; small text files that are committed
+mlflow_experiment,model-tuning,a name,the MLflow experiment of the studies (one run per study with a child run per trial and per confirmed setting) and of compare_tuned.py's comparison

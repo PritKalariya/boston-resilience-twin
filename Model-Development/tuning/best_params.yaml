@@ -1,0 +1,11 @@
+# Confirmed tuning candidates of Model-Development/scripts/tune.py (#109), data version sha256:a719afeb9695d4a2d8e9f3d00ee1069e52d1e41ea5f63aeadeaf72e5f42fd0ef
+# seed 0, 80 trials per model, trial seeds 0;1;2, confirmed on seeds 10;11;12;13;14; models logreg, xgboost, lightgbm; studies in Model-Development/tuning
+# Not active: no training run reads this file. tune.py --activate copies it into tuned_params.yaml.
+# A model not named kept its starting values in model_params.yaml.
+lightgbm:
+  colsample_bytree: 0.9629498988002458
+  learning_rate: 0.011070871616615597
+  min_child_samples: 24
+  num_leaves: 19
+  reg_lambda: 0.017500845808932783
+  subsample: 0.8441349453851072
