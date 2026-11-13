@@ -6,12 +6,27 @@ resource "google_storage_bucket_iam_member" "vm_sa_data_bucket" {
   member = "serviceAccount:${google_service_account.airflow_vm.email}"
 }
 
+# Secret-level accessor on every slot, so the boot render in startup.sh can read
+# the Airflow secrets and the API keys (#64, ADR-034). Never project-level.
 resource "google_secret_manager_secret_iam_member" "vm_sa_secrets" {
   for_each = google_secret_manager_secret.project_1
 
   project   = var.project_id
   secret_id = each.value.secret_id
   role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.airflow_vm.email}"
+}
+
+# secretAccessor cannot list versions. The boot render lists the versions of an
+# optional slot to tell "no version yet" from a failed read (startup.sh), so
+# airflow-vm-sa gets secret-level viewer on the optional slots only (ADR-034).
+# The five required slots need no listing: any failed read there stops the render.
+resource "google_secret_manager_secret_iam_member" "vm_sa_secret_viewer" {
+  for_each = toset(local.optional_secret_ids)
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.project_1[each.value].secret_id
+  role      = "roles/secretmanager.viewer"
   member    = "serviceAccount:${google_service_account.airflow_vm.email}"
 }
 
@@ -119,9 +134,12 @@ resource "google_compute_instance_iam_member" "vm_admins" {
 
 # Adding a secret value needs more than accessor. The grant is per secret, so a
 # writer can add versions to these slots and to nothing else in the project.
+# The list is the API keys and the Slack webhook. It does not include
+# local.airflow_secret_ids: a writer holds no grant on those five (ADR-034).
 locals {
+  writer_secret_ids = local.optional_secret_ids
   secret_writer_grants = {
-    for pair in setproduct(var.secret_writers, local.secret_ids) :
+    for pair in setproduct(var.secret_writers, local.writer_secret_ids) :
     "${pair[0]}|${pair[1]}" => {
       member    = pair[0]
       secret_id = pair[1]

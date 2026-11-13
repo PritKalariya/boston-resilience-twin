@@ -155,10 +155,13 @@ Logging and failures (#36):
 Failure alerts go to Slack through an incoming webhook (#34). The URL is the
 credential: anyone who has it can post to the channel, so it lives only in the
 gitignored `.env` locally, never in chat, a ticket or the repo. On airflow-vm
-it comes from Secret Manager with #64. Without it, alerts stay in the task log
-and runs are unaffected. Before an alert is logged or posted, any API key from
-`.env` (or the webhook) that appears in it, as typed or URL-encoded, is replaced
-by its name, for example `key=<CENSUS_API_KEY>`.
+it is the Secret Manager secret `slack-alert-webhook`, which the startup script
+writes into `.env` at boot ("Airflow on the VM", "Secrets on the VM"). Without
+it, alerts stay in the task log and runs are unaffected. Before an alert is
+logged or posted, any API key from `.env`, the webhook, and the Airflow secrets
+(the connection URL with the database password, the Fernet key, the JWT secret
+and the API secret key) that appear in it, as typed or URL-encoded, are replaced
+by their names, for example `key=<CENSUS_API_KEY>`.
 
 Set it up once (the webhook's owner; the team only needs to join the channel):
 
@@ -284,19 +287,17 @@ needs `AIRFLOW_UID` (above). Other local overrides use the names in
 `.env.example`. Postgres and the admin user keep their first password until
 `docker compose down -v`.
 
-On the VM, `.env` holds `AIRFLOW_UID` and the three API keys, copied from
-Secret Manager by hand ("Airflow on the VM", "First-time setup", step 2). That
-is temporary: #64 has the startup script write `.env` at boot (ADR-029). The
-Airflow secrets (the JWT secret, API secret key and Fernet key) still run on
-the compose dev defaults until #64 moves them to Secret Manager (ADR-016).
-Defaults or not, each must be identical in every container; the shared
-environment block in `docker-compose.yaml` passes one value to all of them.
+On the VM nobody edits `.env`: the startup script renders it whole from Secret
+Manager on every boot, and none of the compose dev defaults apply there
+("Airflow on the VM", "Secrets on the VM"; ADR-034). On any machine each
+Airflow secret must be identical in every container; the shared environment
+block in `docker-compose.yaml` passes one value to all of them.
 
 ### API keys in .env
 
 Pipeline tasks read `NOAA_CDO_TOKEN`, `CENSUS_API_KEY` and `NWS_USER_AGENT`
 from the environment (docs/data-access.md). Locally they come from `.env`.
-This section is for a laptop; on airflow-vm see "Airflow on the VM", "First-time setup", step 2, until #64 has the startup script write them at boot.
+This section is for a laptop; on airflow-vm the startup script writes them at boot ("Airflow on the VM", "Secrets on the VM").
 A team member fills them from Secret Manager (needs `gcloud auth login`; the
 command names project 1, so another default gcloud project does not matter).
 Run it in the repo root. It replaces any existing lines for the three keys,
@@ -1004,8 +1005,9 @@ The run compares with the previous run's files before replacing them, and builds
 ## Project 1 infrastructure (Terraform)
 
 Config lives in `Deployment/terraform/`. It covers project 1 only (ADR-009):
-the Airflow VM, the data bucket, the VM service account, two empty secret
-slots, the project 1 APIs, and IAM. Nothing for Cloud Run, Artifact Registry,
+the Airflow VM, the data bucket, the VM service account, the empty secret
+slots (three API keys, five Airflow secrets and the Slack webhook), the
+project 1 APIs, and IAM. Nothing for Cloud Run, Artifact Registry,
 Vertex, or Gemini.
 
 State is in the GCS bucket `boston-resilience-twin-tfstate` under the prefix
@@ -1067,11 +1069,16 @@ Terraform creates the secret slots empty. Values are added by hand and never
 go into a `.tf` file, a tfvars file, chat, the repo, or a ticket.
 
 Who can: the members listed in the `secret_writers` tfvars variable. They hold
-`roles/secretmanager.secretVersionAdder` on each slot in `local.secret_ids`
-(`Deployment/terraform/secrets.tf`) only, which is the permission to add a
-new version. It is not
-project wide and it does not let them read the values back; reading is
-`roles/secretmanager.secretAccessor`, which every team member already has.
+`roles/secretmanager.secretVersionAdder` on the three API key slots
+(`local.secret_ids`) and on `slack-alert-webhook` (`local.slack_secret_ids`) in
+`Deployment/terraform/secrets.tf`, and on nothing else. That is the permission
+to add a new version. It is not project wide and it does not let them read the
+values back. Every team member reads the three API keys
+(`roles/secretmanager.secretAccessor`); `slack-alert-webhook` and the five
+`airflow-*` slots are read by `airflow-vm-sa` only, which also holds
+`roles/secretmanager.viewer` on the four optional slots (the three API keys and
+the webhook) so the boot render can tell "no version" from a failed read. Writers hold no grant on the
+five `airflow-*` slots, so the project owner adds those ("Secrets on the VM").
 
 ```bash
 read -rs VALUE && printf '%s' "$VALUE" | gcloud secrets versions add <secret> --data-file=-; unset VALUE
@@ -1187,46 +1194,23 @@ gcloud storage rm -r --all-versions gs://boston-resilience-twin-tfstate
 
 ## Airflow on the VM
 
-How Airflow runs on `airflow-vm`, and why: ADR-016, with the boot provisioning and the checkout owner in ADR-029. The VM runs the same `docker-compose.yaml` as the local stack, checked out from `main` at `/opt/boston-resilience-twin` and owned by the host user `airflow` (UID 50000). Run docker commands on the VM with `sudo` and git commands as `sudo -u airflow`. Nobody joins the `docker` group: it is root-equivalent, and `sudo` keeps the operator list equal to ADR-018's.
+How Airflow runs on `airflow-vm`, and why: ADR-016, with the boot provisioning and the checkout owner in ADR-029. The VM runs the same `docker-compose.yaml` as the local stack, checked out from `main` at `/opt/boston-resilience-twin` and owned by the host user `airflow` (UID 50000). Run docker commands on the VM with `sudo` and git commands as `sudo -u airflow`. Nobody joins the `docker` group: it is root-equivalent, and `sudo` keeps the operator list equal to ADR-018's. The VM's `.env` is mode 600 and owned by UID 50000, so only that user and root can read it. `sudo docker compose` runs as root and reads it; `docker compose` without `sudo` cannot, so every compose command in this runbook uses `sudo`, and the file's mode is never loosened.
 
 The VM runs 24/7 only for the live run and for tests, and is stopped otherwise (ADR-029). Days it was stopped are caught up by the next full build (the DAG's default range): every download refetches what is new and every later step rebuilds from 2015. A date range writes a slice to data/slices/ and does not backfill. After a stop, run one full build with no `-c` ("Run the data pipeline DAG" above): `sudo docker compose exec airflow-scheduler airflow dags trigger daily_pipeline`.
 
 ### First-time setup (new or rebuilt VM only)
 
-The VM's startup script (`Deployment/terraform/startup.sh`, set as the `startup-script` metadata key) installs Docker Engine and the compose plugin, creates the `airflow` user and clones `main` into `/opt/boston-resilience-twin`. It runs on every boot and does nothing for a part that is already done. It does not write `.env` or start the stack.
+The VM's startup script (`Deployment/terraform/startup.sh`, set as the `startup-script` metadata key) installs Docker Engine and the compose plugin, creates the `airflow` user, clones `main` into `/opt/boston-resilience-twin` and, last, renders `.env` from Secret Manager ("Secrets on the VM"). It runs on every boot and does nothing for a part that is already done. It does not start the stack.
 
-1. After `terraform apply`, check the startup log. Every line starts with `brt-startup:` and the last one is `brt-startup: done`:
+1. Add the five `airflow-*` values to Secret Manager first ("Secrets on the VM", "Generating and adding values"). Without them the script stops at the `.env` step and the stack has no `.env`.
+
+2. After `terraform apply`, check the startup log. Every line starts with `brt-startup:`, the `.env` line says `rendered /opt/boston-resilience-twin/.env: 10 keys`, and the last line is `brt-startup: done`:
 
    ```bash
    sudo journalctl -u google-startup-scripts.service --no-pager | grep brt-startup
    ```
 
-   The script waits up to 10 minutes for apt's lock, because automatic updates hold it on first boot. A line starting `brt-startup: error:` names the problem; fix it, then rerun the script (step 5).
-
-2. Create `.env` as `airflow`:
-
-   ```bash
-   sudo -u airflow sh -c 'umask 077 && printf "AIRFLOW_UID=50000\n" > /opt/boston-resilience-twin/.env'
-   sudo -u airflow chmod 600 /opt/boston-resilience-twin/.env
-   ```
-
-   `AIRFLOW_UID=50000` is deliberate. The `.env` quick start above says `id -u`, but under `sudo` that returns 0, which would run Airflow as root. 50000 is the owner of the checkout, so `dvc push` and the task logs work from the containers.
-
-   Then add the API keys (human only, as for a laptop: "API keys in .env"). This step is temporary: #64 has the startup script write `.env` at boot (ADR-029). `gcloud` on the VM runs as `airflow-vm-sa`, which can read the three secrets, so no login is needed. The command fetches all three first and writes nothing if `.env` is missing or unreadable (step 1 writes it), a fetch fails, a value is empty, or a value contains `'` (compose cannot escape it inside single quotes) or a line break. It keeps `AIRFLOW_UID`, leaves `.env` owned by `airflow` with mode 600, and prints no values:
-
-   ```bash
-   cd /opt/boston-resilience-twin
-   sudo -u airflow test -r .env || { echo ".env is missing or unreadable; run step 1 first" >&2; false; } &&
-   keys=$(for s in noaa-cdo-token census-api-key nws-user-agent; do
-     v=$(gcloud secrets versions access latest --secret="$s" --project=boston-resilience-twin) || exit 1
-     case "$v" in (''|*"'"*) echo "$s is empty or contains a single quote; .env not changed" >&2; exit 1;; esac
-     [ "$(printf '%s' "$v" | wc -l)" -eq 0 ] || { echo "$s contains a line break; .env not changed" >&2; exit 1; }
-     printf "%s='%s'\n" "$(echo "$s" | tr a-z- A-Z_)" "$v"
-   done) && { sudo -u airflow grep -vE '^(NOAA_CDO_TOKEN|CENSUS_API_KEY|NWS_USER_AGENT)=' .env; printf '%s\n' "$keys"; } | sudo -u airflow sh -c 'umask 077 && cat > .env.tmp && mv .env.tmp .env'
-   unset keys
-   ```
-
-   Without them the full build fails at `ingest_noaa_logan` and the NWS downloads. On a running stack, follow it with `sudo docker compose up -d --wait`, then check with the `printenv` loop from "API keys in .env" (with `sudo`).
+   The script waits up to 10 minutes for apt's lock, because automatic updates hold it on first boot. A line starting `brt-startup: error:` names the problem (for a secret, its name, never its value); fix it, then rerun the script (step 4).
 
 3. Start the stack:
 
@@ -1236,23 +1220,139 @@ The VM's startup script (`Deployment/terraform/startup.sh`, set as the `startup-
 
    The first start takes about 10 minutes on an e2-medium, half of it pulling the Airflow image. It is not hung.
 
-4. To update after a merge to `main`:
-
-   ```bash
-   sudo -u airflow git -C /opt/boston-resilience-twin pull --ff-only
-   ```
-
-   `Data-Pipeline/` is mounted as a directory (ADR-029), so the containers see the pulled files at once. Recreate the containers only when `docker-compose.yaml`, the image inputs (`airflow.Dockerfile`, `Data-Pipeline/requirements.txt`) or `.dvcignore` changed, because `.dvcignore` is still a single-file mount: `cd /opt/boston-resilience-twin && sudo docker compose up -d --build --wait`.
-
-5. To rerun the startup script without a reboot:
+4. To rerun the startup script without a reboot (it renders `.env` again):
 
    ```bash
    sudo google_metadata_script_runner startup
    ```
 
-   Editing `startup.sh` is an in-place Terraform update that takes effect at the next boot or with this command.
+   Editing `startup.sh` is an in-place Terraform update that takes effect at the next boot or with this command. A changed `.env` reaches the containers only when they are recreated: follow it with `cd /opt/boston-resilience-twin && sudo docker compose up -d --wait`.
+
+To update after a merge to `main`, see "Update after a merge to main" below.
 
 The script never pulls, never changes ownership of an existing checkout, and exits with an error rather than touch a `/opt/boston-resilience-twin` that is not a git repository. A VM made before #60 has a root-owned checkout: replace it with `terraform apply -replace=google_compute_instance.airflow` instead of repairing it by hand. The `vm_admins` sudo grants are recreated in the same apply. DVC inside a container works only from the repo root (`/opt/airflow/repo`): from inside `Data-Pipeline/` it reports "not inside of a DVC repository", because that directory is a mount point.
+
+### Secrets on the VM (#64, ADR-034)
+
+airflow-vm does not run on the compose dev defaults. Its Airflow and Postgres secrets, the API keys and the Slack webhook are Secret Manager secrets in project 1. The startup script reads them as `airflow-vm-sa` and renders `/opt/boston-resilience-twin/.env` on every boot. Laptops are unchanged: they keep the dev defaults and their own `.env`.
+
+| Secret | `.env` variable | If it has no version |
+|---|---|---|
+| `airflow-postgres-password` | `POSTGRES_PASSWORD` | required: boot render stops |
+| `airflow-admin-password` | `_AIRFLOW_WWW_USER_PASSWORD` | required |
+| `airflow-jwt-secret` | `AIRFLOW__API_AUTH__JWT_SECRET` | required |
+| `airflow-api-secret-key` | `AIRFLOW__API__SECRET_KEY` | required |
+| `airflow-fernet-key` | `FERNET_KEY` | required |
+| `noaa-cdo-token` | `NOAA_CDO_TOKEN` | optional: written empty, warning logged |
+| `census-api-key` | `CENSUS_API_KEY` | optional |
+| `nws-user-agent` | `NWS_USER_AGENT` | optional |
+| `slack-alert-webhook` | `SLACK_ALERT_WEBHOOK` | optional |
+
+`.env` also holds `AIRFLOW_UID=50000`, the owner of the checkout (50000, not `id -u`, which is 0 under `sudo`).
+
+**How the render works.**
+
+- It fetches every secret first with `gcloud secrets versions access latest` (project named explicitly, trailing newlines stripped). Only then does it write.
+- If a required secret cannot be read, is empty, or has a value that cannot be written safely (a single quote or line break; for the Postgres password anything but letters and digits, because it sits in a connection URL; for the Fernet key anything but one or more comma-separated 44-character keys), the existing `.env` is not touched, the log names the secret (never its value) and the script exits non-zero, so there is no `brt-startup: done`.
+- A missing version on an optional secret writes `NAME=''` and logs `warning: optional secret <name> has no version`. "No version" means the read failed and `gcloud secrets versions list <name> --filter=state=ENABLED --limit=1` succeeded with no output (`airflow-vm-sa` holds `roles/secretmanager.viewer` on the four optional slots for this). A task that needs the key fails naming it (`credentials.require`). Any other failure to read an optional secret, including a failed listing or a slot that does not exist yet, stops the render like a required one, so a network blip never blanks a key.
+- It writes a temp file in the same directory under `umask 077`, sets owner `50000:50000` and mode 600, and renames it over `.env`. `.env` is never edited in place.
+- It never starts or restarts compose. Containers read `.env` only when they are created, so after any change run `sudo docker compose up -d --wait`.
+
+Rerun without a reboot: `sudo google_metadata_script_runner startup`, then `cd /opt/boston-resilience-twin && sudo docker compose up -d --wait`.
+
+**Generating and adding values** (the project owner, from a laptop signed in with `gcloud auth login`; writers hold no grant on these five slots). Each value goes straight into `gcloud` and is never shown. The passwords and the JWT and API keys are hex only, because the Postgres password sits inside a connection URL:
+
+```bash
+P=boston-resilience-twin
+openssl rand -hex 24 | tr -d '\n' | gcloud secrets versions add airflow-admin-password --project=$P --data-file=-
+openssl rand -hex 24 | tr -d '\n' | gcloud secrets versions add airflow-postgres-password --project=$P --data-file=-
+openssl rand -hex 32 | tr -d '\n' | gcloud secrets versions add airflow-jwt-secret --project=$P --data-file=-
+openssl rand -hex 32 | tr -d '\n' | gcloud secrets versions add airflow-api-secret-key --project=$P --data-file=-
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" | tr -d '\n' | gcloud secrets versions add airflow-fernet-key --project=$P --data-file=-
+```
+
+The `python` line needs `cryptography` (the repo venv has it). Without it, use the Airflow image: replace `python -c ...` with `docker compose run --rm -T --no-deps airflow-scheduler python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` and `tr -d '\r\n'`. Do not run the Postgres line on a VM that already has data until the migration says to ("One-time migration"): the password inside the running database must change first.
+
+**One-time migration of the existing VM** (keeps run history; no fresh volume). Do these in order. Terraform has been applied from `main` (slots, grants, the new startup script) and all five values exist.
+
+1. The VM is running on its old `.env`. Pause the DAGs and make sure no run is active. Between step 2 and step 4 the containers cannot open new database connections, so a run in flight would fail:
+
+   ```bash
+   cd /opt/boston-resilience-twin
+   sudo docker compose exec -T airflow-scheduler airflow dags list
+   sudo docker compose exec -T airflow-scheduler airflow dags pause <dag_id>          # each DAG
+   sudo docker compose exec -T airflow-scheduler airflow dags list-runs <dag_id> --state running
+   ```
+
+   `list-runs` must print nothing for every DAG (also check `--state queued`).
+
+2. Change the database user's password to the new secret. The password goes through stdin only (`printf` is a shell builtin, so it is not in any process's command line), and nothing runs if it is empty or not letters and digits (`ALTER USER ... PASSWORD ''` would remove the password):
+
+   ```bash
+   pw=$(gcloud secrets versions access latest --secret=airflow-postgres-password --project=boston-resilience-twin) &&
+   case "$pw" in ''|*[!A-Za-z0-9]*) echo "airflow-postgres-password is empty or not letters and digits; stopping" >&2; false;; esac &&
+   printf "ALTER USER airflow PASSWORD '%s';\n" "$pw" | sudo docker compose exec -T postgres psql -U airflow -d airflow -v ON_ERROR_STOP=1; unset pw
+   ```
+
+   It prints `ALTER ROLE`. `gcloud` on the VM runs as `airflow-vm-sa`, which reads the slot.
+
+3. Render the new `.env`: `sudo google_metadata_script_runner startup`, and check its log says `rendered ... 10 keys` (step 2 of "First-time setup" has the journal command).
+
+4. Recreate the containers: `sudo docker compose up -d --wait`.
+
+5. Reset the admin password. The compose file uses the FAB auth manager (`AIRFLOW__CORE__AUTH_MANAGER` is `FabAuthManager`), whose user lives in the metadata database and keeps its first password: `_AIRFLOW_WWW_USER_PASSWORD` only matters when the user is first created. `users reset-password` without `--password` asks for it with `getpass`, which reads two lines from stdin when there is no terminal (`-T`). Never pass the value with `--password`: that is a command-line argument. The CLI prints a harmless `Password input may be echoed` warning:
+
+   ```bash
+   pw=$(gcloud secrets versions access latest --secret=airflow-admin-password --project=boston-resilience-twin) && [ -n "$pw" ] &&
+   printf '%s\n%s\n' "$pw" "$pw" | sudo docker compose exec -T airflow-scheduler airflow users reset-password --username airflow; unset pw
+   ```
+
+   It prints `User "airflow" password reset successfully`.
+
+6. Encrypt what the database already stores with the new Fernet key (nothing is stored today, but the command also fixes anything added since): `sudo docker compose exec -T airflow-scheduler airflow rotate-fernet-key`.
+
+7. Unpause the DAGs you paused, then run the checks below.
+
+**Checks** (print no secret):
+
+```bash
+# airflow/airflow must now fail: 401 (it was 201 on the dev defaults)
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8080/auth/token -H 'Content-Type: application/json' -d '{"username":"airflow","password":"airflow"}'
+# the Fernet key is set: more than 40 characters (45 for one key, 90 while a rotation holds two)
+sudo docker compose exec -T airflow-scheduler airflow config get-value core fernet_key | wc -c
+# .env is mode 600, owned by airflow
+sudo stat -c '%a %U' /opt/boston-resilience-twin/.env
+```
+
+**Rotation.** Every rotation ends with `sudo google_metadata_script_runner startup` and `cd /opt/boston-resilience-twin && sudo docker compose up -d --wait`, because containers read `.env` only when they are recreated. Then destroy the old version: disabled versions still bill, and a destroyed one cannot be read again, so check the stack first. List the versions with `gcloud secrets versions list <secret> --project=boston-resilience-twin` and run `gcloud secrets versions destroy <number> --secret=<secret> --project=boston-resilience-twin`. A leaked value is rotated the same way.
+
+- **`airflow-postgres-password`** (DAGs paused and no active run, as in the migration step 1): add the new version first, then change the password in the database from that version, then recreate. The value is never held only in a shell variable: it is in Secret Manager before anything uses it, so a failed step is repeated from the secret.
+  1. From the laptop, add the new version. `.env` does not change until the render reruns, so nothing breaks yet:
+
+     ```bash
+     openssl rand -hex 24 | tr -d '\n' | gcloud secrets versions add airflow-postgres-password --project=boston-resilience-twin --data-file=-
+     ```
+
+  2. On the VM, read it back and run `ALTER USER`: the command from migration step 2, unchanged (it refuses an empty value or one that is not letters and digits, and the password goes through stdin only).
+  3. The closing commands. Until they run, the containers still hold connections made with the old password. If step 2 fails, do not run them: fix the cause and repeat step 2, which reads the same version.
+  4. Destroy the old version (the closing paragraph).
+
+- **`airflow-jwt-secret`** and **`airflow-api-secret-key`**: only with no active DAG run (the JWT secret signs the tokens running tasks use, the API secret key signs UI sessions; people log in again afterwards). Add a new version with `openssl rand -hex 32 | tr -d '\n' | gcloud secrets versions add <secret> --project=boston-resilience-twin --data-file=-`, then the closing commands.
+- **`airflow-fernet-key`**: in four steps, so nothing stored is ever unreadable.
+  1. Add `new,old` as the version (the first key encrypts, any listed key decrypts):
+
+     ```bash
+     old=$(gcloud secrets versions access latest --secret=airflow-fernet-key --project=boston-resilience-twin)
+     new=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+     printf '%s,%s' "$new" "$old" | gcloud secrets versions add airflow-fernet-key --project=boston-resilience-twin --data-file=-
+     ```
+
+  2. The closing commands (this recreates the containers with both keys).
+  3. On the VM: `sudo docker compose exec -T airflow-scheduler airflow rotate-fernet-key`.
+  4. Add `new` alone: `printf '%s' "$new" | gcloud secrets versions add airflow-fernet-key --project=boston-resilience-twin --data-file=-; unset old new`, then the closing commands again. Destroy both older versions (the old key alone and `new,old`).
+- **`airflow-admin-password`**: add a new version (`openssl rand -hex 24 | tr -d '\n' | gcloud secrets versions add airflow-admin-password --project=boston-resilience-twin --data-file=-`), run the reset command from migration step 5 on the VM, then the closing commands (they keep `.env` equal to the secret; the admin user itself only changes through the reset command).
+
+**Test the render on a laptop** (no root, no Docker, no cloud call): `Deployment/terraform/README.md` ("Testing the .env render") shows the stub that drives it.
 
 ### After a VM start
 
@@ -1274,7 +1374,7 @@ The API server listens on the VM's `127.0.0.1:8080` only, and no firewall rule o
 gcloud compute ssh airflow-vm --zone=us-east1-b -- -N -L 18080:localhost:8080
 ```
 
-Then browse to `http://localhost:18080` and log in with the compose defaults, `airflow` / `airflow` (ADR-016 explains why that is acceptable). Port 18080 avoids your local stack's 8080. Ctrl+C closes the tunnel. Health without a browser: `curl -s http://localhost:18080/api/v2/monitor/health`.
+Then browse to `http://localhost:18080` and log in as `airflow` with the password in the Secret Manager secret `airflow-admin-password` (ADR-034). Read it on the VM, where `gcloud` runs as `airflow-vm-sa`: `gcloud secrets versions access latest --secret=airflow-admin-password --project=boston-resilience-twin`. Only people with sudo on the VM can, since the slot is not readable by team members. Port 18080 avoids your local stack's 8080. Ctrl+C closes the tunnel. Health without a browser: `curl -s http://localhost:18080/api/v2/monitor/health`.
 
 ### Update after a merge to main
 
@@ -1283,7 +1383,7 @@ sudo -u airflow git -C /opt/boston-resilience-twin pull --ff-only
 cd /opt/boston-resilience-twin && sudo docker compose up -d --build --wait
 ```
 
-The second line is needed only when `docker-compose.yaml`, `airflow.Dockerfile`, `Data-Pipeline/requirements.txt` or `.dvcignore` changed (see "First-time setup", step 4). The VM runs `main` only. Test branches on your laptop.
+`Data-Pipeline/` is mounted as a directory (ADR-029), so the containers see the pulled files at once. The second line is needed only when `docker-compose.yaml`, the image inputs (`airflow.Dockerfile`, `Data-Pipeline/requirements.txt`) or `.dvcignore` changed, because `.dvcignore` is still a single-file mount. It reads the `.env` the startup script rendered. The VM runs `main` only. Test branches on your laptop.
 
 ### Run a DAG from the CLI
 

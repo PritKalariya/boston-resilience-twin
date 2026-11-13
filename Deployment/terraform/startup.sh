@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# airflow-vm boot provisioning (#60). Set as the instance's `startup-script`
-# metadata key, so GCE runs it as root on every boot. Every step is safe to repeat.
+# airflow-vm boot provisioning (#60) and .env render (#64, ADR-034). Set as the
+# instance's `startup-script` metadata key, so GCE runs it as root on every boot.
+# Every step is safe to repeat.
 #
-# It installs Docker, creates the `airflow` host user and clones the repo. It does
-# not write .env, fetch secrets or run `docker compose up`: those are runbook steps
-# until #64 moves the secrets to Secret Manager.
+# It installs Docker, creates the `airflow` host user, clones the repo and, last,
+# renders the repo's `.env` from Secret Manager. It never runs `docker compose`:
+# containers read `.env` only when they are created, so after a changed secret
+# run `sudo docker compose up -d --wait` (runbook, "Airflow on the VM").
 #
 # Read its log with:
 #   sudo journalctl -u google-startup-scripts.service --no-pager | grep brt-startup
 # Rerun it without a reboot with:
 #   sudo google_metadata_script_runner startup
+#
+# Test the render alone, with no root and no Docker (Deployment/terraform/README.md):
+#   BRT_RENDER_ONLY=1 BRT_ENV_FILE=/tmp/t/.env BRT_ENV_OWNER="$(id -u):$(id -g)" \
+#     BRT_SECRET_FETCH_CMD=./stub_fetch.sh bash startup.sh
 set -euo pipefail
 
 REPO_URL="https://github.com/PritKalariya/boston-resilience-twin.git"
@@ -23,6 +29,182 @@ die() { log "error: $*"; exit 1; }
 
 # unattended-upgrades holds the apt lock for a few minutes on first boot.
 apt_get() { DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -q "$@"; }
+
+# ---- .env render (#64, ADR-034) ----
+
+# The render's inputs, overridable so a stub can drive it on a laptop. The fetch
+# command is called as `<command> <secret name>`: it prints the value and exits 0,
+# exits 4 when the secret has no version, and exits 1 on any other failure.
+ENV_FILE="${BRT_ENV_FILE:-$CLONE_DIR/.env}"
+ENV_OWNER="${BRT_ENV_OWNER:-$AIRFLOW_UID:$AIRFLOW_UID}"
+GCP_PROJECT="${BRT_GCP_PROJECT:-boston-resilience-twin}"
+FETCH_CMD="${BRT_SECRET_FETCH_CMD:-fetch_with_gcloud}"
+FETCH_NO_VERSION=4
+
+# VARIABLE=secret-name. The variables are the names docker-compose.yaml reads.
+REQUIRED_SECRETS=(
+  "POSTGRES_PASSWORD=airflow-postgres-password"
+  "_AIRFLOW_WWW_USER_PASSWORD=airflow-admin-password"
+  "AIRFLOW__API_AUTH__JWT_SECRET=airflow-jwt-secret"
+  "AIRFLOW__API__SECRET_KEY=airflow-api-secret-key"
+  "FERNET_KEY=airflow-fernet-key"
+)
+OPTIONAL_SECRETS=(
+  "NOAA_CDO_TOKEN=noaa-cdo-token"
+  "CENSUS_API_KEY=census-api-key"
+  "NWS_USER_AGENT=nws-user-agent"
+  "SLACK_ALERT_WEBHOOK=slack-alert-webhook"
+)
+
+# The default fetcher. Prints the value and nothing else. When the read fails it
+# asks for the newest enabled version: an empty answer means the secret has no
+# version (exit 4); a failed listing, or a version that exists, is a plain failure
+# (exit 1). Needs `versions list`, which airflow-vm-sa holds on the optional slots.
+fetch_with_gcloud() {
+  local name="$1" bin="" candidate listing
+  bin="$(command -v gcloud || true)"
+  if [ -z "$bin" ]; then
+    for candidate in /snap/bin/gcloud /usr/bin/gcloud /usr/lib/google-cloud-sdk/bin/gcloud; do
+      if [ -x "$candidate" ]; then bin="$candidate"; break; fi
+    done
+  fi
+  if [ -z "$bin" ]; then
+    log "error: gcloud not found on this VM"
+    return 1
+  fi
+  if env HOME="${HOME:-/root}" CLOUDSDK_CORE_DISABLE_PROMPTS=1 \
+    "$bin" secrets versions access latest --secret="$name" --project="$GCP_PROJECT" 2>/dev/null; then
+    return 0
+  fi
+  if listing="$(env HOME="${HOME:-/root}" CLOUDSDK_CORE_DISABLE_PROMPTS=1 \
+    "$bin" secrets versions list "$name" --project="$GCP_PROJECT" \
+    --filter=state=ENABLED --limit=1 --format='value(name)' 2>/dev/null)" && [ -z "$listing" ]; then
+    return "$FETCH_NO_VERSION"
+  fi
+  return 1
+}
+
+# Sets FETCHED to the secret's value without its trailing newlines. Returns the
+# fetcher's code: 0, FETCH_NO_VERSION or another failure.
+FETCHED=""
+fetch_secret() {
+  local -a cmd
+  local rc=0
+  FETCHED=""
+  read -r -a cmd <<<"$FETCH_CMD"
+  if FETCHED="$("${cmd[@]}" "$1")"; then rc=0; else rc=$?; FETCHED=""; fi
+  return "$rc"
+}
+
+# A line of .env is VAR='value': compose cannot escape a single quote inside
+# single quotes, and a line break would start a new line. Prints the reason and
+# returns 1 when the value cannot be written safely. Never prints the value.
+value_problem() {
+  local var="$1" value="$2"
+  case "$value" in
+    *"'"*) echo "contains a single quote"; return 1 ;;
+    *$'\n'* | *$'\r'*) echo "contains a line break"; return 1 ;;
+  esac
+  # The Postgres password sits inside AIRFLOW__DATABASE__SQL_ALCHEMY_CONN, a URL.
+  if [ "$var" = POSTGRES_PASSWORD ] && ! [[ "$value" =~ ^[A-Za-z0-9]+$ ]]; then
+    echo "is not letters and digits only (it sits in a connection URL)"
+    return 1
+  fi
+  # One Fernet key is 44 URL-safe base64 characters; a rotation holds `new,old`.
+  if [ "$var" = FERNET_KEY ] && ! [[ "$value" =~ ^[A-Za-z0-9_=-]{44}(,[A-Za-z0-9_=-]{44})*$ ]]; then
+    echo "is not one Fernet key or a comma-separated list of them"
+    return 1
+  fi
+  return 0
+}
+
+# Renders ENV_FILE whole: every secret is fetched and checked first, so one
+# failure leaves the existing file untouched. Logs secret names, never values.
+render_env() {
+  local dir pair var name rc failed=0 old_umask tmp line count=0 empty=0
+  local -a lines
+  local problem
+  dir="$(dirname "$ENV_FILE")"
+  if [ ! -d "$dir" ]; then
+    log "error: $dir does not exist; .env not written"
+    return 1
+  fi
+
+  lines=("AIRFLOW_UID=$AIRFLOW_UID")
+
+  for pair in "${REQUIRED_SECRETS[@]}"; do
+    var="${pair%%=*}"
+    name="${pair#*=}"
+    if fetch_secret "$name"; then rc=0; else rc=$?; fi
+    if [ "$rc" -ne 0 ]; then
+      log "error: required secret $name could not be read (fetch exit $rc)"
+      failed=1
+      continue
+    fi
+    if [ -z "$FETCHED" ]; then
+      log "error: required secret $name is empty"
+      failed=1
+      continue
+    fi
+    if problem="$(value_problem "$var" "$FETCHED")"; then
+      lines+=("$var='$FETCHED'")
+    else
+      log "error: required secret $name $problem"
+      failed=1
+    fi
+  done
+
+  for pair in "${OPTIONAL_SECRETS[@]}"; do
+    var="${pair%%=*}"
+    name="${pair#*=}"
+    if fetch_secret "$name"; then rc=0; else rc=$?; fi
+    if [ "$rc" -eq "$FETCH_NO_VERSION" ]; then
+      log "warning: optional secret $name has no version; $var written empty"
+      lines+=("$var=''")
+      empty=$((empty + 1))
+    elif [ "$rc" -ne 0 ]; then
+      log "error: optional secret $name could not be read (fetch exit $rc)"
+      failed=1
+    elif [ -z "$FETCHED" ]; then
+      log "warning: optional secret $name is empty; $var written empty"
+      lines+=("$var=''")
+      empty=$((empty + 1))
+    elif problem="$(value_problem "$var" "$FETCHED")"; then
+      lines+=("$var='$FETCHED'")
+    else
+      log "error: optional secret $name $problem"
+      failed=1
+    fi
+  done
+  FETCHED=""
+
+  if [ "$failed" -ne 0 ]; then
+    log "error: $ENV_FILE not changed"
+    return 1
+  fi
+
+  # Same directory, so the final mv is a rename on one filesystem.
+  old_umask="$(umask)"
+  umask 077
+  tmp="$(mktemp "$dir/.env.XXXXXX")" || { umask "$old_umask"; log "error: cannot create a temp file in $dir"; return 1; }
+  umask "$old_umask"
+  for line in "${lines[@]}"; do
+    printf '%s\n' "$line" >>"$tmp"
+    count=$((count + 1))
+  done
+  if ! chown "$ENV_OWNER" "$tmp" || ! chmod 600 "$tmp" || ! mv -f "$tmp" "$ENV_FILE"; then
+    rm -f "$tmp"
+    log "error: could not install the new $ENV_FILE; it is not changed"
+    return 1
+  fi
+  log "rendered $ENV_FILE: $count keys, $empty optional empty, owner $ENV_OWNER, mode 600"
+}
+
+# Render alone: no root, no Docker, no clone. For the stub test.
+if [ "${BRT_RENDER_ONLY:-0}" = 1 ]; then
+  render_env
+  exit $?
+fi
 
 [ "$(id -u)" -eq 0 ] || die "must run as root"
 
@@ -132,5 +314,10 @@ else
   mv "$PARTIAL_DIR" "$CLONE_DIR"
   log "cloned $(as_airflow git -C "$CLONE_DIR" rev-parse --short HEAD) from $BRANCH into $CLONE_DIR"
 fi
+
+# ---- .env (#64, ADR-034) ----
+
+# Last, so the checkout exists. A failure exits non-zero and leaves the old .env.
+render_env || die ".env was not rendered; the existing one is untouched"
 
 log "done"
