@@ -1,7 +1,9 @@
 """The training image's requirements match the pins the tests pass on (#112, ADR-032).
 
 Model-Development/requirements.txt (the image) and requirements-pull.txt (the runner's DVC) copy
-their pins from Data-Pipeline/requirements.txt. These tests read the files from the repo only, so
+the pins of the packages they share with Data-Pipeline/requirements.txt. A package pinned in only
+one of the two files is allowed (the image may add one, such as google-cloud-aiplatform for #111);
+a package pinned in both must have equal pins. These tests read the files from the repo only, so
 they run in the compose test container, which mounts both folders.
 """
 
@@ -34,13 +36,26 @@ def pins(path: Path) -> dict[str, tuple[str, ...]]:
     return {name: tuple(values) for name, values in found.items()}
 
 
+def mismatched_shared_pins(shared_path: Path, own_path: Path) -> list[str]:
+    """One message per package pinned in both files with different pins; a package in one file only is fine."""
+    shared, own = pins(shared_path), pins(own_path)
+    return [f"{name}: {own[name]} in {own_path.name}, {shared[name]} in {shared_path.name}"
+            for name in sorted(own.keys() & shared.keys()) if own[name] != shared[name]]
+
+
 @pytest.mark.parametrize("path", [IMAGE_FILE, PULL_FILE])
-def test_every_pin_matches_data_pipeline(path):
-    shared, own = pins(SHARED), pins(path)
-    assert own
-    for name, values in own.items():
-        assert name in shared, f"{name} is pinned in {path.name} but not in Data-Pipeline/requirements.txt"
-        assert values == shared[name], f"{name}: {values} in {path.name}, {shared[name]} in Data-Pipeline"
+def test_every_shared_pin_matches_data_pipeline(path):
+    assert pins(path)
+    assert mismatched_shared_pins(SHARED, path) == []
+
+
+def test_an_image_only_package_passes_and_a_mismatched_shared_pin_fails(tmp_path):
+    shared, own = tmp_path / "shared.txt", tmp_path / "own.txt"
+    shared.write_text("numpy==2.5.3\npandas==3.0.5\nairflow-only==1.0.0\n", encoding="utf-8")
+    own.write_text("numpy==2.5.3\ngoogle-cloud-aiplatform==1.2.3  # image only (#111)\n", encoding="utf-8")
+    assert mismatched_shared_pins(shared, own) == []  # image-only and shared-only packages are allowed
+    own.write_text("numpy==2.5.4\ngoogle-cloud-aiplatform==1.2.3\n", encoding="utf-8")
+    assert mismatched_shared_pins(shared, own) == ["numpy: ('2.5.4; ',) in own.txt, ('2.5.3; ',) in shared.txt"]
 
 
 def test_the_xgboost_platform_markers_are_kept():
