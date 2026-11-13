@@ -23,12 +23,12 @@ docker compose up -d --wait mlflow                  # start the server; UI at ht
 docker compose run --rm --build mlflow-smoke        # log one test run from a container; starts mlflow if needed
 export MLFLOW_TRACKING_URI=http://127.0.0.1:5000    # host runs (train.py, selection.py) now log to the server
 python Model-Development/scripts/mlflow_smoke.py    # the same test run, from the host
-docker compose --profile mlflow down                # stop it; a plain `docker compose down` leaves it running
+docker compose --profile mlflow down                # stop it, on any Compose version
 ```
 
-The smoke check prints `mlflow smoke OK` and the run's link in the UI. Containers on the compose network reach the server at `http://mlflow:5000`. Unset `MLFLOW_TRACKING_URI` to log to the local store again.
+The smoke check prints `mlflow smoke OK` and the run's link in the UI. Containers on the compose network reach the server at `http://mlflow:5000`. Unset `MLFLOW_TRACKING_URI` to log to the local store again. A plain `docker compose down` removes mlflow on Compose v5.5.1 and later but leaves it running on v5.0.1; `--profile mlflow` stops it on both.
 
-**What it produces.** Runs, grouped in experiments: `smoke-test` (the smoke check) and `model-training` (every `train.py` run, and each `selection.py` run with its models nested in it). A run holds its parameters, metrics, tags (model, data version, git commit) and files; the runbook's "MLflow tracking (#107)" lists what a training run logs.
+**What it produces.** Runs, grouped in experiments: `smoke-test` (the smoke check), `model-training` (every `train.py` run, and each `selection.py` run with its models nested in it) and `model-tuning` (each `tune.py` study and each `compare_tuned.py` comparison, #109). A run holds its parameters, metrics, tags (model, data version, git commit) and files; the runbook's "MLflow tracking (#107)" lists what a training run logs.
 
 **Where results live** (all gitignored):
 
