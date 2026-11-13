@@ -310,6 +310,7 @@ services:
     volumes:
       - ./Data-Pipeline:/opt/airflow/repo/Data-Pipeline:ro
       - ./Model-Development:/opt/airflow/repo/Model-Development:ro
+      - ./.github:/opt/airflow/repo/.github:ro  # model.yml and in_image.sh, for test_steps_workflow.py (#112)
       - ./docs/data:/opt/airflow/repo/docs/data:ro
       - ./.coveragerc:/opt/airflow/repo/.coveragerc:ro
       - ./.env.example:/opt/airflow/repo/.env.example:ro

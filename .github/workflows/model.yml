@@ -1,24 +1,34 @@
-# Model CI/CD (#112, ADR-028): train, evaluate, gate, and on main register and set the
-# champion. PR 2 runs it on stub steps (Model-Development/scripts/steps); PR 3 swaps the
-# step contents without changing this file's shape. No GCP, no secret except the Slack
-# webhook, which only the notify step sees.
+# Model CI/CD (#112, ADR-028, ADR-032): pull the data, train the baseline and the
+# candidates, evaluate, gate, reload-check, and on main push the image and run the registry
+# and champion steps. The steps are Model-Development/scripts/steps/step_*.py, run in the
+# training image (Model-Development/Dockerfile) through .github/scripts/in_image.sh, which
+# defines the one `docker run` prefix and its mounts. The data pull is on the runner, with
+# DVC and the CI identity from project 2 (#131, ADR-030); the image never holds data or a
+# credential. The registry push and the champion step are still stubs (#111), and the
+# per-group counts in the evaluate step are interim (#110): both are marked in their files.
 #
 # The workflow runs on every pull request, so the check always reports. The `changes`
-# job finds out whether model files changed (Model-Development/, this file, or
-# Data-Pipeline/dvc.lock, since a new data version should retrain): a PR is diffed
-# against its base, a push to main against the previous head (github.event.before),
-# and a diff that cannot be computed, such as after a force push, runs the pipeline
-# anyway. A dispatch always runs. `pipeline` runs only when `changes` says so, and `model-ci`
-# (always runs) is the one required status check: a skipped `pipeline` passes it, a
-# failed `changes` fails it. Do not require `pipeline` itself (a skipped required job
-# counts as passed, which would hide a failed `changes`).
+# job finds out whether model files changed (Model-Development/, this file, the script it
+# calls, Data-Pipeline/dvc.lock and Data-Pipeline/config/feature_catalog.csv, the two
+# data inputs training reads outside Model-Development: a new data version or catalog
+# should retrain): a PR is diffed against its base, a push to main against the previous
+# head (github.event.before), and a diff that cannot be computed, such as after a force
+# push, runs the pipeline anyway. A dispatch always runs. `pipeline` runs only when
+# `changes` says so, and `model-ci` (always runs) is the one required status check: a
+# skipped `pipeline` passes it, a failed `changes` fails it. Do not require `pipeline`
+# itself (a skipped required job counts as passed, which would hide a failed `changes`).
 #
-# A pull request runs up to the gates. A push to main also runs the champion re-score,
-# the reload check, the registry push and the champion step.
+# Every ref runs up to the gates and then the reload check. A gate failure (gates exit 1)
+# fails the job on main and only warns on a pull request: merging code does not promote a
+# model, and weak data must not freeze all model code. Exit 2 fails the job on every ref. A
+# push to main also pushes the image to Artifact Registry right after the build, and runs
+# the champion re-score, the registry push and the champion step.
+#
+# A fork PR gets no OIDC token and no secret: the Google auth step fails, so the run is
+# "pipeline failed" with no Slack message. Maintainers rerun it from a branch of this repo.
 #
 # workflow_dispatch works only once this file is on main (GitHub reads the dispatch
-# trigger from the default branch). stub_outcome picks the stub result: pass, fail_gate
-# or fail_pipeline.
+# trigger from the default branch).
 
 name: Model
 
@@ -27,12 +37,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      stub_outcome:
-        description: Result the stub steps produce
-        type: choice
-        options: [pass, fail_gate, fail_pipeline]
-        default: pass
 
 permissions:
   contents: read
@@ -78,7 +82,7 @@ jobs:
             exit 0
           fi
           cat changed.txt
-          if grep -qE '^(Model-Development/|\.github/workflows/model\.yml$|Data-Pipeline/dvc\.lock$)' changed.txt; then
+          if grep -qE '^(Model-Development/|\.github/workflows/model\.yml$|\.github/scripts/in_image\.sh$|Data-Pipeline/dvc\.lock$|Data-Pipeline/config/feature_catalog\.csv$)' changed.txt; then
             echo "model=true" >> "$GITHUB_OUTPUT"
           else
             echo "model=false" >> "$GITHUB_OUTPUT"
@@ -91,9 +95,14 @@ jobs:
     if: needs.changes.outputs.model == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # The token the Google auth step exchanges for credentials (Workload Identity
+    # Federation, #131, ADR-030). Only this job: the others have no use for it.
+    permissions:
+      contents: read
+      id-token: write
     env:
       IMAGE: brt-train:ci
-      STUB_OUTCOME: ${{ github.event.inputs.stub_outcome || 'pass' }}
+      REGISTRY_IMAGE: us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images/brt-train
       # The main-only steps: a push or a dispatch on main, never a pull request.
       MAIN_RUN: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
     steps:
@@ -101,76 +110,129 @@ jobs:
         with:
           persist-credentials: false
 
+      # Identities and provider from project 2 (#131, ADR-030), public identifiers, not
+      # secrets. ci-reader reads the DVC data on pull requests and branches; ci-writer, which
+      # only refs/heads/main can use, also pushes the image on main.
+      - name: Authenticate to Google Cloud (ci-reader)
+        id: auth_reader
+        if: env.MAIN_RUN != 'true'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: projects/570429679915/locations/global/workloadIdentityPools/github/providers/github-oidc
+          service_account: ci-reader@boston-resilience-twin-p2.iam.gserviceaccount.com
+
+      - name: Authenticate to Google Cloud (ci-writer)
+        id: auth_writer
+        if: env.MAIN_RUN == 'true'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: projects/570429679915/locations/global/workloadIdentityPools/github/providers/github-oidc
+          service_account: ci-writer@boston-resilience-twin-p2.iam.gserviceaccount.com
+          token_format: access_token  # for `docker login` to Artifact Registry
+
+      - name: Set up Python 3.12
+        id: python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install DVC
+        id: dvc_install
+        run: pip install -r Model-Development/requirements-pull.txt
+
+      # Only the two files training reads: a bare `dvc pull` is about 2.26 GB. The auth step
+      # exported the credentials file DVC's Google Cloud Storage remote picks up.
+      - name: Pull the training data (DVC)
+        id: dvc_pull
+        run: |
+          dvc pull Data-Pipeline/data/processed/labels.parquet Data-Pipeline/data/processed/features.parquet
+          for f in Data-Pipeline/data/processed/labels.parquet Data-Pipeline/data/processed/features.parquet; do
+            [ -s "$f" ] || { echo "::error::$f is missing or empty after dvc pull"; exit 1; }
+          done
+
       - name: Build the training image
+        id: build
         run: |
           docker build -f Model-Development/Dockerfile -t "$IMAGE" .
-          mkdir artifacts
-          # For #111's registry record: the local image ID until PR 3 pushes to Artifact
-          # Registry, then the registry digest.
+          mkdir -p artifacts
+          # For #111's registry record: the local image ID on a pull request; on main the
+          # next step replaces it with the registry digest.
           docker image inspect --format '{{.Id}}' "$IMAGE" > artifacts/image_digest.txt
 
-      # Every step below runs in the image with artifacts/ mounted, as the runner user so
-      # the files are the runner's to upload. A step stops the job at its first failure.
-      - name: Pull data
-        run: >
-          docker run --rm --user "$(id -u):$(id -g)" -e STUB_OUTCOME -e GITHUB_SHA
-          -v "$PWD/artifacts:/app/artifacts" "$IMAGE"
-          python Model-Development/scripts/steps/step_pull_data.py --artifacts artifacts
+      # Right after the build, main only (ADR-032): tagged with the commit. The access token
+      # goes in on stdin from the environment, never on a command line.
+      - name: Push the image (main only)
+        id: push
+        if: env.MAIN_RUN == 'true'
+        env:
+          REGISTRY_TOKEN: ${{ steps.auth_writer.outputs.access_token }}
+        run: |
+          printf '%s' "$REGISTRY_TOKEN" | docker login -u oauth2accesstoken --password-stdin us-east1-docker.pkg.dev
+          docker tag "$IMAGE" "$REGISTRY_IMAGE:$GITHUB_SHA"
+          docker push "$REGISTRY_IMAGE:$GITHUB_SHA"
+          digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$IMAGE" | grep "^$REGISTRY_IMAGE@" | head -n 1)"
+          [ -n "$digest" ] || { echo "::error::no registry digest for $REGISTRY_IMAGE"; exit 1; }
+          echo "$digest" > artifacts/image_digest.txt
+          echo "pushed $digest"
+          docker logout us-east1-docker.pkg.dev
 
-      - name: Train
-        run: >
-          docker run --rm --user "$(id -u):$(id -g)" -e STUB_OUTCOME
-          -v "$PWD/artifacts:/app/artifacts" "$IMAGE"
-          python Model-Development/scripts/steps/step_train.py --artifacts artifacts
+      # Every step below runs in the image through in_image.sh (the data and config mounted
+      # read-only, artifacts/ and its runs, mlruns and reports folders writable, as the runner
+      # user so the files are the runner's to upload). A step stops the job at its first failure.
+      - name: Check the data and record its version
+        id: data
+        run: bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_pull_data.py --artifacts artifacts
+
+      - name: Train the baseline and the candidates
+        id: train
+        run: bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_train.py --artifacts artifacts
 
       - name: Evaluate
-        run: >
-          docker run --rm --user "$(id -u):$(id -g)" -e STUB_OUTCOME
-          -v "$PWD/artifacts:/app/artifacts" "$IMAGE"
-          python Model-Development/scripts/steps/step_evaluate.py --artifacts artifacts
+        id: evaluate
+        run: bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_evaluate.py --artifacts artifacts
 
       - name: Re-score the champion (main only)
+        id: rescore
         if: env.MAIN_RUN == 'true'
-        run: >
-          docker run --rm --user "$(id -u):$(id -g)" -e STUB_OUTCOME
-          -v "$PWD/artifacts:/app/artifacts" "$IMAGE"
-          python Model-Development/scripts/steps/step_rescore_champion.py --artifacts artifacts
+        run: bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_rescore_champion.py --artifacts artifacts
 
       # gates.py exits 0 (promote or keep the champion), 1 (a gate failed) or 2 (cannot
-      # evaluate). The exit code is kept as a step output for the Slack message.
+      # evaluate). The exit code is kept as a step output for the Slack message. On a pull
+      # request exit 1 is a warning, not a failure (merging code does not promote a model);
+      # on main it fails the job, so nothing after it runs. Exit 2 fails on every ref.
       - name: Gates
         id: gates
         run: |
           set +e
-          docker run --rm --user "$(id -u):$(id -g)" \
-            -v "$PWD/artifacts:/app/artifacts" "$IMAGE" \
-            python Model-Development/scripts/gates.py \
+          bash .github/scripts/in_image.sh python Model-Development/scripts/gates.py \
             --metrics artifacts/metrics.json --out artifacts/gate_report.json
           code=$?
+          set -e
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          [ -f artifacts/gate_report.json ] && cat artifacts/gate_report.json
+          if [ -f artifacts/gate_report.json ]; then cat artifacts/gate_report.json; fi
+          if [ "$code" = "1" ] && [ "$MAIN_RUN" != "true" ]; then
+            reason="$(jq -r '"\(.f1_gate.reason // "n/a"); \(.fairness_gate.reason // "n/a")"' artifacts/gate_report.json)"
+            echo "::warning::Gates failed on this pull request: the model would not be promoted ($reason)"
+            echo "### Gates failed (not a merge blocker)" >> "$GITHUB_STEP_SUMMARY"
+            echo "The candidate would not be promoted: $reason. Merging code does not promote a model (ADR-032)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           exit "$code"
 
-      - name: Reload check (main only)
-        if: env.MAIN_RUN == 'true'
-        run: >
-          docker run --rm --user "$(id -u):$(id -g)" -e STUB_OUTCOME
-          -v "$PWD/artifacts:/app/artifacts" "$IMAGE"
-          python Model-Development/scripts/steps/step_reload_check.py --artifacts artifacts
+      # No side effects, so on every ref: it catches a broken model file before merge.
+      - name: Reload check
+        id: reload
+        run: bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_reload_check.py --artifacts artifacts
 
       - name: Registry push (main only)
+        id: registry
         if: env.MAIN_RUN == 'true'
-        run: >
-          docker run --rm --user "$(id -u):$(id -g)" -e STUB_OUTCOME
-          -v "$PWD/artifacts:/app/artifacts" "$IMAGE"
-          python Model-Development/scripts/steps/step_registry_push.py --artifacts artifacts
+        run: bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_registry_push.py --artifacts artifacts
 
       - name: Set champion (main only)
+        id: champion
         if: env.MAIN_RUN == 'true'
-        run: >
-          docker run --rm --user "$(id -u):$(id -g)" -e STUB_OUTCOME
-          -v "$PWD/artifacts:/app/artifacts" "$IMAGE"
-          python Model-Development/scripts/steps/step_set_champion.py --artifacts artifacts
+        run: bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_set_champion.py --artifacts artifacts
 
       - name: Upload artifacts
         if: always()
@@ -182,6 +244,8 @@ jobs:
 
       # Last step, on the runner (the one step outside the image). The webhook secret is
       # exposed to this step only. Empty (no secret yet, or a fork PR): a warning, exit 0.
+      # The failed step is the first step in order whose outcome is failure, or the gates
+      # when they exited 1 on a pull request.
       - name: Notify Slack
         if: always()
         env:
@@ -190,13 +254,47 @@ jobs:
           GATES_EXIT: ${{ steps.gates.outputs.exit_code }}
           REF_NAME: ${{ github.head_ref || github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OUTCOME_AUTH_READER: ${{ steps.auth_reader.outcome }}
+          OUTCOME_AUTH_WRITER: ${{ steps.auth_writer.outcome }}
+          OUTCOME_PYTHON: ${{ steps.python.outcome }}
+          OUTCOME_DVC_INSTALL: ${{ steps.dvc_install.outcome }}
+          OUTCOME_DVC_PULL: ${{ steps.dvc_pull.outcome }}
+          OUTCOME_BUILD: ${{ steps.build.outcome }}
+          OUTCOME_PUSH: ${{ steps.push.outcome }}
+          OUTCOME_DATA: ${{ steps.data.outcome }}
+          OUTCOME_TRAIN: ${{ steps.train.outcome }}
+          OUTCOME_EVALUATE: ${{ steps.evaluate.outcome }}
+          OUTCOME_RESCORE: ${{ steps.rescore.outcome }}
+          OUTCOME_GATES: ${{ steps.gates.outcome }}
+          OUTCOME_RELOAD: ${{ steps.reload.outcome }}
+          OUTCOME_REGISTRY: ${{ steps.registry.outcome }}
+          OUTCOME_CHAMPION: ${{ steps.champion.outcome }}
         run: |
+          failed=""
+          check() { if [ -z "$failed" ] && [ "$2" = "failure" ]; then failed="$1"; fi; }
+          check "Authenticate to Google Cloud (ci-reader)" "$OUTCOME_AUTH_READER"
+          check "Authenticate to Google Cloud (ci-writer)" "$OUTCOME_AUTH_WRITER"
+          check "Set up Python 3.12" "$OUTCOME_PYTHON"
+          check "Install DVC" "$OUTCOME_DVC_INSTALL"
+          check "Pull the training data (DVC)" "$OUTCOME_DVC_PULL"
+          check "Build the training image" "$OUTCOME_BUILD"
+          check "Push the image" "$OUTCOME_PUSH"
+          check "Check the data and record its version" "$OUTCOME_DATA"
+          check "Train the baseline and the candidates" "$OUTCOME_TRAIN"
+          check "Evaluate" "$OUTCOME_EVALUATE"
+          check "Re-score the champion" "$OUTCOME_RESCORE"
+          check "Gates" "$OUTCOME_GATES"
+          check "Reload check" "$OUTCOME_RELOAD"
+          check "Registry push" "$OUTCOME_REGISTRY"
+          check "Set champion" "$OUTCOME_CHAMPION"
+          if [ -z "$failed" ] && [ "$GATES_EXIT" = "1" ]; then failed="Gates"; fi
+          if [ -z "$failed" ] && [ "$JOB_STATUS" = "failure" ]; then failed="unknown (see the run)"; fi
           args=()
           if [ "$MAIN_RUN" = "true" ]; then args+=(--main); fi
           python3 Model-Development/scripts/steps/step_notify.py \
             --artifacts artifacts --repo "$GITHUB_REPOSITORY" --ref "$REF_NAME" \
             --run-url "$RUN_URL" --job-status "$JOB_STATUS" --gates-exit "$GATES_EXIT" \
-            "${args[@]}"
+            --failed-step "$failed" "${args[@]}"
 
   # The required status check. Always runs, so it reports on every pull request.
   model-ci:

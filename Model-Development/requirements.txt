@@ -1,0 +1,20 @@
+# The training image's packages (#112, ADR-028, ADR-032): what train.py, selection.py's
+# ranking and the workflow steps import, nothing else. Every pin is copied from
+# Data-Pipeline/requirements.txt, the pins the tests passed on; test_steps_requirements.py keeps
+# the two files equal. There is no -c constraints line: that file's Airflow constraints
+# URL belongs to the Airflow image (ADR-022), and pip check at the end of the build
+# fails the image if the result is inconsistent.
+numpy==2.5.3
+pandas==3.0.5
+pyarrow==25.0.1
+joblib==1.6.0
+PyYAML==6.0.3
+scikit-learn==1.9.1
+# LightGBM loads the OpenMP runtime: the Dockerfile installs libgomp1 (ADR-032).
+lightgbm==4.7.0
+# selection.py draws its charts with it, and the steps import selection's ranking.
+matplotlib==3.11.2
+mlflow==3.17.2
+# The CPU-only build on Linux; the standard Linux wheel pulls NVIDIA's NCCL (about 430 MB).
+xgboost==3.4.1; sys_platform != "linux"
+xgboost-cpu==3.4.1; sys_platform == "linux"

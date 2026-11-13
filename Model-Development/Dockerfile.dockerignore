@@ -1,9 +1,13 @@
-# Build context for Model-Development/Dockerfile: the component folder minus its tests
-# and caches. BuildKit uses this file in place of any root .dockerignore, so the
-# Airflow image's context is unaffected.
+# Build context for Model-Development/Dockerfile: the component folder minus its tests,
+# caches and anything a run writes. BuildKit uses this file in place of any root
+# .dockerignore, so the Airflow image's context is unaffected.
 *
 !Model-Development
 Model-Development/tests
+# What a run writes (gitignored): never part of the image. The workflow mounts these
+# folders from artifacts/ (ADR-032).
+Model-Development/runs
+Model-Development/reports
 # MLflow's stores (#104): run data from local use, never part of the image
 Model-Development/mlflow
 Model-Development/mlruns
