@@ -4,8 +4,9 @@ Runs on the runner, not in the image: it needs the webhook, and nothing else doe
 The webhook is read from the SLACK_ALERT_WEBHOOK environment variable, the name the
 Airflow pipeline uses (Data-Pipeline/scripts/alerts.py). Routing:
 
-  gates exited 1                 -> "gate failed" (PR and main)
-  any other failure              -> "pipeline failed" (PR and main)
+  gates exited 1, nothing else failed -> "gate failed" (PR and main)
+  any other failure, including a later step that failed after a PR's gates exited 1
+                                 -> "pipeline failed" (PR and main)
   success on main                -> "training complete" with the decision
   success on a PR, or cancelled  -> no message
 
@@ -39,8 +40,15 @@ TRAINING_COMPLETE = "training complete"
 
 
 def route(job_status: str, gates_exit: str, is_main: bool) -> str | None:
-    """The message kind for a run, or None when nobody needs one."""
-    if gates_exit.strip() == "1":
+    """The message kind for a run, or None when nobody needs one.
+
+    A failed job is "pipeline failed" unless the gates step is the only failure. Gates exit 1
+    is the only failure when the job passed (a PR: the gates step succeeds with a warning), or
+    on main, where the gates step fails the job and no later step runs. On a PR, gates exit 1
+    followed by a failed later step (the reload check, say) is a pipeline failure.
+    """
+    gates_failed = gates_exit.strip() == "1"
+    if gates_failed and (is_main or job_status == "success"):
         return GATE_FAILED
     if job_status == "cancelled":
         return None

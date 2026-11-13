@@ -1,0 +1,198 @@
+{
+  "activated": false,
+  "best_params": "best_params.yaml",
+  "confirm_seeds": [
+    10,
+    11,
+    12,
+    13,
+    14
+  ],
+  "confirm_top": 5,
+  "created_utc": "2026-11-12T07:47:44+00:00",
+  "data_version": "sha256:a719afeb9695d4a2d8e9f3d00ee1069e52d1e41ea5f63aeadeaf72e5f42fd0ef",
+  "git": {
+    "commit": "d0f0782cf106afb8ea5536c3e874bc9846030d6b",
+    "uncommitted_changes": true
+  },
+  "guard_ratio": 1.005,
+  "inner_fold_years": [
+    2019,
+    2022,
+    2023
+  ],
+  "models": [
+    "logreg",
+    "xgboost",
+    "lightgbm"
+  ],
+  "results": {
+    "lightgbm": {
+      "best": {
+        "fold_f1": 0.2790384473478312,
+        "log_loss": 0.11215766666666666,
+        "params": {
+          "colsample_bytree": 0.8929107670750726,
+          "learning_rate": 0.019471750052815723,
+          "min_child_samples": 20,
+          "num_leaves": 21,
+          "reg_lambda": 0.04944278628800611,
+          "subsample": 0.8121702039641977
+        }
+      },
+      "best_trial": 53,
+      "confirmation": {
+        "candidate_fold_f1": 0.27968726464230675,
+        "candidate_log_loss": 0.111768,
+        "candidate_params": {
+          "colsample_bytree": 0.9629498988002458,
+          "learning_rate": 0.011070871616615597,
+          "min_child_samples": 24,
+          "num_leaves": 19,
+          "reg_lambda": 0.017500845808932783,
+          "subsample": 0.8441349453851072
+        },
+        "candidate_trial": 62,
+        "decision": "improvement: tuned values in best_params.yaml",
+        "gain": 0.016202890136216175,
+        "gain_se": 0.0017420607146323081,
+        "improvement": true,
+        "pairs": "confirm_seeds",
+        "seeds": [
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "trial_0_fold_f1": 0.2634843745060906,
+        "trial_0_log_loss": 0.11301939999999999
+      },
+      "trial_0": {
+        "fold_f1": 0.2645437976138027,
+        "log_loss": 0.11277100000000001,
+        "params": {
+          "colsample_bytree": 0.8,
+          "learning_rate": 0.05,
+          "min_child_samples": 100,
+          "num_leaves": 15,
+          "reg_lambda": 5.0,
+          "subsample": 0.8
+        }
+      },
+      "trials": 80,
+      "tuned_values": {
+        "colsample_bytree": 0.9629498988002458,
+        "learning_rate": 0.011070871616615597,
+        "min_child_samples": 24,
+        "num_leaves": 19,
+        "reg_lambda": 0.017500845808932783,
+        "subsample": 0.8441349453851072
+      }
+    },
+    "logreg": {
+      "best": {
+        "fold_f1": 0.24988892235370544,
+        "log_loss": 0.118946,
+        "params": {
+          "C": 92.2593806286261,
+          "year_parts": 3
+        }
+      },
+      "best_trial": 50,
+      "confirmation": {
+        "candidate_fold_f1": 0.24988892235370544,
+        "candidate_log_loss": 0.118946,
+        "candidate_params": {
+          "C": 92.2593806286261,
+          "year_parts": 3
+        },
+        "candidate_trial": 50,
+        "decision": "starting values kept: the candidate's gain is within stable_se standard errors",
+        "gain": 0.01538568091189573,
+        "gain_se": 0.009714451313523182,
+        "improvement": false,
+        "pairs": "fold years (no seed: one fit per setting)",
+        "seeds": [],
+        "trial_0_fold_f1": 0.2345032414418097,
+        "trial_0_log_loss": 0.118631
+      },
+      "trial_0": {
+        "fold_f1": 0.2345032414418097,
+        "log_loss": 0.118631,
+        "params": {
+          "C": 0.0316,
+          "year_parts": 12
+        }
+      },
+      "trials": 80,
+      "tuned_values": {}
+    },
+    "xgboost": {
+      "best": {
+        "fold_f1": 0.2735581848637702,
+        "log_loss": 0.11177533333333334,
+        "params": {
+          "colsample_bytree": 0.8982484079326524,
+          "learning_rate": 0.0860806522790092,
+          "max_depth": 4,
+          "min_child_weight": 1.3834378919922845,
+          "reg_lambda": 0.23082746639303928,
+          "subsample": 0.9303662310072864
+        }
+      },
+      "best_trial": 32,
+      "confirmation": {
+        "candidate_fold_f1": 0.2675987891130466,
+        "candidate_log_loss": 0.11243940000000001,
+        "candidate_params": {
+          "colsample_bytree": 0.8186992360102563,
+          "learning_rate": 0.04736019723474657,
+          "max_depth": 4,
+          "min_child_weight": 1.602395003862622,
+          "reg_lambda": 0.0900044738055222,
+          "subsample": 0.8884068016920965
+        },
+        "candidate_trial": 62,
+        "decision": "starting values kept: the candidate's gain is within stable_se standard errors",
+        "gain": 0.003991264547008655,
+        "gain_se": 0.002596813759618972,
+        "improvement": false,
+        "pairs": "confirm_seeds",
+        "seeds": [
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "trial_0_fold_f1": 0.263607524566038,
+        "trial_0_log_loss": 0.113195
+      },
+      "trial_0": {
+        "fold_f1": 0.2657037460770568,
+        "log_loss": 0.11311766666666667,
+        "params": {
+          "colsample_bytree": 0.8,
+          "learning_rate": 0.05,
+          "max_depth": 4,
+          "min_child_weight": 5.0,
+          "reg_lambda": 5.0,
+          "subsample": 0.8
+        }
+      },
+      "trials": 80,
+      "tuned_values": {}
+    }
+  },
+  "seed": 0,
+  "stable_se": 2.0,
+  "train_rows": 70008,
+  "trial_seeds": [
+    0,
+    1,
+    2
+  ],
+  "trials": 80,
+  "tuned_params": "tuned_params.yaml"
+}

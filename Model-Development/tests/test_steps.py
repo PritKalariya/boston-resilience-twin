@@ -212,6 +212,41 @@ def test_common_reads_and_rejects(tmp_path):
     assert C.run_id("lightgbm") == "ci-lightgbm"
 
 
+@pytest.mark.parametrize("error", [KeyError("winner"), TypeError("not a number"), ValueError("bad"),
+                                   RuntimeError("boom")])
+def test_the_runner_turns_any_exception_into_exit_2(error, capsys):
+    def step(argv):
+        raise error
+
+    assert C.run(step, []) == 2
+    err = capsys.readouterr().err
+    assert "pipeline failed" in err and type(error).__name__ in err
+
+
+def test_the_runner_keeps_exit_1_for_the_gates_and_lets_argparse_exit_through():
+    assert C.run(lambda argv: None, []) == 0
+    with pytest.raises(SystemExit) as exc:
+        C.run(lambda argv: C.parse_artifacts("x", argv), [])
+    assert exc.value.code == 2
+
+
+def test_a_key_error_in_a_step_exits_2(copy, monkeypatch):
+    monkeypatch.setattr(s_evaluate, "pick_winner", lambda *a, **k: {}["missing"])
+    assert s_evaluate.main(copy.args()) == 2
+
+
+def test_a_type_error_in_a_step_exits_2(copy, monkeypatch):
+    monkeypatch.setattr(C, "read_data_version", lambda artifacts: None + 1)
+    assert s_train.main(copy.args()) == 2
+
+
+def test_a_truncated_parquet_exits_2(copy):
+    run = copy.settings().runs_dir / read(copy.art / "evaluation.json")["winner_run"]
+    path = run / "predictions.parquet"
+    path.write_bytes(path.read_bytes()[:200])  # cut off: pyarrow raises ArrowInvalid, not an OSError
+    assert s_reload.main(copy.args()) == 2
+
+
 def test_artifacts_flag_is_required():
     with pytest.raises(SystemExit) as exc:
         s_pull.main([])
@@ -662,9 +697,9 @@ def gate_art(tmp_path):
 @pytest.mark.parametrize(
     ("status", "gates_exit", "is_main", "expected"),
     [
-        ("failure", "1", False, notify.GATE_FAILED),
-        ("failure", "1", True, notify.GATE_FAILED),
-        ("success", "1", False, notify.GATE_FAILED),  # a PR whose gates exited 1: the job passes, Slack still says so
+        ("failure", "1", True, notify.GATE_FAILED),  # main: the gates step fails the job, nothing later runs
+        ("success", "1", False, notify.GATE_FAILED),  # a PR whose gates exited 1 only: the job passes, Slack says so
+        ("failure", "1", False, notify.PIPELINE_FAILED),  # a PR: gates exit 1, then a later step (reload check) failed
         ("failure", "2", False, notify.PIPELINE_FAILED),
         ("failure", "", True, notify.PIPELINE_FAILED),
         ("success", "0", True, notify.TRAINING_COMPLETE),
@@ -672,6 +707,7 @@ def gate_art(tmp_path):
         ("success", "", False, None),
         ("cancelled", "", True, None),
         ("cancelled", "1", True, notify.GATE_FAILED),
+        ("cancelled", "1", False, None),
     ],
 )
 def test_route(status, gates_exit, is_main, expected):

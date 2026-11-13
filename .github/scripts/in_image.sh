@@ -12,17 +12,22 @@
 # --user is the runner's uid, so everything written is the runner's to upload.
 set -euo pipefail
 : "${IMAGE:?set IMAGE to the training image}"
+# Create the folder first: resolving a path that does not exist yet fails.
+mkdir -p "${ARTIFACTS_DIR:-$PWD/artifacts}"
 art="$(realpath "${ARTIFACTS_DIR:-$PWD/artifacts}")"
 mkdir -p "$art/runs" "$art/mlruns" "$art/reports"
+# --mount, not -v: a missing source is an error ("bind source path does not exist"), where -v
+# makes Docker create a root-owned directory in its place. A path with a comma cannot be a
+# --mount source; none of the repo's paths has one.
 exec docker run --rm --user "$(id -u):$(id -g)" \
   -e GITHUB_SHA \
-  -v "$PWD/Data-Pipeline/data/processed/labels.parquet:/app/Data-Pipeline/data/processed/labels.parquet:ro" \
-  -v "$PWD/Data-Pipeline/data/processed/features.parquet:/app/Data-Pipeline/data/processed/features.parquet:ro" \
-  -v "$PWD/Data-Pipeline/config/feature_catalog.csv:/app/Data-Pipeline/config/feature_catalog.csv:ro" \
-  -v "$PWD/Data-Pipeline/dvc.lock:/app/Data-Pipeline/dvc.lock:ro" \
-  -v "$PWD/Model-Development/config:/app/Model-Development/config:ro" \
-  -v "$art:/app/artifacts" \
-  -v "$art/runs:/app/Model-Development/runs" \
-  -v "$art/mlruns:/app/Model-Development/mlruns" \
-  -v "$art/reports:/app/Model-Development/reports" \
+  --mount "type=bind,source=$PWD/Data-Pipeline/data/processed/labels.parquet,target=/app/Data-Pipeline/data/processed/labels.parquet,readonly" \
+  --mount "type=bind,source=$PWD/Data-Pipeline/data/processed/features.parquet,target=/app/Data-Pipeline/data/processed/features.parquet,readonly" \
+  --mount "type=bind,source=$PWD/Data-Pipeline/config/feature_catalog.csv,target=/app/Data-Pipeline/config/feature_catalog.csv,readonly" \
+  --mount "type=bind,source=$PWD/Data-Pipeline/dvc.lock,target=/app/Data-Pipeline/dvc.lock,readonly" \
+  --mount "type=bind,source=$PWD/Model-Development/config,target=/app/Model-Development/config,readonly" \
+  --mount "type=bind,source=$art,target=/app/artifacts" \
+  --mount "type=bind,source=$art/runs,target=/app/Model-Development/runs" \
+  --mount "type=bind,source=$art/mlruns,target=/app/Model-Development/mlruns" \
+  --mount "type=bind,source=$art/reports,target=/app/Model-Development/reports" \
   "$IMAGE" "$@"
