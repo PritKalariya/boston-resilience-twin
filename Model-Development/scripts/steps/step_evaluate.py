@@ -126,11 +126,15 @@ def step(argv: list[str] | None) -> None:
     counted = checks[winner.model]["counts"]
     baseline = {key: counts[baseline_name][key] for key in ("tp", "fp", "fn")}
 
+    from mlflow.exceptions import MlflowException
+
     try:
         report, files = bias.analyse(winner.run_dir, settings.features, settings.splits, artifacts / BIAS_DIR,
-                                     loaded=loaded, report_splits=("validation",), rows=rows[winner.model])
+                                     loaded=loaded, report_splits=("validation",), rows=rows[winner.model],
+                                     check=checks[winner.model])
         bias.log_files(winner.run_dir, files, settings)
-    except (bias.BiasError, OSError, ValueError, KeyError) as exc:
+    except (bias.BiasError, MlflowException, OSError, ValueError, KeyError) as exc:
+        # an MLflow error is a pipeline failure like any other: exit 2, never a traceback and 1
         raise C.StepError(f"the bias report for {winner.model} failed: {exc}") from exc
 
     C.write_json(artifacts / "metrics.json", {"data_version": version, "candidate": counted["candidate"],
@@ -153,8 +157,7 @@ def step(argv: list[str] | None) -> None:
         print(f"group {name}: {count['true_positives']} of {count['positives']} surge days caught")
     for hood, count in counted["excluded"].items():
         print(f"excluded {hood}: {count['true_positives']} of {count['positives']} ({count['reason']})")
-    for item in report["triggers"]:
-        print(f"ADR-026 reopen condition: {item['condition']}: {item.get('neighborhood', item.get('recalls'))}")
+    print(bias.reopen_line(report["triggers"]))
 
 
 def main(argv: list[str] | None = None) -> int:

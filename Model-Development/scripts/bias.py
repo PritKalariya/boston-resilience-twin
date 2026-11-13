@@ -36,7 +36,6 @@ when it fails and 2 when it cannot be evaluated, as gates.py does.
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import sys
 from pathlib import Path
@@ -68,11 +67,11 @@ class BiasError(ValueError):
 # Groups
 
 
-def load_groups(loaded: gates.Gates, path: str | Path = SLICE_GROUPS) -> pd.DataFrame:
+def load_groups(loaded: gates.Gates, path: str | Path | None = None) -> pd.DataFrame:
     """Every neighborhood's group in each family, indexed by neighborhood: poverty from the file
     gates.csv names, the others from slice_groups.csv. Both must list the same neighborhoods."""
-    poverty = read_poverty_groups(gates.REPO_ROOT / loaded.fairness_group_source, loaded.fairness_groups)
-    path = Path(path)
+    poverty = gates.poverty_groups(loaded)
+    path = Path(path or SLICE_GROUPS)
     try:
         table = pd.read_csv(path, dtype=str, keep_default_na=False)
     except OSError as exc:
@@ -90,20 +89,6 @@ def load_groups(loaded: gates.Gates, path: str | Path = SLICE_GROUPS) -> pd.Data
                         f"{sorted(set(table.index) ^ set(poverty))}")
     table.insert(0, "poverty", pd.Series(poverty))
     return table.sort_index()
-
-
-def read_poverty_groups(path: Path, configured: tuple[str, ...]) -> dict[str, str]:
-    """neighborhood -> group name or "ungrouped", from the file gates.csv names (gates.load_gates checks it)."""
-    try:
-        with open(path, encoding="utf-8", newline="") as handle:
-            rows = list(csv.DictReader(handle))
-    except OSError as exc:
-        raise BiasError(f"cannot read {path}: {exc}") from exc
-    mapping = {row["neighborhood"].strip(): row["group"].strip() for row in rows}
-    unknown = sorted(set(mapping.values()) - set(configured) - {UNGROUPED})
-    if unknown:
-        raise BiasError(f"{path.name} has groups {unknown} that gates.csv does not name")
-    return mapping
 
 
 # The gate
@@ -230,8 +215,12 @@ def slice_table(rows: pd.DataFrame, groups: pd.DataFrame, floor: int, splits=SPL
     return out[["split", "family", "group", "days", "surges", "true_positives", "recall", "precision", "f1"]]
 
 
-def triggers(table: pd.DataFrame, groups: pd.DataFrame, loaded: gates.Gates) -> list[dict]:
-    """ADR-026's two "Reopen if" conditions on validation, with the numbers behind each one that holds."""
+def triggers(table: pd.DataFrame, groups: pd.DataFrame, loaded: gates.Gates, gate_passes: bool = True) -> list[dict]:
+    """ADR-026's two "Reopen if" conditions on validation, with the numbers behind each one that holds.
+    Both apply only "while the gate passes" (ADR-026), so a failed gate gives none: it blocks the model
+    instead. The neighborhood condition gives one entry per neighborhood it holds for."""
+    if not gate_passes:
+        return []
     floor, limit = loaded.fairness_min_group_surges, float(loaded.fairness_max_gap)
     validation = table[table["split"] == "validation"]
     poverty = validation[validation["family"] == "poverty"].set_index("group")["recall"]
@@ -348,13 +337,14 @@ def plot(table: pd.DataFrame, limit: float, path: Path) -> None:
 
 
 def analyse(run_dir: str | Path, features_path: str | Path, splits: dict, out_dir: str | Path | None = None,
-            loaded: gates.Gates | None = None, groups_path: str | Path = SLICE_GROUPS,
-            report_splits=SPLITS, rows: pd.DataFrame | None = None) -> tuple[dict, list[Path]]:
+            loaded: gates.Gates | None = None, groups_path: str | Path | None = None,
+            report_splits=SPLITS, rows: pd.DataFrame | None = None, check: dict | None = None) -> tuple[dict, list[Path]]:
     """Run the analysis on a train.py run folder and write its four files; returns bias.json's content.
     report_splits limits the per-group tables and the reporting-bias rows to those splits (with train for
     the reporting bias): the model workflow passes ("validation",), so no test number enters its step.
     rows, when given, are the predictions already read (the workflow's validation rows); otherwise
-    predictions.parquet is read through the predictions.py contract."""
+    predictions.parquet is read through the predictions.py contract. check, when given, is this run's
+    bias_check already made on the same validation rows (the workflow's), so it is not computed again."""
     import predictions
 
     run_dir = Path(run_dir)
@@ -364,9 +354,9 @@ def analyse(run_dir: str | Path, features_path: str | Path, splits: dict, out_di
     rows = rows[rows["split"].isin(report_splits)]  # in the workflow, validation only: no test row is kept
     loaded = loaded or gates.load_gates()
     groups = load_groups(loaded, groups_path)
-    check = bias_check(rows, loaded, groups["poverty"].to_dict(), run["data_version"])
+    check = check or bias_check(rows, loaded, groups["poverty"].to_dict(), run["data_version"])
     table = slice_table(rows, groups, loaded.fairness_min_group_surges, report_splits)
-    found = triggers(table, groups, loaded)
+    found = triggers(table, groups, loaded, check["pass"])
     import pyarrow.parquet as pq
 
     wanted = ["unit", "date", POPULATION, *LAGS]
@@ -382,7 +372,7 @@ def analyse(run_dir: str | Path, features_path: str | Path, splits: dict, out_di
     content = {"model": run["model"], "run": run["run_id"], "data_version": run["data_version"],
                "gate": {key: value for key, value in check.items() if key != "counts"}, "counts": check["counts"],
                "splits": list(report_splits), "triggers": found, "reporting_bias": reporting,
-               "groups_files": {"gated": loaded.fairness_group_source, "reported": Path(groups_path).name}}
+               "groups_files": {"gated": loaded.fairness_group_source, "reported": Path(groups_path or SLICE_GROUPS).name}}
     files[0].write_text(json.dumps(content, indent=2, default=float) + "\n", encoding="utf-8")
     table.to_csv(files[1], index=False)
     files[2].write_text(report(run["model"], check, table, found, reporting, loaded.fairness_min_group_surges),
@@ -402,10 +392,27 @@ def log_files(run_dir: Path, files: list[Path], settings) -> None:
     with mlflow.start_run(run_id=run["mlflow"]["run_id"]):
         for path in files:
             mlflow.log_artifact(str(path), artifact_path="bias")
-        content = json.loads(files[0].read_text(encoding="utf-8"))
+        named = {path.name: path for path in files}
+        if "bias.json" not in named:
+            raise BiasError("no bias.json among the files to log")
+        content = json.loads(named["bias.json"].read_text(encoding="utf-8"))
+        neighborhoods, two_parts = reopen_summary(content["triggers"])
         mlflow.log_metric("validation_worst_group_recall_gap", content["gate"]["gap"])
         mlflow.set_tags({"bias_gate": "pass" if content["gate"]["pass"] else "fail",
-                         "bias_triggers": str(len(content["triggers"]))})
+                         "bias_reopen_neighborhoods": ";".join(neighborhoods) or "none",
+                         "bias_reopen_two_parts": "holds" if two_parts else "does not hold"})
+
+
+def reopen_summary(found: list[dict]) -> tuple[list[str], bool]:
+    """The neighborhoods ADR-026's neighborhood condition holds for, and whether the two-part one holds."""
+    neighborhoods = [item["neighborhood"] for item in found if item["condition"] == "neighborhood below its group"]
+    return neighborhoods, any(item["condition"] == "higher group's two parts differ" for item in found)
+
+
+def reopen_line(found: list[dict]) -> str:
+    neighborhoods, two_parts = reopen_summary(found)
+    held = f"holds for {', '.join(neighborhoods)}" if neighborhoods else "holds for no neighborhood"
+    return f"ADR-026 neighborhood condition {held}; two-part condition {'holds' if two_parts else 'does not hold'}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -430,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
     gate = content["gate"]
     print(f"{content['model']}: fairness gate {'pass' if gate['pass'] else 'FAIL'}, gap {gate['gap']:.3f} "
           f"({gate['best_group']} against {gate['worst_group']}), limit {gate['threshold']:g}; "
-          f"{len(content['triggers'])} ADR-026 reopen conditions hold; wrote {files[0].parent}")
+          f"{reopen_line(content['triggers'])}; wrote {files[0].parent}")
     return 0 if gate["pass"] else 1
 
 

@@ -399,13 +399,57 @@ def test_a_neighborhood_in_no_group_fails():
     assert excluded == {"Harbor Islands": {"positives": 0, "true_positives": 0, "reason": "ungrouped"}}
 
 
-def test_a_group_file_with_an_unknown_group_fails(tmp_path):
-    path = tmp_path / "groups.csv"
-    path.write_text("neighborhood,poverty_share,group\nBack Bay,0.1,middle\n")
-    with pytest.raises(bias.BiasError, match="middle"):
-        bias.read_poverty_groups(path, ("lower", "higher"))
-    with pytest.raises(bias.BiasError, match="cannot read"):
-        bias.read_poverty_groups(tmp_path / "missing.csv", ("lower", "higher"))
+def test_the_poverty_groups_have_one_reader_in_gates(tmp_path):
+    import dataclasses
+
+    loaded = G.load_gates()
+    mapping = G.poverty_groups(loaded)
+    assert len(mapping) == 24 and mapping["Harbor Islands"] == G.UNGROUPED
+    assert set(mapping.values()) == {*loaded.fairness_groups, G.UNGROUPED}
+    assert bias.load_groups(loaded)["poverty"].to_dict() == mapping  # the bias check reads it through gates
+    missing = dataclasses.replace(loaded, fairness_group_source=str(tmp_path / "missing.csv"))
+    with pytest.raises(G.ConfigError, match="cannot be read"):
+        G.poverty_groups(missing)
+
+
+def test_the_evaluate_step_keeps_the_contract_block():
+    # #110 replaced the interim, so the first line is no longer "INTERFACE FOR"; the contract stays.
+    lines = s_evaluate.__doc__.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("Called as: "))
+    assert lines[start] == "Called as: python Model-Development/scripts/steps/step_evaluate.py --artifacts DIR"
+    keys = [line.split(":")[0] for line in lines[start + 1:] if line and not line.startswith(" ")]
+    assert keys[:4] == ["Reads", "Writes", "Exit", "Must hold"]
+    assert "Exit: 0 ok, 2 pipeline failed" in s_evaluate.__doc__
+
+
+def test_evaluate_records_the_bias_check_and_writes_the_report(built):
+    evaluation = read(built.art / "evaluation.json")
+    assert evaluation["selected"].startswith(evaluation["winner"] + ":")
+    for row in evaluation["ranking"]:
+        assert set(row["fairness_gate"]) == {"pass", "gap", "worst_group"}
+    assert evaluation["bias_report"] == "bias/bias_report.md" and isinstance(evaluation["reopen_conditions"], list)
+    files = {path.name for path in (built.art / "bias").iterdir()}
+    assert files == {"bias.json", "bias_slices.csv", "bias_report.md", "bias_recall.png"}
+    report = read(built.art / "bias" / "bias.json")
+    assert report["splits"] == ["validation"]  # no test number enters the step
+    assert report["counts"]["groups"] == read(built.art / "metrics.json")["groups"]
+
+
+def test_evaluate_exits_2_when_mlflow_fails(copy, monkeypatch):
+    from mlflow.exceptions import MlflowException
+
+    def broken(*args, **kwargs):
+        raise MlflowException("the tracking store is unreachable")
+
+    monkeypatch.setattr(bias, "log_files", broken)
+    assert s_evaluate.main(copy.args()) == 2
+
+
+def test_evaluate_exits_2_on_a_bias_error(copy, monkeypatch, tmp_path):
+    bad = tmp_path / "slice_groups.csv"
+    bad.write_text("neighborhood,poc\nBack Bay,lower\n")
+    monkeypatch.setattr(bias, "SLICE_GROUPS", bad)
+    assert s_evaluate.main(copy.args()) == 2
 
 
 def test_evaluate_reads_no_test_metric(copy):

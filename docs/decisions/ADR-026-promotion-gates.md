@@ -1,6 +1,7 @@
 # ADR-026: Promotion gates for the model CI/CD pipeline, frozen before training
 
 - Status: accepted
+- Note (2026-11-12): #139 (for #110) reports the neighborhood reopen condition holding on validation for West End (9 surges, recall 0.111 against 0.406) and Fenway (16, 0.188 against 0.363) while the gate passes at a gap of 0.043. Not reopened: one or two caught surges clear the line, both exceed their group on test (0.667, 0.852), and this is the small-sample noise behind gating the two poverty groups rather than neighborhoods. The gate is unchanged.
 - Date: 2026-11-02
 - Owner: PritKalariya
 - Phase: model

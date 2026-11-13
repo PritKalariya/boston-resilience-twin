@@ -152,6 +152,21 @@ def test_the_reopen_conditions_of_adr_026():
     assert bias.triggers(level, GROUPS, LOADED) == []
 
 
+def test_no_reopen_condition_while_the_gate_fails():
+    rows = rows_for(lambda hood: 0.05 if hood == "West End" else 0.45)
+    table = bias.slice_table(rows, GROUPS, LOADED.fairness_min_group_surges, ("validation",))
+    assert bias.triggers(table, GROUPS, LOADED, gate_passes=True)
+    assert bias.triggers(table, GROUPS, LOADED, gate_passes=False) == []  # "while the gate passes" (ADR-026)
+
+
+def test_the_reopen_line_counts_neighborhoods_not_conditions():
+    found = [{"condition": "neighborhood below its group", "neighborhood": "West End"},
+             {"condition": "neighborhood below its group", "neighborhood": "Fenway"}]
+    assert bias.reopen_line(found) == ("ADR-026 neighborhood condition holds for West End, Fenway; "
+                                       "two-part condition does not hold")
+    assert bias.reopen_line([]) == "ADR-026 neighborhood condition holds for no neighborhood; two-part condition does not hold"
+
+
 def test_a_neighborhood_under_the_floor_does_not_trigger():
     rows = rows_for(lambda hood: 0.0 if hood == "West End" else 0.5, surges=4)
     table = bias.slice_table(rows, GROUPS, 5, ("validation",))
@@ -249,6 +264,39 @@ def test_main_logs_the_files_to_the_runs_mlflow_run(tmp_path, monkeypatch):
     monkeypatch.setattr(bias, "log_files", lambda run_dir, files, settings: logged.append((run_dir, [f.name for f in files])))
     assert bias.main(["--run", str(run), "--out-dir", str(tmp_path / "out")]) == 0
     assert logged == [(run, ["bias.json", "bias_slices.csv", "bias_report.md", "bias_recall.png"])]
+
+
+def test_log_files_logs_to_the_runs_own_mlflow_run(tmp_path):
+    import mlflow
+
+    import tracking
+
+    run, features = run_folder(tmp_path)
+    settings = SimpleNamespace(features=features, splits=SPLITS, mlflow_experiment="bias-test",
+                               mlflow_store=tmp_path / "mlruns")
+    tracking.setup(settings.mlflow_experiment, settings.mlflow_store)
+    with mlflow.start_run() as started:
+        pass
+    data = json.loads((run / "run.json").read_text())
+    data["mlflow"]["run_id"] = started.info.run_id
+    (run / "run.json").write_text(json.dumps(data))
+    _, files = bias.analyse(run, features, SPLITS, tmp_path / "out", loaded=LOADED)
+    bias.log_files(run, list(reversed(files)), settings)  # found by name, not by position
+    logged = mlflow.get_run(started.info.run_id)
+    assert logged.data.tags["bias_gate"] == "pass" and logged.data.tags["bias_reopen_two_parts"] == "does not hold"
+    assert logged.data.metrics["validation_worst_group_recall_gap"] == pytest.approx(0.05)
+    names = {item.path for item in mlflow.MlflowClient().list_artifacts(started.info.run_id, "bias")}
+    assert names == {f"bias/{f.name}" for f in files}
+    with pytest.raises(bias.BiasError, match="no bias.json"):
+        bias.log_files(run, files[1:], settings)
+
+
+def test_analyse_reuses_a_check_it_is_given(tmp_path, monkeypatch):
+    run, features = run_folder(tmp_path)
+    check = bias.bias_check(pd.read_parquet(run / "predictions.parquet"), LOADED, POVERTY, "sha256:x")
+    monkeypatch.setattr(bias, "bias_check", lambda *a, **k: pytest.fail("the check was computed again"))
+    content, _ = bias.analyse(run, features, SPLITS, tmp_path / "out", loaded=LOADED, check=check)
+    assert content["gate"]["gap"] == check["gap"]
 
 
 # Selection after bias

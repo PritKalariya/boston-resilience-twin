@@ -27,14 +27,14 @@ Two constraints shape the design:
 - **The file:** `bias_slicing.py --model-groups` (the #32 code, run on the host) writes `Model-Development/config/slice_groups.csv`: each neighborhood's people of color, limited English and flood zone group, and whether it is a student area.
 - **The student-area rule** is #32's: at least twice the city's share of college and graduate students, ACS B14002. That gives Allston, Downtown, Fenway, Longwood and Mission Hill, not a hand-named list.
 - **Drift is caught:** a Data-Pipeline test regenerates the file from the static layers and fails if it differs.
-- **Poverty stays in `poverty_groups.csv`,** the file gates.csv checks by sha256.
+- **Poverty stays in `poverty_groups.csv`,** the file gates.csv checks by sha256. `gates.poverty_groups()` is its one reader, for the gate and the bias check alike.
 
 **3. What is gated and what is reported.**
 - **Gated:** the poverty groups only (ADR-026).
 - **Reported, not gated:** people of color, limited English, flood zone and each neighborhood, from Fairlearn's `MetricFrame` on validation and test. A group under the floor is merged with its family's other small groups, as the gate pools them.
 - **A diagnostic, not a gate:** the higher-poverty group in two parts, its student areas and the rest (#126).
 
-**4. ADR-026's reopen conditions are checked, not enforced.** `bias.py` reports a neighborhood with at least the floor of validation surges whose recall is more than the limit below its own poverty group's, and the two-part split differing by more than the limit. A condition holding does not block promotion. It goes to ADR-026's owner, as ADR-026 says.
+**4. ADR-026's reopen conditions are checked, not enforced.** `bias.py` reports a neighborhood with at least the floor of validation surges whose recall is more than the limit below its own poverty group's, and the two-part split differing by more than the limit. Both conditions apply only while the gate passes, as ADR-026 words them; a failed gate blocks the model instead. A condition holding does not block promotion. It goes to ADR-026's owner, as ADR-026 says.
 
 **5. Selection after bias.** `step_evaluate.py` ranks the candidates by selection.py's rule (validation F1, then log loss, then name), runs `bias_check` on each, and picks the first that passes. If none passes, it keeps the best F1 so that `gates.py` blocks it and the run says why. `evaluation.json` records each candidate's gap and how the winner was chosen.
 
@@ -85,7 +85,7 @@ The groups #32 worried about, more people of color and more limited English, get
 | West End | lower | 9 | 0.111 | 0.406 |
 | Fenway | higher | 16 | 0.188 | 0.363 |
 
-On test they reach 0.667 and 0.852. With 9 and 16 surges a recall moves by 0.06 to 0.11 per surge, so this may be noise. It goes to ADR-026's owner as its rule says; this ADR does not change the gate.
+On test they reach 0.667 and 0.852. With 9 and 16 surges a recall moves by 0.06 to 0.11 per surge, so this may be noise. ADR-026's owner decided not to reopen it (ADR-026's note of 2026-11-12, from #139's review); this ADR does not change the gate.
 
 **Residual reporting bias:** storm requests per 1,000 residents a year, higher against lower poverty, are 19.76 against 28.33 in training (0.70), 15.72 against 25.04 in validation (0.63) and 34.16 against 44.69 in test (0.76). That matches #32. The model's 311 inputs are self-relative (ADR-025), but the labels still come from reported requests, so a neighborhood that reports less reaches the surge floor less often.
 
@@ -104,7 +104,7 @@ On test they reach 0.667 and 0.852. With 9 and 16 surges a recall moves by 0.06 
 - `fairlearn==0.15.0` is in the training image (the pin #32 uses).
 - A change to #32's ACS groups or the student-area rule means rerunning `bias_slicing.py --model-groups`; the Data-Pipeline test fails until then.
 - Selection after bias picks a model, but `gates.py` still decides promotion.
-- The two ADR-026 reopen conditions above are handed to ADR-026's owner on #110's PR.
+- The neighborhood condition holding for West End and Fenway went to ADR-026's owner on #139, who did not reopen the gate (ADR-026, note of 2026-11-12).
 
 ## Revisit when
 
