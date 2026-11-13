@@ -1,6 +1,6 @@
 # ADR-006: Vertex AI Model Registry is the only model registry; MLflow tracks experiments, Cloud Run serves
 
-- Status: proposed (Kirtan's approval requested on the PR)
+- Status: accepted (approved by Kirtan in the #111 PR, 2026-11-12); the model files bucket is in project 2 (ADR-030)
 - Date: 2026-10-26
 - Owner: piyush1420
 - Phase: setup
