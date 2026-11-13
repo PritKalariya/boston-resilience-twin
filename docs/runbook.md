@@ -787,6 +787,48 @@ Every `train.py` run is also an MLflow run in the experiment `model-training` (`
   When the compose server already holds port 5000, or on macOS, where AirPlay Receiver may hold it, add `--port 5001`.
 - **Load a saved model.** Use `mlflow.sklearn.load_model("models:/<id>")` (the id is in `run.json` under `mlflow.model_uri`), or `joblib.load("Model-Development/runs/<run id>/model.joblib")`. `predict` gives the surge flag at the run's threshold and `predict_proba` the probability. Both need scikit-learn and the model's own library, not this repo's code. Load models only from this project's own store: cloudpickle and joblib can run code while loading.
 
+### Hyperparameter tuning (#109)
+
+`tune.py` searches each candidate's settings with Optuna on the train years, and `compare_tuned.py` compares what it found with the starting values on validation 2024. Neither changes what the training stage trains: `tuned_params.yaml` changes only through the reviewed promotion below. From the repo root:
+
+```bash
+python Model-Development/scripts/tune.py                                # about 75 minutes for the three studies (macOS arm64, 10 cores)
+python Model-Development/scripts/compare_tuned.py                       # about a minute; the starting values against best_params.yaml on 2024
+python Model-Development/scripts/tune.py --models lightgbm --trials 2   # one short study, for timing or a smoke check
+```
+
+- **A study** takes its settings from `Model-Development/config/tuning.csv` and its search space from `tune.SPACES`.
+  - Trial 0 is the starting values of `model_params.yaml`, so every study compares tuning with them.
+  - A trial fits on the train years only, once per seed in `trial_seeds`; logistic regression has no seed and is fitted once. Its value is the mean fold F1: each inner fold year (2019, 2022, 2023) is scored at the threshold the shared rule picks on that year. Validation 2024 and test are never read.
+- **The confirmation** refits trial 0 and the `confirm_top` best other trials on `confirm_seeds`, seeds no trial used.
+  - A setting whose mean inner-fold log loss is more than `guard_ratio` times trial 0's is not eligible.
+  - The eligible setting with the highest mean fold F1 is the candidate. It is an improvement only when its mean gain over trial 0, paired by seed, is more than `stable_se` standard errors. Otherwise the starting values are kept.
+  - Logistic regression pairs the three fold years instead and fits nothing new: a weaker check, which keeps the study's luck in ranking its trials.
+- **Writes** `Model-Development/tuning/` (committed):
+  - `<model>.json`: every trial's settings and scores, and the confirmation. `tune.load_study` rebuilds the study for M10 (#113).
+  - `importance.csv`: each setting's importance for the log loss and for the fold F1 (fANOVA, seeded).
+  - `summary.json`: what each confirmation decided.
+  - `best_params.yaml`: the improvements, in the `tuned_params.yaml` format. No training run reads it.
+  - `comparison.json`, from `compare_tuned.py`: every model's 2024 numbers in both runs and, for a tuned model, the share of rows with the same call and a paired bootstrap over whole days of the F1 and log loss gains. Its run folders go to `Model-Development/runs/`, never `reports/`.
+- **MLflow** (`model-tuning`): a `tune-<model>` run per study, with a child run per trial and per confirmed setting and the decision as a tag; a `tune-summary` run with the files; and a run per comparison with both selections nested.
+- **Promote tuned values** only after the comparison is reviewed in a PR:
+  1. `python Model-Development/scripts/tune.py --activate` runs the studies again and writes `best_params.yaml`'s values into `tuned_params.yaml` (the same seed, platform and data version give the same studies).
+  2. `python Model-Development/scripts/model_params.py` checks the file and marks the tuned values.
+  3. Run the training stage in the training image (next bullet). Commit `tuned_params.yaml` with `Model-Development/dvc.lock`.
+- **Run the training stage in the training image**, as CI does, so the locked reports are CI's numbers. The image has no DVC and no git (ADR-032): it runs the stage's command, and DVC on the host records the result. From the repo root, after the data pull:
+
+  ```bash
+  docker build -f Model-Development/Dockerfile -t brt-train:local .
+  A=$(mktemp -d); ARTIFACTS_DIR=$A IMAGE=brt-train:local bash .github/scripts/in_image.sh python Model-Development/scripts/selection.py
+  rsync -a --delete "$A/reports/" Model-Development/reports/
+  cd Model-Development && dvc commit -f select && dvc status select   # writes dvc.lock; then "Data and pipelines are up to date."
+  python ../Data-Pipeline/scripts/dvc_push.py                         # store the reports
+  ```
+
+  `-f` skips DVC's question about the changed inputs. The image's `selection.json` records no commit, as in CI; the lock ties the reports to the code.
+- **Current state** (data `a719afeb`, 2026-11-12): `tuned_params.yaml` sets nothing, so every candidate trains with its starting values. Only LightGBM's confirmation found an improvement on the train years, and on 2024 it tied the starting values: F1 0.343675 against 0.343529, with the gain's 95% interval [-0.0161, +0.0148] (`comparison.json`). The studies belong to that data version: run both scripts again on a new one.
+- **Platforms.** The committed studies come from macOS (arm64). XGBoost's fits differ slightly between platforms ("Training stage" above), so its study repeats exactly only on the same platform. LightGBM and logistic regression match across platforms in the selection; their studies were not rerun in the Airflow image. The locked reports come from the training image: XGBoost's 2024 F1 is 0.331683 there and 0.336735 on macOS, and LightGBM's is 0.343529 on both. `compare_tuned.py` runs on the host, where git can record the commit, so the XGBoost rows of `comparison.json` are the macOS value.
+
 ## Versioned data (DVC)
 
 The DVC remote is `gs://boston-resilience-twin-data/dvc` (`.dvc/config`), a
