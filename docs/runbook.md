@@ -672,6 +672,43 @@ python Data-Pipeline/scripts/bias_mitigation.py   # before and after numbers, ab
 - **Writes** `mitigation.csv` (every group mean) and `mitigation.md` to `Data-Pipeline/data/interim/reports/bias/`. It is not a DAG task or DVC stage: rerun it after a `dvc repro` that changes the features or labels, and copy both files to `Data-Pipeline/reports/bias/` with the #32 files.
 - **A self-relative lag is missing** until the neighborhood has a baseline (from January 2016), never filled; the leakage check reads it by date like the raw lags.
 
+## MLflow tracking server (#104)
+
+The compose service `mlflow` keeps experiment runs: `ghcr.io/mlflow/mlflow:v3.17.2` with one worker, its store in `Model-Development/mlflow/` (gitignored). It is off by default: its profiles are `mlflow` and `smoke`, so a plain `docker compose up`, as on airflow-vm, never starts it (ADR-031). Nothing needs it: with `MLFLOW_TRACKING_URI` unset, runs go to the local store ("MLflow tracking (#107)" below). Run the commands from the repo root; they were checked on 2026-11-13 with Docker Compose v5.0.1.
+
+- **Port.** The UI binds `127.0.0.1:5000` only (ADR-016). When 5000 is taken (macOS AirPlay Receiver, or another server), the start fails with `ports are not available: ... listen tcp4 127.0.0.1:5000: bind: address already in use`. Set `MLFLOW_HOST_PORT` in `.env` (for example `5050`), or before one command (`MLFLOW_HOST_PORT=5050 docker compose up -d --wait mlflow`), and use that port in place of 5000 below.
+- **Start and check:**
+
+  ```bash
+  docker compose up -d --wait mlflow                    # mlflow only
+  docker compose --profile mlflow up -d --build --wait  # or mlflow with the Airflow stack
+  docker compose ps -a                                  # mlflow: Up (healthy), 127.0.0.1:5000->5000/tcp
+  curl -fsS http://127.0.0.1:5000/health                # OK
+  ```
+
+  The UI is at http://127.0.0.1:5000.
+- **Smoke check:**
+
+  ```bash
+  docker compose run --rm --build mlflow-smoke                                                 # from a container on the compose network
+  MLFLOW_TRACKING_URI=http://127.0.0.1:5000 python Model-Development/scripts/mlflow_smoke.py   # the same from the host
+  python Model-Development/scripts/mlflow_smoke.py --local-dir "$(mktemp -d)"                  # no server: a throwaway local store
+  ```
+
+  Each logs one run in the `smoke-test` experiment with a parameter, a metric and an artifact, reads the three back and prints `mlflow smoke OK` with where to see the run. It exits 1 when something did not read back or the server did not answer.
+- **mlflow-smoke starts mlflow and leaves it running.** When mlflow is not running, `docker compose run mlflow-smoke` starts it first and waits until it is healthy. When the check ends, the smoke container is removed but mlflow keeps running, with about 355 MiB of its own memory under its 512 MiB limit, until `docker compose --profile mlflow down` (below). `docker stats` shows more, about 475 MiB after a first start, because it also counts file cache the kernel can reclaim.
+- **Log runs to it.** On the host, `export MLFLOW_TRACKING_URI=http://127.0.0.1:5000` before `train.py` or `selection.py`; containers on the compose network use `http://mlflow:5000` (`.env.example`). When the server does not answer `/health`, a run stops within seconds and says to start the server or unset the variable. Unset, runs go back to the local store.
+- **Where the runs are:** `Model-Development/mlflow/mlflow.db` (SQLite: experiments, runs, parameters and metrics) and `Model-Development/mlflow/artifacts/` (the files). Both stay when the container stops or is removed. Its `.gitkeep` keeps the folder in the checkout, so on Linux the folder is yours and not root's.
+- **Stop:**
+
+  ```bash
+  docker compose --profile mlflow down   # mlflow, and the Airflow stack if it is up; the store and the Airflow database stay
+  ```
+
+  A plain `docker compose down` stops the Airflow stack but leaves mlflow running, and prints `Network boston-resilience-twin_default Resource is still in use` (Compose v5.0.1; #135 saw v5.5.1 remove it). `--profile mlflow` removes mlflow and the network too.
+- **On airflow-vm** it is not started: ADR-031's memory budget reserves nothing for it (#61).
+- **A 403 from the server** to a container, while `/health` answers, means the host name in its URL is not in the server's `--allowed-hosts` (`docker-compose.yaml`). Use `http://mlflow:5000`.
+
 ## Training interface (#106, ADR-027)
 
 Every model trains and is scored through `Model-Development/scripts/train.py`, on the frozen labels (`sd_k2_m5`, snow_ice and tree) and the ADR-003 splits in `Model-Development/config/training.csv`. Get the data first (`cd Data-Pipeline && dvc pull`), then from the repo root:
