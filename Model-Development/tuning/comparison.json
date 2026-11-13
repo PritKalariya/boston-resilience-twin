@@ -1,12 +1,12 @@
 {
   "candidate": "Model-Development/tuning/best_params.yaml",
   "candidate_sha256": "sha256:50030cd7657e9c72c5d527b16e271d1c70fff2e033e0265483bc9d2fbb4bcf74",
-  "comparison_id": "20261112T075022Z-tune-compare",
-  "created_utc": "2026-11-12T07:50:48+00:00",
+  "comparison_id": "20261112T231510Z-tune-compare",
+  "created_utc": "2026-11-12T23:15:38+00:00",
   "data_version": "sha256:a719afeb9695d4a2d8e9f3d00ee1069e52d1e41ea5f63aeadeaf72e5f42fd0ef",
   "git": {
-    "commit": "d0f0782cf106afb8ea5536c3e874bc9846030d6b",
-    "uncommitted_changes": true
+    "commit": "94bd427f2c94f73c1b165ddab76a51b90aea0675",
+    "uncommitted_changes": false
   },
   "models": {
     "lightgbm": {
@@ -40,7 +40,7 @@
         "precision": 0.3099787685774947,
         "recall": 0.38522427440633245,
         "rows": 8304,
-        "run_folder": "20261112T075022Z-tune-compare-default-lightgbm",
+        "run_folder": "20261112T231510Z-tune-compare-default-lightgbm",
         "surges": 379,
         "threshold": 0.0959946834206164,
         "tp": 146
@@ -69,7 +69,7 @@
         "precision": 0.3137254901960784,
         "recall": 0.37994722955145116,
         "rows": 8304,
-        "run_folder": "20261112T075022Z-tune-compare-tuned-lightgbm",
+        "run_folder": "20261112T231510Z-tune-compare-tuned-lightgbm",
         "surges": 379,
         "threshold": 0.09221782239911762,
         "tp": 144
@@ -98,7 +98,7 @@
         "precision": 0.45714285714285713,
         "recall": 0.21108179419525067,
         "rows": 8304,
-        "run_folder": "20261112T075022Z-tune-compare-default-logreg",
+        "run_folder": "20261112T231510Z-tune-compare-default-logreg",
         "surges": 379,
         "threshold": 0.16795772936661868,
         "tp": 80
@@ -126,7 +126,7 @@
         "precision": 0.45714285714285713,
         "recall": 0.21108179419525067,
         "rows": 8304,
-        "run_folder": "20261112T075022Z-tune-compare-tuned-logreg",
+        "run_folder": "20261112T231510Z-tune-compare-tuned-logreg",
         "surges": 379,
         "threshold": 0.16795772936661868,
         "tp": 80
@@ -146,7 +146,7 @@
         "precision": 0.06905012267788294,
         "recall": 0.5197889182058048,
         "rows": 8304,
-        "run_folder": "20261112T075022Z-tune-compare-default-seasonal",
+        "run_folder": "20261112T231510Z-tune-compare-default-seasonal",
         "surges": 379,
         "threshold": 0.034482758620689655,
         "tp": 197
@@ -172,7 +172,7 @@
         "precision": 0.06905012267788294,
         "recall": 0.5197889182058048,
         "rows": 8304,
-        "run_folder": "20261112T075022Z-tune-compare-tuned-seasonal",
+        "run_folder": "20261112T231510Z-tune-compare-tuned-seasonal",
         "surges": 379,
         "threshold": 0.034482758620689655,
         "tp": 197
@@ -194,7 +194,7 @@
         "precision": 0.32592592592592595,
         "recall": 0.3482849604221636,
         "rows": 8304,
-        "run_folder": "20261112T075022Z-tune-compare-default-xgboost",
+        "run_folder": "20261112T231510Z-tune-compare-default-xgboost",
         "surges": 379,
         "threshold": 0.08996271342039108,
         "tp": 132
@@ -222,7 +222,7 @@
         "precision": 0.32592592592592595,
         "recall": 0.3482849604221636,
         "rows": 8304,
-        "run_folder": "20261112T075022Z-tune-compare-tuned-xgboost",
+        "run_folder": "20261112T231510Z-tune-compare-tuned-xgboost",
         "surges": 379,
         "threshold": 0.08996271342039108,
         "tp": 132
@@ -231,8 +231,8 @@
     }
   },
   "selections": {
-    "default": "20261112T075022Z-tune-compare-default",
-    "tuned": "20261112T075022Z-tune-compare-tuned"
+    "default": "20261112T231510Z-tune-compare-default",
+    "tuned": "20261112T231510Z-tune-compare-tuned"
   },
   "split": "validation",
   "tuned_values": {

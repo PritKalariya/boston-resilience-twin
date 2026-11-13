@@ -1,8 +1,14 @@
-"""Step: set the champion from the gate decision (#112, ADR-028). STUB. Main only.
+"""INTERFACE FOR #111 (Kirtan): replace this body; keep the command line and exit codes.
+Called as: python Model-Development/scripts/steps/step_set_champion.py --artifacts DIR
+Reads: `gate_report.json` (`decision`) and `registry.json` (`model_version`).
+Writes: with the decision `promote`, `champion.json` (the stub: `action` "would set champion" and
+  `model_version`; the real step sets the Vertex AI Model Registry champion alias); with `keep_champion`,
+  nothing.
+Exit: 0 ok, 2 pipeline failed
+Must hold: only the decision `promote` changes the champion; `keep_champion` changes nothing; any other
+  decision (`blocked`, `error`) never reaches this step and exits 2.
 
-Reads `gate_report.json`. `promote` writes `champion.json` saying "would set champion"
-(PR 3 calls #111's registry alias change). `keep_champion` changes nothing. Any other
-decision should never reach this step and exits 2.
+Step: set the champion from the gate decision (#112, ADR-028, ADR-032). STUB. Main only.
 """
 
 from __future__ import annotations
@@ -12,9 +18,11 @@ import sys
 import step_common as C
 
 
+DESCRIPTION = "Step: set the champion from the gate decision"
+
+
 def step(argv: list[str] | None) -> None:
-    artifacts = C.parse_artifacts(__doc__.splitlines()[0], argv)
-    C.stub_outcome()
+    artifacts, _ = C.parse_artifacts(DESCRIPTION, argv)
     report = C.read_json(artifacts / "gate_report.json")
     decision = report.get("decision") if isinstance(report, dict) else None
     if decision == "promote":

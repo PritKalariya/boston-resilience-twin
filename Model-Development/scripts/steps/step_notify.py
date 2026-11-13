@@ -4,10 +4,16 @@ Runs on the runner, not in the image: it needs the webhook, and nothing else doe
 The webhook is read from the SLACK_ALERT_WEBHOOK environment variable, the name the
 Airflow pipeline uses (Data-Pipeline/scripts/alerts.py). Routing:
 
-  gates exited 1                 -> "gate failed" (PR and main)
-  any other failure              -> "pipeline failed" (PR and main)
+  gates exited 1, nothing else failed -> "gate failed" (PR and main)
+  any other failure, including a later step that failed after a PR's gates exited 1
+                                 -> "pipeline failed" (PR and main)
   success on main                -> "training complete" with the decision
   success on a PR, or cancelled  -> no message
+
+A "gate failed" or "pipeline failed" message names the failed step and says "not pushed":
+the model was not registered and the champion is unchanged (ADR-032). The workflow passes the
+step's name in --failed-step. The message carries validation numbers only, never a test
+metric: the gate report holds none (Xu 2024).
 
 With the variable empty (also a fork PR, which gets no secrets) it prints a
 ::warning:: and the message it would have sent, and exits 0. A Slack outage is a
@@ -34,8 +40,15 @@ TRAINING_COMPLETE = "training complete"
 
 
 def route(job_status: str, gates_exit: str, is_main: bool) -> str | None:
-    """The message kind for a run, or None when nobody needs one."""
-    if gates_exit.strip() == "1":
+    """The message kind for a run, or None when nobody needs one.
+
+    A failed job is "pipeline failed" unless the gates step is the only failure. Gates exit 1
+    is the only failure when the job passed (a PR: the gates step succeeds with a warning), or
+    on main, where the gates step fails the job and no later step runs. On a PR, gates exit 1
+    followed by a failed later step (the reload check, say) is a pipeline failure.
+    """
+    gates_failed = gates_exit.strip() == "1"
+    if gates_failed and (is_main or job_status == "success"):
         return GATE_FAILED
     if job_status == "cancelled":
         return None
@@ -61,7 +74,10 @@ def _escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def build_message(kind: str, artifacts: Path, repo: str, ref: str, run_url: str) -> str:
+NOT_PUSHED = "Model not pushed: the registry and the champion are unchanged"
+
+
+def build_message(kind: str, artifacts: Path, repo: str, ref: str, run_url: str, failed_step: str = "") -> str:
     try:
         data_version = (artifacts / "data_version.txt").read_text(encoding="utf-8").strip() or "n/a"
     except (OSError, ValueError):  # missing folder or file, or bytes that are not text
@@ -80,6 +96,9 @@ def build_message(kind: str, artifacts: Path, repo: str, ref: str, run_url: str)
         f"F1 margin: {_number(f1_gate.get('margin'))}",
         f"Worst-group recall gap: {_number(fairness_gate.get('gap'))}",
     ]
+    if kind in (GATE_FAILED, PIPELINE_FAILED):
+        lines.insert(1, f"Failed step: {failed_step.strip() or 'unknown'}")
+        lines.insert(2, NOT_PUSHED)
     return _escape("\n".join(lines))
 
 
@@ -102,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-url", required=True)
     parser.add_argument("--job-status", required=True, choices=["success", "failure", "cancelled"])
     parser.add_argument("--gates-exit", default="", help="the gates step's exit code, empty if it did not run")
+    parser.add_argument("--failed-step", default="", help="the name of the step that failed, empty if none did")
     parser.add_argument("--main", action="store_true", help="the run is on main")
     args = parser.parse_args(argv)
 
@@ -109,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
     if kind is None:
         print(f"no Slack message for status {args.job_status} on {'main' if args.main else 'a PR'}")
         return 0
-    message = build_message(kind, Path(args.artifacts), args.repo, args.ref, args.run_url)
+    message = build_message(kind, Path(args.artifacts), args.repo, args.ref, args.run_url, args.failed_step)
     webhook = os.environ.get(WEBHOOK_ENV, "").strip()
     if not webhook:
         print(f"::warning::{WEBHOOK_ENV} is empty (not set, or a fork PR): no Slack message sent")
