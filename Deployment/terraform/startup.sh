@@ -60,8 +60,13 @@ OPTIONAL_SECRETS=(
 # asks for the newest enabled version: an empty answer means the secret has no
 # version (exit 4); a failed listing, or a version that exists, is a plain failure
 # (exit 1). Needs `versions list`, which airflow-vm-sa holds on the optional slots.
+#
+# stdout carries the value only, so everything this function logs goes to stderr.
+# When the result is a plain failure (exit 1) it logs the first line of gcloud's
+# stderr (an error message, never the value, which is on stdout) so the journal
+# says why. A secret with no version (exit 4) logs nothing here: the caller warns.
 fetch_with_gcloud() {
-  local name="$1" bin="" candidate listing
+  local name="$1" bin="" candidate listing errfile access_line list_line
   bin="$(command -v gcloud || true)"
   if [ -z "$bin" ]; then
     for candidate in /snap/bin/gcloud /usr/bin/gcloud /usr/lib/google-cloud-sdk/bin/gcloud; do
@@ -69,18 +74,30 @@ fetch_with_gcloud() {
     done
   fi
   if [ -z "$bin" ]; then
-    log "error: gcloud not found on this VM"
+    log "error: gcloud not found on this VM" >&2
     return 1
   fi
+  errfile="$(mktemp)" || { log "error: cannot create a temp file for gcloud's error output" >&2; return 1; }
   if env HOME="${HOME:-/root}" CLOUDSDK_CORE_DISABLE_PROMPTS=1 \
-    "$bin" secrets versions access latest --secret="$name" --project="$GCP_PROJECT" 2>/dev/null; then
+    "$bin" secrets versions access latest --secret="$name" --project="$GCP_PROJECT" 2>"$errfile"; then
+    rm -f "$errfile"
     return 0
   fi
+  access_line="$(head -n 1 "$errfile")"
   if listing="$(env HOME="${HOME:-/root}" CLOUDSDK_CORE_DISABLE_PROMPTS=1 \
     "$bin" secrets versions list "$name" --project="$GCP_PROJECT" \
-    --filter=state=ENABLED --limit=1 --format='value(name)' 2>/dev/null)" && [ -z "$listing" ]; then
-    return "$FETCH_NO_VERSION"
+    --filter=state=ENABLED --limit=1 --format='value(name)' 2>"$errfile")"; then
+    rm -f "$errfile"
+    if [ -z "$listing" ]; then
+      return "$FETCH_NO_VERSION"
+    fi
+    log "gcloud access of $name failed: ${access_line:-no error text}" >&2
+    return 1
   fi
+  list_line="$(head -n 1 "$errfile")"
+  rm -f "$errfile"
+  log "gcloud access of $name failed: ${access_line:-no error text}" >&2
+  log "gcloud list of $name failed: ${list_line:-no error text}" >&2
   return 1
 }
 

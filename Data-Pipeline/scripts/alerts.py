@@ -41,7 +41,8 @@ from credentials import KEYS
 SLACK_WEBHOOK_ENV = "SLACK_ALERT_WEBHOOK"
 # The Airflow secrets as the containers see them (docker-compose.yaml maps .env's
 # FERNET_KEY, POSTGRES_PASSWORD and the rest onto these). The database password
-# is only inside the connection URL, so the whole URL is the value that is masked.
+# is only inside the connection URL, so the URL is masked whole and its password
+# part on its own (URL_SECRET_ENV).
 AIRFLOW_SECRET_ENV = (
     "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN",
     "AIRFLOW__CORE__FERNET_KEY",
@@ -53,6 +54,9 @@ SECRET_ENV = (*KEYS, SLACK_WEBHOOK_ENV, *AIRFLOW_SECRET_ENV)
 # Other values are never split: a NWS_USER_AGENT such as "(app, me@example.org)" has a
 # comma that separates nothing secret.
 LIST_SECRET_ENV = ("AIRFLOW__CORE__FERNET_KEY",)
+# Connection URLs: the password part is masked on its own too, so a message that
+# quotes only the password (not the whole URL) is masked.
+URL_SECRET_ENV = ("AIRFLOW__DATABASE__SQL_ALCHEMY_CONN",)
 # Shorter values are not masked: replacing a 3-character string everywhere
 # would mangle the message and hides nothing worth hiding.
 MIN_SECRET_CHARS = 8
@@ -130,8 +134,19 @@ def post_to_slack(url: str, message: str, timeout: float = SLACK_TIMEOUT_SECONDS
         raise AlertNotSent(f"Slack answered HTTP {status}")
 
 
+def url_password(url: str) -> str:
+    """The password part of a connection URL, or "" when it has none or is not a URL."""
+    try:
+        return urllib.parse.urlsplit(url).password or ""
+    except ValueError:
+        return ""
+
+
 def mask_secrets(message: str) -> str:
     """Replace each credential's value, as typed and as URL-encoded, with <NAME>.
+
+    The password of a name in URL_SECRET_ENV (the database connection URL) is
+    masked on its own as well as inside the whole URL.
 
     The value of a name in LIST_SECRET_ENV (the Fernet key, `new,old` during a
     rotation) is masked as a whole and by each comma-separated part, so a message
@@ -144,6 +159,10 @@ def mask_secrets(message: str) -> str:
             continue
         parts = [part.strip() for part in value.split(",")] if name in LIST_SECRET_ENV and "," in value else []
         values = {value, *(part for part in parts if len(part) >= MIN_SECRET_CHARS)}
+        if name in URL_SECRET_ENV:
+            password = url_password(value)
+            if len(password) >= MIN_SECRET_CHARS:
+                values.add(password)
         forms = {form for v in values for form in (v, urllib.parse.quote(v, safe=""), urllib.parse.quote_plus(v))}
         # Longest form first, so a URL-encoded value is not left half replaced and
         # the whole value goes before its parts.

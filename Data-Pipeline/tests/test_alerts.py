@@ -278,6 +278,31 @@ def test_the_database_password_in_the_connection_url_is_masked(monkeypatch):
     assert alerts.mask_secrets(f"cannot connect to {url}") == "cannot connect to <AIRFLOW__DATABASE__SQL_ALCHEMY_CONN>"
 
 
+def test_the_password_alone_is_masked_like_the_whole_connection_url(monkeypatch):
+    password = "0123456789abcdef0123"
+    url = f"postgresql+psycopg2://airflow:{password}@postgres/airflow"
+    monkeypatch.setenv("AIRFLOW__DATABASE__SQL_ALCHEMY_CONN", url)
+    name = "<AIRFLOW__DATABASE__SQL_ALCHEMY_CONN>"
+    assert alerts.mask_secrets(f"password authentication failed, password {password}") == (
+        f"password authentication failed, password {name}"
+    )
+    # The whole URL still goes first, so no half-replaced password is left behind.
+    assert alerts.mask_secrets(f"cannot connect to {url}") == f"cannot connect to {name}"
+    assert password not in alerts.mask_secrets(f"{url} then {password}")
+
+
+def test_a_short_or_missing_url_password_masks_nothing_extra(monkeypatch):
+    monkeypatch.setenv("AIRFLOW__DATABASE__SQL_ALCHEMY_CONN", "postgresql+psycopg2://airflow:short@postgres/airflow")
+    assert alerts.mask_secrets("short and airflow stay") == "short and airflow stay"
+    monkeypatch.setenv("AIRFLOW__DATABASE__SQL_ALCHEMY_CONN", "sqlite:////opt/airflow/airflow.db")
+    assert alerts.mask_secrets("airflow.db failed") == "airflow.db failed"
+    assert alerts.url_password("http://[bad") == ""
+
+
+def test_the_connection_url_is_the_only_name_with_its_password_split():
+    assert alerts.URL_SECRET_ENV == ("AIRFLOW__DATABASE__SQL_ALCHEMY_CONN",)
+
+
 def test_a_two_key_fernet_value_is_masked_whole_and_by_each_key(monkeypatch):
     new, old = "N" * 43 + "=", "O" * 43 + "="
     monkeypatch.setenv("AIRFLOW__CORE__FERNET_KEY", f"{new},{old}")
