@@ -1,8 +1,9 @@
 # Local Airflow stack: Airflow 3.3.2 with LocalExecutor and a Postgres 16 metadata DB,
 # and the MLflow tracking server (#104), which starts only when asked for (profile mlflow).
 # macOS and Windows: works on a clean clone with no .env. Linux: put AIRFLOW_UID in
-# .env first (README). Defaults are for local use only. The VM runs on them until
-# W4-3 (#64) moves its secrets to Secret Manager (ADR-016).
+# .env first (README). Defaults are for local use only. On airflow-vm none of them
+# apply: its startup script renders .env from Secret Manager at every boot (runbook,
+# "Airflow on the VM", "Secrets on the VM"; ADR-034).
 # Adapted from the official Airflow 3.3.2 docker-compose.yaml (Apache License 2.0):
 # https://airflow.apache.org/docs/apache-airflow/3.3.2/docker-compose.yaml
 
@@ -25,7 +26,7 @@ x-airflow-common:
     # Task processes call the Execution API on the API server.
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
     # The next three must match in every container. There is no shared airflow.cfg,
-    # so unset values would differ per container. Empty Fernet key: no encryption (local, and the VM until W4-3).
+    # so unset values would differ per container. Empty Fernet key: no encryption (local only; the VM's comes from Secret Manager, ADR-034).
     AIRFLOW__CORE__FERNET_KEY: ${FERNET_KEY:-}
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-dev-only-jwt-secret-do-not-use-on-the-vm-0123456789abcdef0123456789}
     AIRFLOW__API__SECRET_KEY: ${AIRFLOW__API__SECRET_KEY:-dev-only-api-secret-key-do-not-use-on-the-vm-0123456789abcdef012345}
@@ -51,7 +52,7 @@ x-airflow-common:
     CENSUS_API_KEY: ${CENSUS_API_KEY:-}
     NWS_USER_AGENT: ${NWS_USER_AGENT:-}
     # Slack incoming webhook for failure alerts (#34), from .env. Empty: alerts go
-    # to the task log only. On the VM it comes from Secret Manager with #64.
+    # to the task log only. On the VM it comes from Secret Manager at boot (ADR-034).
     SLACK_ALERT_WEBHOOK: ${SLACK_ALERT_WEBHOOK:-}
     # Legacy 311 years parsed at once (#37). Put LEGACY_PARALLEL=2 in .env if memory is tight.
     LEGACY_PARALLEL: ${LEGACY_PARALLEL:-4}

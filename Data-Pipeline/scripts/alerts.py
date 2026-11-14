@@ -11,12 +11,15 @@ SLACK_ALERT_WEBHOOK is set (from the gitignored .env, like #4's API keys), it
 also posts the alert to that Slack incoming webhook. Without it, the task log
 is the only channel, which is the fallback #34's acceptance criteria name, and
 the run is not changed by it. On airflow-vm the webhook comes from Secret
-Manager with #64. The webhook URL is the credential, so it is never logged.
+Manager at boot (#64, ADR-034). The webhook URL is the credential, so it is
+never logged.
 
 Before an alert is logged or posted, the value of every credential in the
-environment (the API keys in credentials.KEYS and the webhook) is replaced by
-its name, so an error that quotes a request URL, such as a Census call with
-`key=...`, cannot leak a key into the log or Slack. Standard library only.
+environment (the API keys in credentials.KEYS, the webhook and the Airflow
+secrets in AIRFLOW_SECRET_ENV) is replaced by its name (the Fernet key also key
+by key), so an error that quotes a request URL, such as a Census
+call with `key=...`, cannot leak a key into the log or Slack. Standard library
+only.
 
     python Data-Pipeline/scripts/alerts.py --test   # post one test alert
 """
@@ -36,7 +39,24 @@ from collections.abc import Mapping
 from credentials import KEYS
 
 SLACK_WEBHOOK_ENV = "SLACK_ALERT_WEBHOOK"
-SECRET_ENV = (*KEYS, SLACK_WEBHOOK_ENV)
+# The Airflow secrets as the containers see them (docker-compose.yaml maps .env's
+# FERNET_KEY, POSTGRES_PASSWORD and the rest onto these). The database password
+# is only inside the connection URL, so the URL is masked whole and its password
+# part on its own (URL_SECRET_ENV).
+AIRFLOW_SECRET_ENV = (
+    "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN",
+    "AIRFLOW__CORE__FERNET_KEY",
+    "AIRFLOW__API_AUTH__JWT_SECRET",
+    "AIRFLOW__API__SECRET_KEY",
+)
+SECRET_ENV = (*KEYS, SLACK_WEBHOOK_ENV, *AIRFLOW_SECRET_ENV)
+# Holds `new,old` during a Fernet rotation (ADR-034), so it is also masked key by key.
+# Other values are never split: a NWS_USER_AGENT such as "(app, me@example.org)" has a
+# comma that separates nothing secret.
+LIST_SECRET_ENV = ("AIRFLOW__CORE__FERNET_KEY",)
+# Connection URLs: the password part is masked on its own too, so a message that
+# quotes only the password (not the whole URL) is masked.
+URL_SECRET_ENV = ("AIRFLOW__DATABASE__SQL_ALCHEMY_CONN",)
 # Shorter values are not masked: replacing a 3-character string everywhere
 # would mangle the message and hides nothing worth hiding.
 MIN_SECRET_CHARS = 8
@@ -114,14 +134,39 @@ def post_to_slack(url: str, message: str, timeout: float = SLACK_TIMEOUT_SECONDS
         raise AlertNotSent(f"Slack answered HTTP {status}")
 
 
+def url_password(url: str) -> str:
+    """The password part of a connection URL, or "" when it has none or is not a URL."""
+    try:
+        return urllib.parse.urlsplit(url).password or ""
+    except ValueError:
+        return ""
+
+
 def mask_secrets(message: str) -> str:
-    """Replace each credential's value, as typed and as URL-encoded, with <NAME>."""
+    """Replace each credential's value, as typed and as URL-encoded, with <NAME>.
+
+    The password of a name in URL_SECRET_ENV (the database connection URL) is
+    masked on its own as well as inside the whole URL.
+
+    The value of a name in LIST_SECRET_ENV (the Fernet key, `new,old` during a
+    rotation) is masked as a whole and by each comma-separated part, so a message
+    that quotes only one key is masked too. Parts under MIN_SECRET_CHARS are left
+    alone. No other value is split.
+    """
     for name in SECRET_ENV:
         value = os.environ.get(name, "").strip()
         if len(value) < MIN_SECRET_CHARS:
             continue
-        # Longest form first, so a URL-encoded value is not left half replaced.
-        for form in sorted({value, urllib.parse.quote(value, safe=""), urllib.parse.quote_plus(value)}, key=len, reverse=True):
+        parts = [part.strip() for part in value.split(",")] if name in LIST_SECRET_ENV and "," in value else []
+        values = {value, *(part for part in parts if len(part) >= MIN_SECRET_CHARS)}
+        if name in URL_SECRET_ENV:
+            password = url_password(value)
+            if len(password) >= MIN_SECRET_CHARS:
+                values.add(password)
+        forms = {form for v in values for form in (v, urllib.parse.quote(v, safe=""), urllib.parse.quote_plus(v))}
+        # Longest form first, so a URL-encoded value is not left half replaced and
+        # the whole value goes before its parts.
+        for form in sorted(forms, key=len, reverse=True):
             message = message.replace(form, f"<{name}>")
     return message
 
