@@ -8,7 +8,7 @@ gates.evaluate() takes and returns its fairness gate: the worst-group recall gap
 fairness_max_gap, with gates.csv's floor and pooling. The floor, the limit and the groups come from
 gates.csv and poverty_groups.csv; this module has no constants of its own for them.
 
-Reported, not gated (slice_groups.csv, written by #32's bias_slicing.py --model-groups on the host, since the
+Reported, not gated (slice_groups.csv, written from #32's code by Data-Pipeline's model_groups.py on the host, since the
 training image has neither geopandas nor the static layers):
 - the other #32 families: people of color, limited English and flood zone, each split at the median
   neighborhood as #32 does;
@@ -215,10 +215,11 @@ def slice_table(rows: pd.DataFrame, groups: pd.DataFrame, floor: int, splits=SPL
     return out[["split", "family", "group", "days", "surges", "true_positives", "recall", "precision", "f1"]]
 
 
-def triggers(table: pd.DataFrame, groups: pd.DataFrame, loaded: gates.Gates, gate_passes: bool = True) -> list[dict]:
+def triggers(table: pd.DataFrame, groups: pd.DataFrame, loaded: gates.Gates, *, gate_passes: bool) -> list[dict]:
     """ADR-026's two "Reopen if" conditions on validation, with the numbers behind each one that holds.
     Both apply only "while the gate passes" (ADR-026), so a failed gate gives none: it blocks the model
-    instead. The neighborhood condition gives one entry per neighborhood it holds for."""
+    instead; gate_passes has no default, so a caller must say. The neighborhood condition gives one
+    entry per neighborhood it holds for."""
     if not gate_passes:
         return []
     floor, limit = loaded.fairness_min_group_surges, float(loaded.fairness_max_gap)
@@ -356,7 +357,7 @@ def analyse(run_dir: str | Path, features_path: str | Path, splits: dict, out_di
     groups = load_groups(loaded, groups_path)
     check = check or bias_check(rows, loaded, groups["poverty"].to_dict(), run["data_version"])
     table = slice_table(rows, groups, loaded.fairness_min_group_surges, report_splits)
-    found = triggers(table, groups, loaded, check["pass"])
+    found = triggers(table, groups, loaded, gate_passes=check["pass"])
     import pyarrow.parquet as pq
 
     wanted = ["unit", "date", POPULATION, *LAGS]
@@ -424,6 +425,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default=str(training_data.DEFAULT_CONFIG), help="training.csv path")
     parser.add_argument("--no-mlflow", action="store_true", help="do not log the files to the run's MLflow run")
     args = parser.parse_args(argv)
+    from mlflow.exceptions import MlflowException
+
     try:
         if not args.run:
             parser.error("--run is required")
@@ -431,7 +434,8 @@ def main(argv: list[str] | None = None) -> int:
         content, files = analyse(args.run, settings.features, settings.splits, args.out_dir)
         if not args.no_mlflow:
             log_files(Path(args.run), files, settings)
-    except (BiasError, gates.ConfigError, OSError, ValueError, KeyError) as exc:
+    except (BiasError, gates.ConfigError, MlflowException, OSError, ValueError, KeyError) as exc:
+        # An MLflow failure is an error, not a failed gate: exit 1 means the gate failed.
         print(f"error: {exc}", file=sys.stderr)
         return 2
     gate = content["gate"]

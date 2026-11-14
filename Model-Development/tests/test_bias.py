@@ -143,13 +143,13 @@ def test_the_reopen_conditions_of_adr_026():
     weak = {"West End", "Fenway"}
     rows = rows_for(lambda hood: 0.05 if hood in weak else 0.45)
     table = bias.slice_table(rows, GROUPS, LOADED.fairness_min_group_surges, ("validation",))
-    found = bias.triggers(table, GROUPS, LOADED)
+    found = bias.triggers(table, GROUPS, LOADED, gate_passes=True)
     assert {item["neighborhood"] for item in found if item["condition"] == "neighborhood below its group"} == weak
     students = rows_for(lambda hood: 0.1 if GROUPS.loc[hood, "student_area"] == bias.STUDENT else 0.5)
-    found = bias.triggers(bias.slice_table(students, GROUPS, 5, ("validation",)), GROUPS, LOADED)
+    found = bias.triggers(bias.slice_table(students, GROUPS, 5, ("validation",)), GROUPS, LOADED, gate_passes=True)
     assert any(item["condition"] == "higher group's two parts differ" for item in found)
     level = bias.slice_table(rows_for(by_group(0.45, 0.45)), GROUPS, 5, ("validation",))
-    assert bias.triggers(level, GROUPS, LOADED) == []
+    assert bias.triggers(level, GROUPS, LOADED, gate_passes=True) == []
 
 
 def test_no_reopen_condition_while_the_gate_fails():
@@ -170,7 +170,7 @@ def test_the_reopen_line_counts_neighborhoods_not_conditions():
 def test_a_neighborhood_under_the_floor_does_not_trigger():
     rows = rows_for(lambda hood: 0.0 if hood == "West End" else 0.5, surges=4)
     table = bias.slice_table(rows, GROUPS, 5, ("validation",))
-    assert not any(item.get("neighborhood") == "West End" for item in bias.triggers(table, GROUPS, LOADED))
+    assert not any(item.get("neighborhood") == "West End" for item in bias.triggers(table, GROUPS, LOADED, gate_passes=True))
 
 
 def features_for(per_resident):
@@ -253,6 +253,26 @@ def test_main_exits_2_on_a_broken_run(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(training_data, "load_settings", lambda path: settings_for(features))
     assert bias.main(["--run", str(run), "--no-mlflow"]) == 2
     assert "error" in capsys.readouterr().err
+
+
+def test_main_exits_2_when_mlflow_fails(tmp_path, monkeypatch, capsys):
+    import training_data
+    from mlflow.exceptions import MlflowException
+
+    run, features = run_folder(tmp_path)  # a passing run: exit 1 would wrongly say the gate failed
+
+    def broken(*args, **kwargs):
+        raise MlflowException("the tracking store is unreachable")
+
+    monkeypatch.setattr(training_data, "load_settings", lambda path: settings_for(features))
+    monkeypatch.setattr(bias, "log_files", broken)
+    assert bias.main(["--run", str(run), "--out-dir", str(tmp_path / "out")]) == 2
+    assert "tracking store is unreachable" in capsys.readouterr().err
+
+
+def test_the_gate_result_must_be_given_to_triggers():
+    with pytest.raises(TypeError):
+        bias.triggers(pd.DataFrame(), GROUPS, LOADED)
 
 
 def test_main_logs_the_files_to_the_runs_mlflow_run(tmp_path, monkeypatch):

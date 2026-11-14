@@ -24,9 +24,10 @@ Two constraints shape the design:
 **1. One gate implementation.** `bias.bias_check()` turns a model's validation predictions into the per-group counts `gates.evaluate()` takes and returns its fairness gate. The floor, pooling, limit and exact arithmetic are the gate's own; `bias.py` has no constants for them. Since the accuracy gate is not its concern, it passes the candidate's own counts as the baseline block and reads only the fairness part of the report.
 
 **2. The reported groups come from #32, frozen in a file.**
-- **The file:** `bias_slicing.py --model-groups` (the #32 code, run on the host) writes `Model-Development/config/slice_groups.csv`: each neighborhood's people of color, limited English and flood zone group, and whether it is a student area.
+- **The file:** `Data-Pipeline/scripts/model_groups.py`, run on the host, writes `Model-Development/config/slice_groups.csv` with #32's functions from `bias_slicing.py`: each neighborhood's people of color, limited English and flood zone group, and whether it is a student area.
+- **A script of its own, not a DVC stage,** so `bias_slicing.py` and `Data-Pipeline/dvc.lock` are unchanged and the data version stays the same. The data version is the lock's sha256, so a change to a stage's code would change it for the same labels and features.
 - **The student-area rule** is #32's: at least twice the city's share of college and graduate students, ACS B14002. That gives Allston, Downtown, Fenway, Longwood and Mission Hill, not a hand-named list.
-- **Drift is caught:** a Data-Pipeline test regenerates the file from the static layers and fails if it differs.
+- **Drift is caught:** a Data-Pipeline test regenerates the file from the static layers and fails if it differs. It needs the static layers, so it skips in CI and runs on a host that has them.
 - **Poverty stays in `poverty_groups.csv`,** the file gates.csv checks by sha256. `gates.poverty_groups()` is its one reader, for the gate and the bias check alike.
 
 **3. What is gated and what is reported.**
@@ -102,7 +103,7 @@ On test they reach 0.667 and 0.852. With 9 and 16 surges a recall moves by 0.06 
 
 - `step_evaluate.py`'s interim counts are gone; `metrics.json` keeps #138's shape and rules, now from `bias.gate_counts()`.
 - `fairlearn==0.15.0` is in the training image (the pin #32 uses).
-- A change to #32's ACS groups or the student-area rule means rerunning `bias_slicing.py --model-groups`; the Data-Pipeline test fails until then.
+- A change to #32's ACS groups or the student-area rule means rerunning `model_groups.py`; the Data-Pipeline test fails until then (on a host with the static layers).
 - Selection after bias picks a model, but `gates.py` still decides promotion.
 - The neighborhood condition holding for West End and Fenway went to ADR-026's owner on #139, who did not reopen the gate (ADR-026, note of 2026-11-12).
 
