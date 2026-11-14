@@ -1,6 +1,6 @@
 # ADR-028: Model CI/CD workflow shape: stub steps, one required aggregator, Slack routing
 
-- Status: accepted
+- Status: accepted; amended by ADR-032 (2026-11-11): the real steps, the data pull, the image push, the identities, the reload check on every ref and the gate failure on a pull request
 - Date: 2026-11-05
 - Owner: PritKalariya
 - Phase: model

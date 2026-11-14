@@ -1,6 +1,6 @@
 # ADR-022: Airflow runs an image built from airflow.Dockerfile with the pipeline dependencies
 
-- Status: accepted
+- Status: accepted; amended by ADR-032 (2026-11-11): the training image installs `libgomp1` in one root apt step too, and `brt-airflow` keeps `USER airflow` before pip
 - Date: 2026-10-22
 - Owner: PritKalariya
 - Phase: setup

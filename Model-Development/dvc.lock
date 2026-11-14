@@ -21,9 +21,9 @@ stages:
       size: 33073
     - path: config
       hash: md5
-      md5: 7c85dbc32217de07310ef3d4e4757221.dir
-      size: 10878
-      nfiles: 6
+      md5: 39a15e6e969a900bb98d685be487c605.dir
+      size: 14748
+      nfiles: 8
     - path: scripts/inner_folds.py
       hash: md5
       md5: 0494e04b926b8c482dbdd5a1327bf5c5
@@ -75,6 +75,6 @@ stages:
     outs:
     - path: reports
       hash: md5
-      md5: 0e12431556ae636765227531ff3b71a6.dir
-      size: 140789
+      md5: f3d5aa18b2454afdc8cbcfae1cfc4ca9.dir
+      size: 141280
       nfiles: 5

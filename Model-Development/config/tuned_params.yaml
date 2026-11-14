@@ -1,0 +1,8 @@
+# The tuned values models.build reads (#109, M6): each one would replace its starting value in
+# model_params.yaml. This file sets none, so every candidate trains with M4's starting values.
+#
+# tune.py's confirmed candidate (LightGBM, Model-Development/tuning/best_params.yaml) tied the
+# starting values on validation 2024, data version sha256:a719afeb9695: F1 0.343675 against
+# 0.343529, inside the paired bootstrap interval over days (Model-Development/tuning/comparison.json).
+# tune.py writes this file only with --activate, after review (docs/runbook.md, "Hyperparameter
+# tuning (#109)").

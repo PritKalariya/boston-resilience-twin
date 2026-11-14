@@ -672,6 +672,43 @@ python Data-Pipeline/scripts/bias_mitigation.py   # before and after numbers, ab
 - **Writes** `mitigation.csv` (every group mean) and `mitigation.md` to `Data-Pipeline/data/interim/reports/bias/`. It is not a DAG task or DVC stage: rerun it after a `dvc repro` that changes the features or labels, and copy both files to `Data-Pipeline/reports/bias/` with the #32 files.
 - **A self-relative lag is missing** until the neighborhood has a baseline (from January 2016), never filled; the leakage check reads it by date like the raw lags.
 
+## MLflow tracking server (#104)
+
+The compose service `mlflow` keeps experiment runs: `ghcr.io/mlflow/mlflow:v3.17.2` with one worker, its store in `Model-Development/mlflow/` (gitignored). It is off by default: its profiles are `mlflow` and `smoke`, so a plain `docker compose up`, as on airflow-vm, never starts it (ADR-031). Nothing needs it: with `MLFLOW_TRACKING_URI` unset, runs go to the local store ("MLflow tracking (#107)" below). Run the commands from the repo root; they were checked on 2026-11-13 with Docker Compose v5.0.1.
+
+- **Port.** The UI binds `127.0.0.1:5000` only (ADR-016). When 5000 is taken (macOS AirPlay Receiver, or another server), the start fails with `ports are not available: ... listen tcp4 127.0.0.1:5000: bind: address already in use`. Set `MLFLOW_HOST_PORT` in `.env` (for example `5050`), or before one command (`MLFLOW_HOST_PORT=5050 docker compose up -d --wait mlflow`), and use that port in place of 5000 below.
+- **Start and check:**
+
+  ```bash
+  docker compose up -d --wait mlflow                    # mlflow only
+  docker compose --profile mlflow up -d --build --wait  # or mlflow with the Airflow stack
+  docker compose ps -a                                  # mlflow: Up (healthy), 127.0.0.1:5000->5000/tcp
+  curl -fsS http://127.0.0.1:5000/health                # OK
+  ```
+
+  The UI is at http://127.0.0.1:5000.
+- **Smoke check:**
+
+  ```bash
+  docker compose run --rm --build mlflow-smoke                                                 # from a container on the compose network
+  MLFLOW_TRACKING_URI=http://127.0.0.1:5000 python Model-Development/scripts/mlflow_smoke.py   # the same from the host
+  python Model-Development/scripts/mlflow_smoke.py --local-dir "$(mktemp -d)"                  # no server: a throwaway local store
+  ```
+
+  Each logs one run in the `smoke-test` experiment with a parameter, a metric and an artifact, reads the three back and prints `mlflow smoke OK` with where to see the run. It exits 1 when something did not read back or the server did not answer.
+- **mlflow-smoke starts mlflow and leaves it running.** When mlflow is not running, `docker compose run mlflow-smoke` starts it first and waits until it is healthy. When the check ends, the smoke container is removed but mlflow keeps running, with about 355 MiB of its own memory under its 512 MiB limit, until `docker compose --profile mlflow down` (below). `docker stats` shows more, about 475 MiB after a first start, because it also counts file cache the kernel can reclaim.
+- **Log runs to it.** On the host, `export MLFLOW_TRACKING_URI=http://127.0.0.1:5000` before `train.py` or `selection.py`; containers on the compose network use `http://mlflow:5000` (`.env.example`). When the server does not answer `/health`, a run stops within seconds and says to start the server or unset the variable. Unset, runs go back to the local store.
+- **Where the runs are:** `Model-Development/mlflow/mlflow.db` (SQLite: experiments, runs, parameters and metrics) and `Model-Development/mlflow/artifacts/` (the files). Both stay when the container stops or is removed. Its `.gitkeep` keeps the folder in the checkout, so on Linux the folder is yours and not root's.
+- **Stop:**
+
+  ```bash
+  docker compose --profile mlflow down   # mlflow, and the Airflow stack if it is up; the store and the Airflow database stay
+  ```
+
+  A plain `docker compose down` stops the Airflow stack but leaves mlflow running, and prints `Network boston-resilience-twin_default Resource is still in use` (Compose v5.0.1; #135 saw v5.5.1 remove it). `--profile mlflow` removes mlflow and the network too.
+- **On airflow-vm** it is not started: ADR-031's memory budget reserves nothing for it (#61).
+- **A 403 from the server** to a container, while `/health` answers, means the host name in its URL is not in the server's `--allowed-hosts` (`docker-compose.yaml`). Use `http://mlflow:5000`.
+
 ## Training interface (#106, ADR-027)
 
 Every model trains and is scored through `Model-Development/scripts/train.py`, on the frozen labels (`sd_k2_m5`, snow_ice and tree) and the ADR-003 splits in `Model-Development/config/training.csv`. Get the data first (`cd Data-Pipeline && dvc pull`), then from the repo root:
@@ -785,6 +822,48 @@ Every `train.py` run is also an MLflow run in the experiment `model-training` (`
 
   When the compose server already holds port 5000, or on macOS, where AirPlay Receiver may hold it, add `--port 5001`.
 - **Load a saved model.** Use `mlflow.sklearn.load_model("models:/<id>")` (the id is in `run.json` under `mlflow.model_uri`), or `joblib.load("Model-Development/runs/<run id>/model.joblib")`. `predict` gives the surge flag at the run's threshold and `predict_proba` the probability. Both need scikit-learn and the model's own library, not this repo's code. Load models only from this project's own store: cloudpickle and joblib can run code while loading.
+
+### Hyperparameter tuning (#109)
+
+`tune.py` searches each candidate's settings with Optuna on the train years, and `compare_tuned.py` compares what it found with the starting values on validation 2024. Neither changes what the training stage trains: `tuned_params.yaml` changes only through the reviewed promotion below. From the repo root:
+
+```bash
+python Model-Development/scripts/tune.py                                # about 75 minutes for the three studies (macOS arm64, 10 cores)
+python Model-Development/scripts/compare_tuned.py                       # about a minute; the starting values against best_params.yaml on 2024
+python Model-Development/scripts/tune.py --models lightgbm --trials 2   # one short study, for timing or a smoke check
+```
+
+- **A study** takes its settings from `Model-Development/config/tuning.csv` and its search space from `tune.SPACES`.
+  - Trial 0 is the starting values of `model_params.yaml`, so every study compares tuning with them.
+  - A trial fits on the train years only, once per seed in `trial_seeds`; logistic regression has no seed and is fitted once. Its value is the mean fold F1: each inner fold year (2019, 2022, 2023) is scored at the threshold the shared rule picks on that year. Validation 2024 and test are never read.
+- **The confirmation** refits trial 0 and the `confirm_top` best other trials on `confirm_seeds`, seeds no trial used.
+  - A setting whose mean inner-fold log loss is more than `guard_ratio` times trial 0's is not eligible.
+  - The eligible setting with the highest mean fold F1 is the candidate. It is an improvement only when its mean gain over trial 0, paired by seed, is more than `stable_se` standard errors. Otherwise the starting values are kept.
+  - Logistic regression pairs the three fold years instead and fits nothing new: a weaker check, which keeps the study's luck in ranking its trials.
+- **Writes** `Model-Development/tuning/` (committed):
+  - `<model>.json`: every trial's settings and scores, and the confirmation. `tune.load_study` rebuilds the study for M10 (#113).
+  - `importance.csv`: each setting's importance for the log loss and for the fold F1 (fANOVA, seeded).
+  - `summary.json`: what each confirmation decided.
+  - `best_params.yaml`: the improvements, in the `tuned_params.yaml` format. No training run reads it.
+  - `comparison.json`, from `compare_tuned.py`: every model's 2024 numbers in both runs and, for a tuned model, the share of rows with the same call and a paired bootstrap over whole days of the F1 and log loss gains. Its run folders go to `Model-Development/runs/`, never `reports/`.
+- **MLflow** (`model-tuning`): a `tune-<model>` run per study, with a child run per trial and per confirmed setting and the decision as a tag; a `tune-summary` run with the files; and a run per comparison with both selections nested.
+- **Promote tuned values** only after the comparison is reviewed in a PR:
+  1. `python Model-Development/scripts/tune.py --activate` runs the studies again and writes `best_params.yaml`'s values into `tuned_params.yaml` (the same seed, platform and data version give the same studies).
+  2. `python Model-Development/scripts/model_params.py` checks the file and marks the tuned values.
+  3. Run the training stage in the training image (next bullet). Commit `tuned_params.yaml` with `Model-Development/dvc.lock`.
+- **Run the training stage in the training image**, as CI does, so the locked reports are CI's numbers. The image has no DVC and no git (ADR-032): it runs the stage's command, and DVC on the host records the result. From the repo root, after the data pull:
+
+  ```bash
+  docker build -f Model-Development/Dockerfile -t brt-train:local .
+  A=$(mktemp -d); ARTIFACTS_DIR=$A IMAGE=brt-train:local bash .github/scripts/in_image.sh python Model-Development/scripts/selection.py
+  rsync -a --delete "$A/reports/" Model-Development/reports/
+  cd Model-Development && dvc commit -f select && dvc status select   # writes dvc.lock; then "Data and pipelines are up to date."
+  python ../Data-Pipeline/scripts/dvc_push.py                         # store the reports
+  ```
+
+  `-f` skips DVC's question about the changed inputs. The image's `selection.json` records no commit, as in CI; the lock ties the reports to the code.
+- **Current state** (data `a719afeb`, 2026-11-12): `tuned_params.yaml` sets nothing, so every candidate trains with its starting values. Only LightGBM's confirmation found an improvement on the train years, and on 2024 it tied the starting values: F1 0.343675 against 0.343529, with the gain's 95% interval [-0.0161, +0.0148] (`comparison.json`). The studies belong to that data version: run both scripts again on a new one.
+- **Platforms.** The committed studies come from macOS (arm64). XGBoost's fits differ slightly between platforms ("Training stage" above), so its study repeats exactly only on the same platform. LightGBM and logistic regression match across platforms in the selection; their studies were not rerun in the Airflow image. The locked reports come from the training image: XGBoost's 2024 F1 is 0.331683 there and 0.336735 on macOS, and LightGBM's is 0.343529 on both. `compare_tuned.py` runs on the host, where git can record the commit, so the XGBoost rows of `comparison.json` are the macOS value.
 
 ### Model registry (#111, ADR-006)
 
