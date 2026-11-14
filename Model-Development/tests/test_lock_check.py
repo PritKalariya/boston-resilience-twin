@@ -71,8 +71,18 @@ def test_an_edited_script_fails(repo):
 
 def test_a_file_added_to_a_tracked_folder_fails(repo):
     (repo / "Stage" / "config" / "c.csv").write_bytes(b"c,3\n")
+    subprocess.run(["git", "add", "Stage/config/c.csv"], cwd=repo, check=True, capture_output=True)
     mismatches, _ = L.check([repo / "Stage" / "dvc.lock"], root=repo)
     assert [m.path for m in mismatches] == ["Stage/config"]
+
+
+def test_an_untracked_file_in_a_tracked_folder_is_not_a_mismatch(repo):
+    """A local __pycache__ or scratch file is not in a CI checkout, so it does not count."""
+    (repo / "Stage" / "config" / "__pycache__").mkdir()
+    (repo / "Stage" / "config" / "__pycache__" / "x.pyc").write_bytes(b"cache")
+    (repo / "Stage" / "config" / "notes.txt").write_bytes(b"scratch")
+    mismatches, checked = L.check([repo / "Stage" / "dvc.lock"], root=repo)
+    assert mismatches == [] and checked == 2
 
 
 def test_a_deleted_dependency_fails(repo):

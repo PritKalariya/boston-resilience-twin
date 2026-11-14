@@ -55,9 +55,15 @@ def file_md5(path: Path) -> str:
     return digest.hexdigest()
 
 
-def dir_md5(path: Path) -> str:
-    """DVC's folder hash: the md5 of json.dumps(sorted [{md5, relpath}], sort_keys=True), plus .dir."""
-    files = sorted((f for f in path.rglob("*") if f.is_file()), key=lambda f: f.relative_to(path).as_posix())
+def dir_md5(path: Path, tracked: set[str] | None = None, from_root: str = "") -> str:
+    """DVC's folder hash: the md5 of json.dumps(sorted [{md5, relpath}], sort_keys=True), plus .dir.
+
+    With tracked (git ls-files paths) and the folder's path from the repo root, only git-tracked files
+    count: the folder as a CI checkout has it, so a local __pycache__ or scratch file is no mismatch."""
+    files = [f for f in path.rglob("*") if f.is_file()]
+    if tracked is not None:
+        files = [f for f in files if f"{from_root.rstrip('/')}/{f.relative_to(path).as_posix()}" in tracked]
+    files.sort(key=lambda f: f.relative_to(path).as_posix())
     entries = [{"md5": file_md5(f), "relpath": f.relative_to(path).as_posix()} for f in files]
     return hashlib.md5(json.dumps(entries, sort_keys=True).encode("utf-8")).hexdigest() + DIR_SUFFIX
 
@@ -111,7 +117,7 @@ def check(locks: list[Path], root: Path | None = None) -> tuple[list[Mismatch], 
                 continue  # data: DVC holds it, and CI has none
             checked += 1
             if recorded.endswith(DIR_SUFFIX):
-                actual = dir_md5(path) if path.is_dir() else None
+                actual = dir_md5(path, tracked, from_root) if path.is_dir() else None
             else:
                 actual = file_md5(path) if path.is_file() else None
             if actual != recorded:

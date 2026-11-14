@@ -21,6 +21,11 @@ mlflow==3.17.2
 optuna==5.0.0
 # sensitivity.py computes the selected model's SHAP values with it (#113).
 shap==0.54.1
+# registry.py and vertex_client.py call Vertex AI and the model bucket over REST with them (#111). Image only:
+# Data-Pipeline/requirements.txt has neither (dvc-gs brings both into the Airflow image), so these are
+# the versions the compose suite ran on there.
+google-auth==2.58.0
+requests==2.34.2
 # The CPU-only build on Linux; the standard Linux wheel pulls NVIDIA's NCCL (about 430 MB).
 xgboost==3.4.1; sys_platform != "linux"
 xgboost-cpu==3.4.1; sys_platform == "linux"

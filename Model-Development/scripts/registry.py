@@ -43,6 +43,7 @@ import os
 import re
 import sys
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -187,6 +188,23 @@ def _hash_label(value: str) -> str:
     return value.removeprefix("sha256:")[:HASH_LABEL]
 
 
+def gate_report_sha256(gate_report: dict) -> str:
+    """The sha256 of a gate report's content (sorted keys), the file the push uploads beside the model."""
+    return "sha256:" + hashlib.sha256(json.dumps(gate_report, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+@contextmanager
+def _access_checked():
+    """After the first call to project 2 answered, a refusal is a missing role or expired credentials:
+    an error (exit 2), never a skip, so a run cannot go green with the registry half changed."""
+    import vertex_client
+
+    try:
+        yield
+    except vertex_client.NoAccess as exc:
+        raise RegistryError(f"project 2 refused a call after the access check: {exc}") from None
+
+
 def _winner(selection: dict) -> dict:
     name = selection.get("winner")
     if not name:
@@ -261,13 +279,15 @@ def build_push(settings: Settings, training: training_data.Settings, gate_report
         "threshold": run.get("threshold"),
         "validation": row.get("validation"), "test": row.get("test"),
         "gate": {"decision": decision, "reason": gate_report.get("reason"), "gates_sha256": gates_sha256,
-                 "fairness_group_sha256": gate_report.get("fairness_group_sha256")},
+                 "fairness_group_sha256": gate_report.get("fairness_group_sha256"),
+                 "report_sha256": gate_report_sha256(gate_report)},
         "files": {name: _sha256(path) for name, path in files.items()},
         "pushed_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     validation = row.get("validation") or {}
     labels = {"model": row["model"], "data_version": _hash_label(versions["run.json"]), "git_commit": commit,
-              "mlflow_run_id": mlflow_run_id, "gate_decision": decision, "gates_sha256": _hash_label(gates_sha256)}
+              "mlflow_run_id": mlflow_run_id, "gate_decision": decision, "gates_sha256": _hash_label(gates_sha256),
+              "gate_report": _hash_label(gate_report_sha256(gate_report))}
     if image_digest:
         labels["image_digest"] = _hash_label(image_digest)
     files_uri = f"gs://{settings.model_bucket}/{folder}/"
@@ -308,14 +328,10 @@ def tag_mlflow(training: training_data.Settings, mlflow_run_id: str, tags: dict[
 def push(settings: Settings, training: training_data.Settings, client, gate_report: dict,
          image_digest: str | None = None) -> dict:
     """Register the winner as a new version with the candidate alias; returns the push record."""
-    import vertex_client
-
     plan = build_push(settings, training, gate_report, image_digest)
     parent = client.find_model()  # the access check: a NoAccess here means skip, before anything is written
-    try:
+    with _access_checked():
         return _push(settings, training, client, plan, gate_report, parent)
-    except vertex_client.NoAccess as exc:  # access was there a moment ago: a missing role, not a skip
-        raise RegistryError(f"project 2 refused a call after the access check: {exc}") from None
 
 
 def _push(settings: Settings, training: training_data.Settings, client, plan: dict, gate_report: dict,
@@ -395,11 +411,18 @@ def promote(settings: Settings, client, push_record: dict, gate_report: dict) ->
     move fails, previous goes back where it was (ADR-006 step 4). Cloud Run traffic is not moved
     here: the forecast API does not exist yet."""
     model_name, version_id = push_record["model_name"], _id(push_record["version_id"])
+    pushed = client.get_version(model_name, version_id)  # the access check: a NoAccess here means skip
+    with _access_checked():
+        return _promote(settings, client, push_record, gate_report, pushed)
+
+
+def _promote(settings: Settings, client, push_record: dict, gate_report: dict, pushed: dict) -> dict:
+    model_name, version_id = push_record["model_name"], _id(push_record["version_id"])
     data_version = push_record["metadata"]["data_version"]
-    pushed = client.get_version(model_name, version_id)
     labels = pushed.get("labels", {})
     expected = {"data_version": _hash_label(data_version),
-                "gates_sha256": _hash_label(str(gate_report.get("gates_sha256", "")))}
+                "gates_sha256": _hash_label(str(gate_report.get("gates_sha256", ""))),
+                "gate_report": _hash_label(gate_report_sha256(gate_report))}
     wrong = {key: labels.get(key) for key, value in expected.items() if labels.get(key) != value}
     if wrong:
         raise RegistryError(f"version {version_id} does not carry this gate report's values: {wrong}")
@@ -419,16 +442,27 @@ def promote(settings: Settings, client, push_record: dict, gate_report: dict) ->
     captured = record["champion_before"]
     if captured is not None:
         client.merge_aliases(model_name, captured, add=(settings.alias_previous,))
+    production_alias, previous_alias = settings.alias_production, settings.alias_previous
     try:
-        client.merge_aliases(model_name, version_id, add=(settings.alias_production,))
+        client.merge_aliases(model_name, version_id, add=(production_alias,))
     except Exception as exc:
-        if captured is not None:  # put previous back as it was, then report the failure
-            if record["previous_before"] is not None:
-                client.merge_aliases(model_name, record["previous_before"], add=(settings.alias_previous,))
+        if captured is None:  # nothing was moved before
+            raise RegistryError(f"moving {production_alias} to version {version_id} failed: {exc}") from None
+        before = record["previous_before"]
+        try:  # put previous back as it was, then report the failure
+            if before is not None:
+                client.merge_aliases(model_name, before, add=(previous_alias,))
             else:
-                client.merge_aliases(model_name, captured, remove=(settings.alias_previous,))
-        raise RegistryError(f"moving {settings.alias_production} to version {version_id} failed; "
-                            f"{settings.alias_previous} was put back: {exc}") from None
+                client.merge_aliases(model_name, captured, remove=(previous_alias,))
+        except Exception as again:  # never lose the first error, never exit 0 with previous moved
+            should = f"version {before}" if before is not None else "no version"
+            raise RegistryError(
+                f"moving {production_alias} to version {version_id} failed ({exc}), and putting "
+                f"{previous_alias} back also failed ({again}). Fix by hand (runbook \"Model registry\"): "
+                f"{previous_alias} is on version {captured} and should be on {should}; {production_alias} "
+                f"is still on version {captured}") from None
+        raise RegistryError(f"moving {production_alias} to version {version_id} failed; "
+                            f"{previous_alias} was put back: {exc}") from None
     return {**record, "decision": "promote", "champion": version_id, "previous": captured}
 
 
@@ -512,10 +546,16 @@ def score_champion(saved, run: dict, training: training_data.Settings) -> dict:
 
 def rescore(settings: Settings, training: training_data.Settings, client) -> tuple[dict | None, dict]:
     """The champion block for the gates input, None with no champion, and a record of what was done."""
+    data_version = training_data.data_version(training.dvc_lock)
+    model_name = client.find_model()  # the access check: a NoAccess here means skip (champion null)
+    with _access_checked():
+        return _rescore(settings, training, client, data_version, model_name)
+
+
+def _rescore(settings: Settings, training: training_data.Settings, client, data_version: str,
+             model_name: str | None) -> tuple[dict | None, dict]:
     import joblib
 
-    data_version = training_data.data_version(training.dvc_lock)
-    model_name = client.find_model()
     production = None if model_name is None else client.find_alias(model_name, settings.alias_production)
     if production is None:
         return None, {"champion": None, "reason": f"no version holds {settings.alias_production}",

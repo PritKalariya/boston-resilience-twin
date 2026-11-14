@@ -1,6 +1,8 @@
 # ADR-006: Vertex AI Model Registry is the only model registry; MLflow tracks experiments, Cloud Run serves
 
-- Status: accepted (approved by Kirtan in the #111 PR, 2026-11-12); the model files bucket is in project 2 (ADR-030)
+- Status: accepted (approved by Kirtan in PR #142, 2026-11-12)
+- Note (2026-11-12): the model files bucket is in project 2 (ADR-030).
+- Note (2026-11-13): step 2 as built (#111). Vertex label values hold at most 63 lower case characters, so the labels carry the short stamps (model, Git commit, MLflow run ID, gate decision) and the first 32 hex characters of the data version, `gates.csv` and gate report sha256 values; the description carries the validation F1, the full data version and `gates.csv` sha256 and where the files are. The full metrics, the gate result and every file's sha256 are in `metadata.json` beside the files, which the description names. The version traces back to its run as step 2 requires; only where each value is stored changes.
 - Date: 2026-10-26
 - Owner: piyush1420
 - Phase: setup

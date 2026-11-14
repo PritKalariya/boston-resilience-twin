@@ -45,6 +45,7 @@ class FakeRegistry:
         self.versions: dict[str, dict] = {}
         self.objects: dict[str, bytes] = {}
         self.deny, self.fail, self.calls = deny, fail, []
+        self.deny_merges, self.fail_merges = set(), set()  # "<version>:merge:<aliases>" that refuse or fail
         for _ in range(versions):
             self._add({"labels": {"data_version": DATA[7:39], "gates_sha256": GATES[:32]}})
 
@@ -95,8 +96,12 @@ class FakeRegistry:
 
     def merge_aliases(self, model_name, version_id, add=(), remove=()):
         self._call("merge_aliases")
-        if self.fail == f"merge:{','.join(add)}":
-            raise R.RegistryError("merge failed (500)")
+        key = "merge:" + ",".join([*add, *(f"-{alias}" for alias in remove)])
+        on = f"{version_id}:{key}"  # the same merge on one version only, e.g. "1:merge:previous"
+        if on in self.deny_merges:
+            raise V.NoAccess(f"{on} refused (403)")
+        if key == self.fail or on in self.fail_merges:
+            raise R.RegistryError(f"{on} failed (500)")
         for alias in add:
             for version in self.versions.values():
                 if alias in version["versionAliases"]:
@@ -274,6 +279,27 @@ def test_refusal_after_the_access_check_is_an_error(settings, training):
     assert not isinstance(caught.value, V.NoAccess)
 
 
+def test_a_push_that_failed_after_uploading_is_not_rerun_over_its_files(settings, training):
+    client = FakeRegistry(settings, deny="upload_version")
+    with pytest.raises(R.RegistryError, match="after the access check"):
+        R.push(settings, training, client, gate())
+    uploaded = dict(client.objects)
+    assert uploaded and client.versions == {}  # files in the bucket, no version (runbook: recovery)
+    client.deny = None
+    with pytest.raises(R.RegistryError, match="already exists"):  # the bucket answers 412: never overwritten
+        R.push(settings, training, client, gate())
+    assert client.objects == uploaded and client.versions == {}
+
+
+def test_rescore_refusal_after_the_access_check_is_an_error(settings, training, scored):
+    client = FakeRegistry(settings)
+    champion_in_bucket(settings, client)
+    client.deny = "download_file"
+    with pytest.raises(R.RegistryError, match="after the access check") as caught:
+        R.rescore(settings, training, client)
+    assert not isinstance(caught.value, V.NoAccess)  # not a null champion: gates would skip the comparison
+
+
 @pytest.mark.parametrize("report, message", [
     (gate("blocked"), "the gates decided 'blocked'"),
     (gate("error"), "the gates decided 'error'"),
@@ -343,25 +369,31 @@ def pushed(version: str) -> dict:
     return {"model_name": MODEL, "version_id": version, "metadata": {"data_version": DATA}}
 
 
+def promote(settings, client, version: str, report: dict) -> dict:
+    """R.promote on a version pushed with this gate report (its gate_report label, as the push sets it)."""
+    client.versions[version].setdefault("labels", {})["gate_report"] = R._hash_label(R.gate_report_sha256(report))
+    return R.promote(settings, client, pushed(version), report)
+
+
 def test_the_first_version_becomes_champion(settings):
     client = FakeRegistry(settings, versions=1)
-    record = R.promote(settings, client, pushed("1"), gate())
+    record = promote(settings, client, "1", gate())
     assert record["decision"] == "promote" and record["champion"] == "1" and record["previous"] is None
     assert client.aliases() == {"1": ["production"]}
 
 
 def test_a_better_challenger_becomes_champion_and_the_old_one_previous(settings):
     client = FakeRegistry(settings, versions=2)
-    R.promote(settings, client, pushed("1"), gate())
-    record = R.promote(settings, client, pushed("2"), gate("promote", champion="1"))
+    promote(settings, client, "1", gate())
+    record = promote(settings, client, "2", gate("promote", champion="1"))
     assert record["champion_before"] == "1" and record["previous"] == "1"
     assert client.aliases() == {"1": ["previous"], "2": ["production"]}
 
 
 def test_a_weaker_challenger_leaves_the_champion(settings):
     client = FakeRegistry(settings, versions=2)
-    R.promote(settings, client, pushed("1"), gate())
-    record = R.promote(settings, client, pushed("2"), gate("keep_champion", champion="1"))
+    promote(settings, client, "1", gate())
+    record = promote(settings, client, "2", gate("keep_champion", champion="1"))
     assert record["decision"] == "keep_champion" and record["champion"] == "1"
     assert client.aliases() == {"1": ["production"]}
 
@@ -376,48 +408,103 @@ def test_a_weaker_challenger_leaves_the_champion(settings):
 ])
 def test_promote_refuses_a_comparison_with_the_wrong_champion(settings, report, message):
     client = FakeRegistry(settings, versions=2)
-    R.promote(settings, client, pushed("1"), gate())
+    promote(settings, client, "1", gate())
     with pytest.raises(R.RegistryError, match=message):
-        R.promote(settings, client, pushed("2"), report)
+        promote(settings, client, "2", report)
     assert client.aliases() == {"1": ["production"]}
 
 
 def test_promote_refuses_a_champion_block_with_no_champion(settings):
     with pytest.raises(R.RegistryError, match="no version holds production"):
-        R.promote(settings, FakeRegistry(settings, versions=1), pushed("1"), gate("promote", champion="1"))
+        promote(settings, FakeRegistry(settings, versions=1), "1", gate("promote", champion="1"))
 
 
 def test_promote_refuses_a_version_with_other_stamps(settings):
     client = FakeRegistry(settings, versions=1)
     with pytest.raises(R.RegistryError, match="does not carry this gate report's values"):
-        R.promote(settings, client, pushed("1"), gate(gates_sha256="9" * 64))
+        promote(settings, client, "1", gate(gates_sha256="9" * 64))
 
 
 def test_promote_refuses_the_version_already_in_production(settings):
     client = FakeRegistry(settings, versions=1)
-    R.promote(settings, client, pushed("1"), gate())
+    promote(settings, client, "1", gate())
     with pytest.raises(R.RegistryError, match="already holds production"):
-        R.promote(settings, client, pushed("1"), gate("promote", champion="1"))
+        promote(settings, client, "1", gate("promote", champion="1"))
 
 
 @pytest.mark.parametrize("had_previous", [False, True])
 def test_a_failed_production_move_puts_previous_back(settings, had_previous):
     client = FakeRegistry(settings, versions=3)
-    R.promote(settings, client, pushed("1"), gate())
-    R.promote(settings, client, pushed("2"), gate("promote", champion="1"))
+    promote(settings, client, "1", gate())
+    promote(settings, client, "2", gate("promote", champion="1"))
     if not had_previous:
         client.merge_aliases(MODEL, "1", remove=("previous",))
     before = client.aliases()
     client.fail = "merge:production"
     with pytest.raises(R.RegistryError, match="previous was put back"):
-        R.promote(settings, client, pushed("3"), gate("promote", champion="2"))
+        promote(settings, client, "3", gate("promote", champion="2"))
     assert client.aliases() == before
+
+
+@pytest.mark.parametrize("had_previous", [False, True])
+@pytest.mark.parametrize("restore", ["fails", "refused"])
+def test_a_failed_restore_is_an_error_naming_both_failures(settings, had_previous, restore):
+    client = FakeRegistry(settings, versions=3)
+    promote(settings, client, "1", gate())
+    promote(settings, client, "2", gate("promote", champion="1"))
+    if not had_previous:
+        client.merge_aliases(MODEL, "1", remove=("previous",))
+    client.fail = "merge:production"
+    key = "1:merge:previous" if had_previous else "2:merge:-previous"  # the restore, not the first move
+    (client.fail_merges if restore == "fails" else client.deny_merges).add(key)
+    with pytest.raises(R.RegistryError) as caught:
+        promote(settings, client, "3", gate("promote", champion="2"))
+    assert not isinstance(caught.value, V.NoAccess)  # a refused restore is not a skip
+    message = str(caught.value)
+    assert "3:merge:production failed" in message and f"{key} " in message and "Fix by hand" in message
+    assert f"should be on {'version 1' if had_previous else 'no version'}" in message
+    assert client.aliases()["2"] == ["previous", "production"]  # the state the message describes
+
+
+def test_a_refusal_after_the_access_check_in_promote_is_an_error(settings):
+    client = FakeRegistry(settings, versions=2)
+    promote(settings, client, "1", gate())
+    client.deny = "list_versions"
+    with pytest.raises(R.RegistryError, match="after the access check") as caught:
+        promote(settings, client, "2", gate("promote", champion="1"))
+    assert not isinstance(caught.value, V.NoAccess)
+    client.deny = "get_version"  # the first call: a skip for the command line
+    with pytest.raises(V.NoAccess):
+        promote(settings, client, "2", gate("promote", champion="1"))
+
+
+def test_promote_refuses_a_gate_report_other_than_the_pushed_one(settings):
+    client = FakeRegistry(settings, versions=1)
+    client.versions["1"]["labels"]["gate_report"] = R._hash_label(R.gate_report_sha256(gate(reason="pushed")))
+    with pytest.raises(R.RegistryError, match="does not carry this gate report's values.*gate_report"):
+        R.promote(settings, client, pushed("1"), gate(reason="another"))
+    assert client.aliases() == {}
+
+
+def test_cli_promote_exits_2_when_the_restore_is_refused(cli, settings, tmp_path, capsys):
+    for _ in range(3):
+        cli._add({"labels": {"data_version": DATA[7:39], "gates_sha256": GATES[:32]}})
+    cli.model = MODEL
+    promote(settings, cli, "1", gate())
+    promote(settings, cli, "2", gate("promote", champion="1"))
+    report = gate("promote", champion="2")
+    cli.versions["3"]["labels"]["gate_report"] = R._hash_label(R.gate_report_sha256(report))
+    cli.fail, cli.deny_merges = "merge:production", {"1:merge:previous"}
+    record = write_json(tmp_path / "push.json", pushed("3"))
+    assert R.main(["promote", "--push-record", str(record), "--gate-report",
+                   str(write_json(tmp_path / "gate.json", report))]) == 2
+    assert "Fix by hand" in capsys.readouterr().err
 
 
 def test_rollback_restores_the_previous_version(settings):
     client = FakeRegistry(settings, versions=2)
-    R.promote(settings, client, pushed("1"), gate())
-    R.promote(settings, client, pushed("2"), gate("promote", champion="1"))
+    promote(settings, client, "1", gate())
+    promote(settings, client, "2", gate("promote", champion="1"))
     record = R.rollback(settings, client)
     assert (record["from"], record["to"]) == ("2", "1")
     assert client.aliases() == {"1": ["previous", "production"]}  # ADR-006: both name it until the next promotion
@@ -425,7 +512,7 @@ def test_rollback_restores_the_previous_version(settings):
 
 def test_rollback_to_a_named_version(settings):
     client = FakeRegistry(settings, versions=3)
-    R.promote(settings, client, pushed("3"), gate())
+    promote(settings, client, "3", gate())
     assert R.rollback(settings, client, to="1")["to"] == "1"
     with pytest.raises(R.RegistryError, match="has no version '9'"):
         R.rollback(settings, client, to="9")
@@ -435,7 +522,7 @@ def test_rollback_needs_something_to_go_back_to(settings):
     with pytest.raises(R.RegistryError, match="no registry model"):
         R.rollback(settings, FakeRegistry(settings))
     client = FakeRegistry(settings, versions=1)
-    R.promote(settings, client, pushed("1"), gate())
+    promote(settings, client, "1", gate())
     with pytest.raises(R.RegistryError, match="nothing to roll back to"):
         R.rollback(settings, client)
     with pytest.raises(R.RegistryError, match="already holds production"):
@@ -445,7 +532,7 @@ def test_rollback_needs_something_to_go_back_to(settings):
 def test_status_lists_versions_newest_first(settings):
     assert R.status(settings, FakeRegistry(settings)) == []
     client = FakeRegistry(settings, versions=2)
-    R.promote(settings, client, pushed("2"), gate())
+    promote(settings, client, "2", gate())
     rows = R.status(settings, client)
     assert [(r["version"], r["aliases"]) for r in rows] == [("2", ["production"]), ("1", [])]
 
