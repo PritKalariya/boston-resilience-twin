@@ -1,7 +1,8 @@
 # The training image's packages (#112, ADR-028, ADR-032): what train.py, selection.py's
-# ranking and the workflow steps import, nothing else. Every pin is copied from
-# Data-Pipeline/requirements.txt, the pins the tests passed on; test_steps_requirements.py keeps
-# the two files equal. There is no -c constraints line: that file's Airflow constraints
+# ranking and the workflow steps import, nothing else. A package that is also in
+# Data-Pipeline/requirements.txt has the pin copied from it, the pins the tests passed on;
+# test_steps_requirements.py fails if the two differ. A package only the image needs may be
+# pinned here alone. There is no -c constraints line: that file's Airflow constraints
 # URL belongs to the Airflow image (ADR-022), and pip check at the end of the build
 # fails the image if the result is inconsistent.
 numpy==2.5.3
