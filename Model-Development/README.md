@@ -65,7 +65,12 @@ docker build -f Model-Development/Dockerfile -t brt-train:local .
 A=$(mktemp -d); export IMAGE=brt-train:local ARTIFACTS_DIR=$A
 for s in pull_data train evaluate; do bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_$s.py --artifacts artifacts || break; done
 bash .github/scripts/in_image.sh python Model-Development/scripts/bias.py --run Model-Development/runs/ci-lightgbm   # validation and test, for one run
-python Data-Pipeline/scripts/model_groups.py    # host only: rewrite config/slice_groups.csv after a change to #32's groups
+```
+
+After a change to #32's groups or the static layers, rewrite `config/slice_groups.csv` on the host (the runbook's "Regenerate `slice_groups.csv`" has the drift test and the `select` stage refresh):
+
+```bash
+python Data-Pipeline/scripts/model_groups.py
 ```
 
 On this data version every candidate passes: LightGBM 0.043, XGBoost 0.046, logistic regression 0.015. LightGBM, the best validation F1 (0.3435), is selected, and `gates.py` gives `promote`. The neighborhood reopen condition holds for West End and Fenway on validation. ADR-026's owner decided not to reopen (ADR-026, note of 2026-11-12).

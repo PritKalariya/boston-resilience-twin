@@ -1,6 +1,6 @@
 # ADR-033: The model bias check reuses the ADR-026 gate, reports #32's other groups, and picks the winner after it
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-12
 - Owner: alekhyabulusu
 - Phase: model
