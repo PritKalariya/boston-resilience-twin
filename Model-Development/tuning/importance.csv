@@ -1,0 +1,15 @@
+model,setting,importance_log_loss,importance_f1
+logreg,C,0.062086,0.0211
+logreg,year_parts,0.937914,0.9789
+xgboost,learning_rate,0.126809,0.069706
+xgboost,max_depth,0.425324,0.424238
+xgboost,min_child_weight,0.255552,0.32485
+xgboost,reg_lambda,0.074132,0.02318
+xgboost,subsample,0.063797,0.117838
+xgboost,colsample_bytree,0.054385,0.040188
+lightgbm,learning_rate,0.203096,0.221177
+lightgbm,num_leaves,0.207761,0.134636
+lightgbm,min_child_samples,0.196516,0.162334
+lightgbm,reg_lambda,0.035199,0.110306
+lightgbm,subsample,0.034044,0.098871
+lightgbm,colsample_bytree,0.323384,0.272676
