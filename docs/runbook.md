@@ -828,11 +828,11 @@ Every `train.py` run is also an MLflow run in the experiment `model-training` (`
 `tune.py` searches each candidate's settings with Optuna on the train years, and `compare_tuned.py` compares what it found with the starting values on validation 2024. Neither changes what the training stage trains: `tuned_params.yaml` changes only through the reviewed promotion below. From the repo root:
 
 ```bash
-python Model-Development/scripts/tune.py                                # about 75 minutes for the three studies (macOS arm64, 10 cores)
-python Model-Development/scripts/compare_tuned.py                       # about a minute; the starting values against best_params.yaml on 2024
-python Model-Development/scripts/tune.py --models lightgbm --trials 2   # one short study, for timing or a smoke check
+python Model-Development/scripts/tune.py                                # about 45 minutes for the three studies (macOS arm64, 10 cores)
+python Model-Development/scripts/compare_tuned.py                       # about 30 seconds; the starting values against best_params.yaml on 2024
 ```
 
+- **Every run rewrites the committed files in `Model-Development/tuning/`**, a short one included: `--models` and `--trials` leave only that run's models in `summary.json`, `importance.csv` and `best_params.yaml`, and `compare_tuned.py` writes a new `comparison.json`. For a smoke check or a timing run, give both scripts a copy of `tuning.csv` whose `study_dir` is in the gitignored `Model-Development/runs/` ([Model-Development README](../Model-Development/README.md#hyperparameter-tuning-with-optuna-m6), "How to run it").
 - **A study** takes its settings from `Model-Development/config/tuning.csv` and its search space from `tune.SPACES`.
   - Trial 0 is the starting values of `model_params.yaml`, so every study compares tuning with them.
   - A trial fits on the train years only, once per seed in `trial_seeds`; logistic regression has no seed and is fitted once. Its value is the mean fold F1: each inner fold year (2019, 2022, 2023) is scored at the threshold the shared rule picks on that year. Validation 2024 and test are never read.
