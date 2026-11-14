@@ -864,6 +864,76 @@ python Model-Development/scripts/tune.py --models lightgbm --trials 2   # one sh
   `-f` skips DVC's question about the changed inputs. The image's `selection.json` records no commit, as in CI; the lock ties the reports to the code.
 - **Current state** (data `a719afeb`, 2026-11-12): `tuned_params.yaml` sets nothing, so every candidate trains with its starting values. Only LightGBM's confirmation found an improvement on the train years, and on 2024 it tied the starting values: F1 0.343675 against 0.343529, with the gain's 95% interval [-0.0161, +0.0148] (`comparison.json`). The studies belong to that data version: run both scripts again on a new one.
 - **Platforms.** The committed studies come from macOS (arm64). XGBoost's fits differ slightly between platforms ("Training stage" above), so its study repeats exactly only on the same platform. LightGBM and logistic regression match across platforms in the selection; their studies were not rerun in the Airflow image. The locked reports come from the training image: XGBoost's 2024 F1 is 0.331683 there and 0.336735 on macOS, and LightGBM's is 0.343529 on both. `compare_tuned.py` runs on the host, where git can record the commit, so the XGBoost rows of `comparison.json` are the macOS value.
+- **The model bias check** follows in its own section: "Model bias check (#110, ADR-033)".
+
+### Model bias check (#110, ADR-033)
+
+The bias check of the model: ADR-026's fairness gate on validation, the groups #32 found reported on validation and test, and selection after bias. It runs in the model workflow's `step_evaluate` and, for one run, from `bias.py`. Every command here was run on main at `2afe4bc` on 2026-11-14 (macOS arm64, Docker Desktop), on data `a719afeb`.
+
+**In the workflow.** `step_evaluate.py` runs the check on every candidate. Nothing extra is needed: the model workflow runs it, and so does the local real chain. To run the chain up to the evaluate step, as a pull request does, from the repo root:
+
+```bash
+dvc pull Data-Pipeline/data/processed/labels.parquet Data-Pipeline/data/processed/features.parquet
+docker build -f Model-Development/Dockerfile -t brt-train:local .
+A=$(mktemp -d); export IMAGE=brt-train:local ARTIFACTS_DIR=$A
+for s in pull_data train evaluate; do bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_$s.py --artifacts artifacts || break; done
+bash .github/scripts/in_image.sh python Model-Development/scripts/gates.py --metrics artifacts/metrics.json --out artifacts/gate_report.json
+```
+
+`step_evaluate` prints:
+
+```
+winner lightgbm: best validation F1 and its fairness gate passes; validation F1 0.3435; baseline seasonal 0.1219
+bias lightgbm: gap 0.043 (pass)
+bias xgboost: gap 0.046 (pass)
+bias logreg: gap 0.015 (pass)
+group lower: 80 of 197 surge days caught
+group higher: 66 of 182 surge days caught
+excluded Harbor Islands: 0 of 0 (ungrouped)
+ADR-026 neighborhood condition holds for Fenway, West End; two-part condition does not hold
+```
+
+- **Selection after bias.** The candidates are ranked by validation F1, then log loss, then name, and the winner is the first whose fairness gate passes. If none passes, the best F1 is kept so that `gates.py` blocks it and says why. `selection.py`'s margin is not applied here; `gates.py` alone decides promotion.
+- **Writes** to `$A` (the workflow's `model-artifacts` upload):
+  - `metrics.json`: the gates' input, with the winner's per-group counts.
+  - `evaluation.json`: the winner (`winner`, `winner_run`), the ranking with each candidate's fairness gate (`ranking`), why the winner was picked (`selected`), the rule (`rule`), the reopen conditions (`reopen_conditions`) and the path of the winner's report (`bias_report`).
+  - `bias/`: the winner's report on validation only (the four files below). No test number enters the step.
+- **MLflow.** The four files go to the winner's run under `bias/`, with the tags `bias_gate` (`pass` or `fail`), `bias_reopen_neighborhoods` (`Fenway;West End`, or `none`) and `bias_reopen_two_parts`, and the metric `validation_worst_group_recall_gap` (0.043454).
+- **Exit 2** (pipeline failed) when the check cannot run: a missing or bad `slice_groups.csv`, counts that disagree with `validation_counts.json`, or an MLflow error.
+
+**One run, validation and test.** `bias.py` writes the same report for both splits, for the selected run or any `train.py` run:
+
+```bash
+bash .github/scripts/in_image.sh python Model-Development/scripts/bias.py --run Model-Development/runs/ci-lightgbm   # about 7 s; same $A and IMAGE as above
+bash .github/scripts/in_image.sh python Model-Development/scripts/bias.py --run Model-Development/runs/ci-lightgbm --out-dir artifacts/bias-cli --no-mlflow
+```
+
+The first prints `lightgbm: fairness gate pass, gap 0.043 (lower against higher), limit 0.15; ADR-026 neighborhood condition holds for Fenway, West End; two-part condition does not hold; wrote Model-Development/runs/ci-lightgbm`. The second prints the same line ending `wrote artifacts/bias-cli`.
+
+- **Writes** `bias.json`, `bias_slices.csv`, `bias_report.md` and `bias_recall.png` to the run folder, or to `--out-dir`.
+- **Logs** them to the run's MLflow run under `bias/`, with the same tags and metric, unless `--no-mlflow`. On a run `step_evaluate` already logged, the files replace the validation-only ones.
+- **Exits** 0 when the gate passes, 1 when it fails, 2 when it cannot evaluate (a bad run folder or config, or an MLflow error), as `gates.py` does.
+- **On the host** it runs too, for example `python Model-Development/scripts/bias.py --run "$A/runs/ci-lightgbm" --out-dir <dir> --no-mlflow`, with the same result. It reads `predictions.parquet` and never loads the model, so LightGBM's `libomp` isn't needed on macOS. A `train.py` run on the host works the same way: `--run Model-Development/runs/<run id>`.
+
+**Reading the report** (`bias_report.md`):
+- **Gated:** the two ACS poverty groups of `poverty_groups.csv`. The gap, the floor of 5 surges with pooling and the 0.15 limit come from `gates.csv` through `gates.evaluate()`, so the report and `gates.py` cannot disagree.
+- **Reported, not gated:** people of color, limited English, flood zone and each neighborhood, from Fairlearn's `MetricFrame`. A group under the floor is merged with its family's other small groups.
+- **Diagnostic:** the higher-poverty group in two parts, its student areas and the rest (#126).
+- **ADR-026 reopen conditions:** a neighborhood with at least 5 validation surges whose recall is more than 0.15 below its own poverty group's, and the two parts differing by more than 0.15. They're checked only while the gate passes. A condition holding doesn't block promotion: tell ADR-026's owner (Prit) on the PR. West End and Fenway hold on this data version, and ADR-026's note of 2026-11-12 says not to reopen for them.
+- **Residual reporting bias:** storm requests per 1,000 residents a year by poverty group, from `features.parquet` (0.63 higher against lower on validation). It says how much less the higher-poverty group reports, which the labels still carry.
+
+**When the gate fails.** `gates.py` exits 1. On main that fails the workflow; on a pull request it only warns. ADR-033 ("Revisit when") then asks for #110's mitigation (reweighting, per-group thresholds or resampling), with before and after numbers, in a reviewed PR.
+
+**Regenerate `slice_groups.csv`** (host only). The training image has neither geopandas nor the static layers, so the reported groups are frozen in `Model-Development/config/slice_groups.csv`. Rewrite it after a change to the ACS groups, the student-area rule (`student_area_factor` in `Data-Pipeline/config/bias_slicing.csv`) or the static layers. It needs the static layers in `Data-Pipeline/data/interim/static/` ("Static layers" above, or `dvc pull Data-Pipeline/data/interim/static`, the output of the `ingest_static_layers` stage, instead of a bare `dvc pull` of all the data, about 2.26 GB):
+
+```bash
+python Data-Pipeline/scripts/model_groups.py                                                    # about 6 s: "wrote 24 neighborhoods to Model-Development/config/slice_groups.csv"
+python -m pytest Data-Pipeline/tests/test_bias_slicing.py -k "model_groups or model_bias" -v    # 3 passed
+```
+
+- **The drift test** is `test_the_model_bias_groups_file_matches_this_code`. It rebuilds the file from #32's code and the static layers, and fails if the committed copy differs. It skips without the static layers, so it skips in CI and in the compose test service: run it on a host that has them before committing a change to the groups.
+- **It's not a DVC stage,** so neither `Data-Pipeline/dvc.lock` nor the data version changes. `Model-Development/config` is a dep of the `select` stage, though: after changing `slice_groups.csv`, refresh that stage in the training image ("Hyperparameter tuning (#109)", "Run the training stage in the training image") until `dvc status select` is clean, and commit the file with `Model-Development/dvc.lock`, as #109 does for `tuned_params.yaml`.
+- **Poverty** isn't in this file. The gate's groups are `poverty_groups.csv`, checked by sha256 in `gates.csv`, and change only by ADR-026.
 
 ## Versioned data (DVC)
 
