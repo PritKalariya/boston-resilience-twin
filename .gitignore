@@ -28,6 +28,8 @@ Data-Pipeline/data/*
 Model-Development/runs/
 # Selection reports (#107): written by selection.py and logged to MLflow, never committed
 Model-Development/reports/
+# Model pipeline artifacts (#112): the default ARTIFACTS_DIR of in_image.sh and model.yml, uploaded by CI, never committed
+/artifacts/
 
 # MLflow (#104): the compose server's store (its folder kept by .gitkeep for the mount),
 # and local stores, which MLflow names mlruns/, mlartifacts/ or mlflow.db

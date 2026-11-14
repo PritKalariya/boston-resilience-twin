@@ -1,6 +1,7 @@
 # ADR-032: The model pipeline on real steps: runner-side data pull, a pinned training image, reload check on every ref
 
 - Status: accepted
+- Note (2026-11-14): #123: in decision 8, "the push is skipped" means the registry push and every step after Gates (reload check, set champion). The training image is pushed right after the build on every main run, pass or fail (decision 6), so a failed gate leaves an image in brt-images with no model registered against it.
 - Date: 2026-11-11
 - Owner: PritKalariya
 - Phase: model

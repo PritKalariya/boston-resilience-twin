@@ -865,6 +865,106 @@ python Model-Development/scripts/tune.py --models lightgbm --trials 2   # one sh
 - **Current state** (data `a719afeb`, 2026-11-12): `tuned_params.yaml` sets nothing, so every candidate trains with its starting values. Only LightGBM's confirmation found an improvement on the train years, and on 2024 it tied the starting values: F1 0.343675 against 0.343529, with the gain's 95% interval [-0.0161, +0.0148] (`comparison.json`). The studies belong to that data version: run both scripts again on a new one.
 - **Platforms.** The committed studies come from macOS (arm64). XGBoost's fits differ slightly between platforms ("Training stage" above), so its study repeats exactly only on the same platform. LightGBM and logistic regression match across platforms in the selection; their studies were not rerun in the Airflow image. The locked reports come from the training image: XGBoost's 2024 F1 is 0.331683 there and 0.336735 on macOS, and LightGBM's is 0.343529 on both. `compare_tuned.py` runs on the host, where git can record the commit, so the XGBoost rows of `comparison.json` are the macOS value.
 
+## Model CI/CD pipeline (#123)
+
+`.github/workflows/model.yml` (ADR-028, ADR-032) trains the baseline and the candidates in the training image, picks the winner after the bias check, applies the promotion gates and checks that the saved model reloads. What it is and how to run its steps on a laptop is in `Model-Development/README.md`, "Model CI/CD pipeline and training image". Commands below were run on 2026-11-13 and 2026-11-14; those that read CI use main's run 43539609767 (commit `2afe4bc`, 3 minutes 45 seconds, gates: promote) and the dispatch run 43560763834 on the same commit. The registry push, the champion re-score and the champion step are stubs until #111, so no model reaches Vertex AI Model Registry yet.
+
+### Start a run
+
+- **A pull request** starts it with no action: the workflow runs on every pull request. A newer push to the same branch cancels the older run.
+- **A push to main** (a merge) runs it as `ci-writer`, pushes the image and, with passing gates, runs the three stubs.
+- **A manual dispatch** is enabled (`workflow_dispatch`) and always runs the pipeline, whatever changed. On main it is a main run: it pushes an image to Artifact Registry and posts to Slack, so use it deliberately. Run 43560763834 (a dispatch on main, success) did both.
+
+```bash
+gh workflow run model.yml --ref main
+```
+
+```bash
+gh run list --workflow model.yml --branch main --limit 5       # newest first: status, title, run id, time
+gh run list --workflow model.yml --event pull_request --limit 3
+```
+
+A run takes 3 to 4 minutes and is stopped after 30. The pipeline starts only when a changed file is under `Model-Development/`, or is `model.yml`, `.github/scripts/in_image.sh`, `Data-Pipeline/dvc.lock` or `Data-Pipeline/config/feature_catalog.csv`. A pull request that only edits `Model-Development/README.md` still runs it.
+
+### The `model-ci` required check
+
+`pipeline` is skipped when no model file changed, and GitHub counts a skipped required job as passed, which would also hide a failed `changes` job. So the required check is `model-ci`, a third job with `if: always()`: it passes when `pipeline` succeeded, or when `changes` found no model file and `pipeline` was skipped, and fails on anything else, including a failed `changes`. Never mark `pipeline` as required, and if the job `model-ci` is renamed, change the branch rule too, or every pull request waits for a check that never reports.
+
+```bash
+gh api repos/PritKalariya/boston-resilience-twin/branches/main/protection/required_status_checks --jq '.contexts[]'
+gh run view 43518003043 --json jobs --jq '.jobs[]|.name+": "+.conclusion'
+```
+
+The first prints `Lint and test (Python 3.12)` and `model-ci` (the rule is also "up to date before merging"). The second is a pull request that touched no model file: `Detect model changes: success`, `model-ci: success`, `Train, evaluate, gate: skipped`, and `model-ci`'s log says `changes=success model_changed=false pipeline=skipped`. A pull request with a model change shows all three jobs run (run 43544972672). A fork pull request gets no Google token, so its `pipeline` fails at the auth step: a maintainer reruns it from a branch of this repository.
+
+### Read a run
+
+```bash
+gh run view <run id>                                    # the jobs and their results; <run id> is the id the list above prints
+gh api repos/PritKalariya/boston-resilience-twin/actions/jobs/$(gh run view <run id> --json jobs --jq '.jobs[]|select(.name=="Train, evaluate, gate")|.databaseId')/logs | sed 's/\x1b\[[0-9;]*m//g' | grep -E 'pushed |"decision"|Slack message'
+D=$(mktemp -d); gh run download <run id> -D "$D"        # the artifacts, kept 90 days
+jq '.decision, .f1_gate.reason, .fairness_gate.reason' "$D/model-artifacts/gate_report.json"
+jq -r '.winner, .selected' "$D/model-artifacts/evaluation.json"
+```
+
+On run 43539609767 the second command prints the digest line, `"decision": "promote"` and `Slack message sent: training complete`; the last two print `"promote"`, `margin 0.221623 >= threshold 0.05`, `gap 0.043454 <= threshold 0.15`, then `lightgbm` and `lightgbm: best validation F1 and its fairness gate passes`. (`gh run view <run id> --log` printed nothing with gh 2.46.0, so the log comes from the API.) The Notify Slack step names the first failed step, and the artifacts are uploaded even when a step failed, so the folder holds what ran before it. `bias/bias_report.md` is the winner's validation bias report and `evaluation.json` lists ADR-026's reopen conditions.
+
+### Gate failed (exit 1)
+
+`gates.py` exits 1 when a candidate does not beat the seasonal baseline by 0.05 F1, or the worst-group recall gap is above 0.15; `gate_report.json` has decision `blocked` and says which gate in `f1_gate.reason` and `fairness_gate.reason` (print them with the `jq` line above). Slack says "gate failed" and "Model not pushed".
+
+- **On a pull request** the run stays green and `model-ci` passes: the log and the job summary show a warning, "Gates failed (not a merge blocker)". Merging code does not promote a model. Read the numbers and decide whether the code change caused it (compare with main's newest `gate_report.json`).
+- **On main** the run fails and nothing after the gates runs, so no reload check, registry push or champion step. The image was already pushed right after the build (every main run pushes one), so a failed run still has an image.
+- **The fix is never in `gates.csv`.** ADR-026 froze its thresholds and the poverty groups before any model trained, and the build fails if `poverty_groups.csv` no longer matches its sha256. Improve the model or the data in a new pull request; a change to a threshold is a new ADR by its owner.
+
+### Pipeline failed (exit 2)
+
+Slack says "pipeline failed" and names the step. Look at that step's log first. Every run stops at its first failed step.
+
+- **Authenticate to Google Cloud** (`ci-reader` on pull requests and branches, `ci-writer` on main only): a fork pull request has no token and fails here by design. Otherwise the Workload Identity provider or the identity's grant in project 2 (#131, ADR-030) changed; do not work around it in the workflow.
+- **Pull the training data (DVC)**: an error such as `Anonymous caller does not have storage.objects.get access ... 401` means the identity cannot read the bucket in project 1; `::error::<file> is missing or empty` means the pull wrote nothing. On a laptop, `dvc status -c Data-Pipeline/data/processed/labels.parquet Data-Pipeline/data/processed/features.parquet` prints `Cache and remote 'gcs' are in sync.` when the commit's data is on the remote; if not, the data was never pushed (`dvc_push.py`, "Versioned data (DVC)" below).
+- **Build the training image**: `pip check` found an inconsistent package set, or `gates.py --validate-config` failed because `gates.csv` or `poverty_groups.csv` changed without its sha256. Reproduce on a laptop:
+
+  ```bash
+  docker build -f Model-Development/Dockerfile -t brt-train:local .
+  docker run --rm brt-train:local python Model-Development/scripts/gates.py --validate-config
+  ```
+
+  The second prints `18 gate settings loaded` and both sha256 values, and exits 0.
+- **A step** (`Check the data`, `Train`, `Evaluate`, `Re-score`, `Reload check`, `Registry push`, `Set champion`) printed `error: ...` and exited 2. Run the chain from the README on the same data version: `pull_data` stops on a file that is missing or not parquet, `train` on a model that failed or an input whose missing share moved ("Training interface (#106)" above), `evaluate` on a run trained on another data version, `reload_check` when the reloaded model scores differently from training.
+
+### Find the image a run pushed
+
+Main runs only; a pull request builds the image but does not push it, and its `image_digest.txt` holds a local image ID. A run's image is the digest in its `image_digest.txt`. The tag `<git sha>` points to the newest push of that commit, so a dispatch or rerun on the same commit moves the tag to the new image and leaves the earlier one untagged; it is still there by digest.
+
+```bash
+D=$(mktemp -d); gh run download <run id> -D "$D"; cat "$D/model-artifacts/image_digest.txt"
+gcloud artifacts docker images list us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images/brt-train --include-tags
+gcloud artifacts docker images describe <digest>        # <digest> is the whole line the first command prints
+```
+
+The first prints the digest of that run's image. Run 43539609767 printed `...brt-train@sha256:2fb821823532a63267dcf6009cea0a4ea83378f81939e3c316817b8c8409bc71`, and the dispatch run 43560763834 on the same commit printed `...brt-train@sha256:694b6bb02004a08d6ce1c53ee9d98e44581e38a23d81828aaa417b157b876741`. The list has one row per image, 7 on 2026-11-14. Now the tag `2afe4bc70a100144209f41a440718ab4b9a1cdf8` is on `sha256:694b6bb02004...` (298,966,556 bytes, created 2026-11-14T00:19:05), and `sha256:2fb821823532...` (created 2026-11-13T20:19:13) has no tag. `describe` on either digest prints `fully_qualified_digest` equal to the reference it was given, so the first run's image is still reachable by its digest. There is no cleanup policy yet, so every main run adds an image. `gcloud` needs a login with read access to project 2.
+
+### A Slack alert did not arrive
+
+The webhook is the repository secret `SLACK_ALERT_WEBHOOK`, read only by the last step, Notify Slack. No message is expected for a successful or cancelled pull request.
+
+A repository admin sets the secret under Settings, Secrets and variables, Actions.
+
+```bash
+gh api repos/PritKalariya/boston-resilience-twin/actions/secrets --jq '.secrets[].name'   # names only; needs repo admin
+gh api repos/PritKalariya/boston-resilience-twin/actions/jobs/$(gh run view <run id> --json jobs --jq '.jobs[]|select(.name=="Train, evaluate, gate")|.databaseId')/logs | sed 's/\x1b\[[0-9;]*m//g' | grep -E 'Slack|SLACK'
+```
+
+The first prints `SLACK_ALERT_WEBHOOK`. In the second, `Slack message sent: <kind>` means Slack took it (check the channel and the webhook's app). `::warning::SLACK_ALERT_WEBHOOK is empty (not set, or a fork PR)` means the secret is missing or the run is a fork's; the message it would have sent follows in the log. `is not an https URL` means the value is wrong, and `Slack post failed (<ExceptionType>)` is a Slack or network error; neither fails the run. To see the message for a finished run without sending it:
+
+```bash
+D=$(mktemp -d); gh run download 43539609767 -D "$D"
+env -u SLACK_ALERT_WEBHOOK python3 Model-Development/scripts/steps/step_notify.py --artifacts "$D/model-artifacts" --repo PritKalariya/boston-resilience-twin --ref main --run-url https://github.com/PritKalariya/boston-resilience-twin/actions/runs/43539609767 --job-status success --main
+```
+
+It prints the warning and `Model pipeline: training complete` with the data version, decision, `F1 margin: 0.2216` and `Worst-group recall gap: 0.0435`. The same webhook serves the Airflow alerts ("Pipeline alerts (Slack)" above).
+
 ## Versioned data (DVC)
 
 The DVC remote is `gs://boston-resilience-twin-data/dvc` (`.dvc/config`), a
