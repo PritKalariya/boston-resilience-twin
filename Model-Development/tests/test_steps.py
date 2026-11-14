@@ -8,7 +8,6 @@ the real data.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -55,6 +54,7 @@ STEP_MODULES = (C, s_evaluate, notify, s_pull, s_registry, s_reload, s_rescore, 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
     monkeypatch.delenv("GITHUB_SHA", raising=False)
+    monkeypatch.delenv("MAIN_RUN", raising=False)
     monkeypatch.delenv(notify.WEBHOOK_ENV, raising=False)
 
 
@@ -114,10 +114,11 @@ def read(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def write_gate_report(art: Path, decision: str = "promote") -> dict:
+def write_gate_report(art: Path, decision: str = "promote", champion: dict | None = None) -> dict:
     gates = G.load_gates()
-    report = {"decision": decision, "gates_sha256": gates.gates_sha256,
-              "fairness_group_sha256": gates.fairness_group_sha256}
+    version = (art / "data_version.txt").read_text(encoding="utf-8").strip() if (art / "data_version.txt").exists() else None
+    report = {"decision": decision, "gates_sha256": gates.gates_sha256, "data_version": version,
+              "fairness_group_sha256": gates.fairness_group_sha256, "champion": champion}
     (art / "gate_report.json").write_text(json.dumps(report), encoding="utf-8")
     return report
 
@@ -174,16 +175,16 @@ def test_the_stub_helpers_are_gone():
     assert not (ROOT / "Model-Development" / "config" / "reload_fixture_row.json").exists()
 
 
-@pytest.mark.parametrize("module, owner", [(s_rescore, "#111"), (s_registry, "#111"), (s_champion, "#111")])
-def test_stub_and_interim_steps_start_with_their_interface_block(module, owner):
+@pytest.mark.parametrize("module", [s_rescore, s_registry, s_champion])
+def test_the_registry_steps_keep_their_contract_block(module):
+    """#111 replaced the stubs and kept the command line, the exit codes and the Reads/Writes block."""
     lines = module.__doc__.splitlines()
-    assert lines[0].startswith(f"INTERFACE FOR {owner} (") and lines[0].endswith(
-        "replace this body; keep the command line and exit codes.")
+    assert lines[0].startswith("Step: ") and "#111" in lines[0] and "INTERFACE FOR" not in module.__doc__
     name = Path(module.__file__).name
-    assert lines[1] == f"Called as: python Model-Development/scripts/steps/{name} --artifacts DIR"
-    keys = [line.split(":")[0] for line in lines[2:] if line and not line.startswith(" ")]
+    assert lines[2] == f"Called as: python Model-Development/scripts/steps/{name} --artifacts DIR"
+    keys = [line.split(":")[0] for line in lines[3:] if line and not line.startswith(" ")]
     assert keys[:4] == ["Reads", "Writes", "Exit", "Must hold"]
-    assert "Exit: 0 ok, 2 pipeline failed" in module.__doc__
+    assert "Exit: 0 ok, 2 pipeline failed" in module.__doc__ and "STUB" not in module.__doc__
 
 
 def test_the_evaluate_block_names_the_groups_and_the_reconciliation():
@@ -516,19 +517,7 @@ def test_evaluate_exits_2_on_predictions_that_disagree_with_the_counts(copy):
     assert s_evaluate.main(copy.args()) == 2
 
 
-# --- re-score the champion (stub) ----------------------------------------------------
-
-
-def test_rescore_champion_leaves_champion_null(copy):
-    assert s_rescore.main(copy.args(config=False)) == 0
-    assert read(copy.art / "metrics.json")["champion"] is None
-    assert read(copy.art / "champion_rescore.json")["champion"] is None
-
-
-def test_rescore_champion_needs_metrics_that_are_an_object(tmp_path):
-    assert s_rescore.main(["--artifacts", str(tmp_path)]) == 2
-    (tmp_path / "metrics.json").write_text("[1]")
-    assert s_rescore.main(["--artifacts", str(tmp_path)]) == 2
+# --- re-score the champion: see the registry steps below ---------------------------------
 
 
 # --- reload check ----------------------------------------------------------------------
@@ -617,53 +606,174 @@ def test_reload_check_exits_2_when_the_run_lists_no_inputs(copy):
     assert s_reload.main(copy.args()) == 2
 
 
-# --- registry push and set champion (stubs) --------------------------------------------
+# --- the registry steps: re-score, push, set champion (#111) ------------------------------------
+# registry.py runs for real against test_registry.py's FakeRegistry, which keeps the Vertex versions,
+# aliases and the model bucket in memory and moves aliases the way Vertex does.
+
+from test_registry import FakeRegistry  # noqa: E402
+
+import registry as R  # noqa: E402
+import vertex_client as V  # noqa: E402
+
+SERVING = R.load_settings().serving_image
+DIGEST = "sha256:" + "d" * 64
+COMMIT = "c" * 40
 
 
-def test_registry_json_carries_the_version_stamps(copy, monkeypatch, capsys):
-    report = write_gate_report(copy.art)
-    (copy.art / "image_digest.txt").write_text("us-east1-docker.pkg.dev/p/r/brt-train@sha256:abc\n")
-    monkeypatch.setenv("GITHUB_SHA", "0123456789abcdef0123456789abcdef01234567")
+@pytest.fixture
+def vertex(monkeypatch):
+    """One fake registry behind every VertexClient the steps create."""
+    client = FakeRegistry(R.load_settings())
+    monkeypatch.setattr(V, "VertexClient", lambda settings: client)
+    return client
+
+
+def as_in_the_image(copy, monkeypatch, digest: bool = True):
+    """The workflow on main: the image has no .git (run.json records no commit, the push takes GITHUB_SHA)
+    and image_digest.txt holds the registry digest the image push wrote."""
+    for path in copy.settings().runs_dir.glob("ci-*/run.json"):
+        data = read(path)
+        data["git"] = {"commit": None, "uncommitted_changes": None}
+        path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("GITHUB_SHA", COMMIT)
+    (copy.art / "image_digest.txt").write_text(f"{SERVING}@{DIGEST}\n" if digest else "sha256:localid\n")
+
+
+def gates_and_reload(copy) -> int:
+    """gates.py on the evaluate step's (re-scored) metrics, then the reload check; the gates' exit code."""
+    code = G.main(["--metrics", str(copy.art / "metrics.json"), "--out", str(copy.art / "gate_report.json")])
+    assert s_reload.main(copy.args()) == 0
+    return code
+
+
+def test_rescore_with_no_champion_leaves_it_null(copy, vertex):
+    assert s_rescore.main(copy.args()) == 0
+    assert read(copy.art / "metrics.json")["champion"] is None
+    assert "no version holds production" in read(copy.art / "champion_rescore.json")["reason"]
+
+
+def test_rescore_needs_the_evaluate_steps_metrics(tmp_path, copy, vertex):
+    assert s_rescore.main(["--artifacts", str(tmp_path)]) == 2
+    (tmp_path / "metrics.json").write_text("[1]")
+    assert s_rescore.main(["--artifacts", str(tmp_path)]) == 2
+    metrics = read(copy.art / "metrics.json")
+    (copy.art / "metrics.json").write_text(json.dumps({**metrics, "data_version": "sha256:" + "0" * 64}))
+    assert s_rescore.main(copy.args()) == 2  # not the pulled data version
+
+
+def test_without_access_the_steps_skip_off_main_and_fail_on_main(copy, monkeypatch, capsys):
+    def no_access(settings):
+        raise V.NoAccess("no Google credentials")
+
+    monkeypatch.setattr(V, "VertexClient", no_access)
+    as_in_the_image(copy, monkeypatch)
+    assert s_rescore.main(copy.args()) == 0 and read(copy.art / "metrics.json")["champion"] is None
+    assert gates_and_reload(copy) == 0
     assert s_registry.main(copy.args()) == 0
     registry = read(copy.art / "registry.json")
-    settings, winner_run = copy.settings(), read(copy.art / "evaluation.json")["winner_run"]
-    run = read(settings.runs_dir / winner_run / "run.json")
-    assert sorted(registry) == sorted(["model_version", "pushed", "model", "data_version", "git_commit",
-                                       "mlflow_run_id", "image_digest", "gates_sha256", "fairness_group_sha256",
-                                       "windows", "decision"])
-    assert registry["pushed"] is False and registry["decision"] == "promote"
-    assert registry["model"] == {"name": read(copy.art / "evaluation.json")["winner"],
-                                 "path": f"runs/{winner_run}/model.joblib",
-                                 "sha256": hashlib.sha256((settings.runs_dir / winner_run / "model.joblib").read_bytes()).hexdigest()}
-    assert registry["data_version"] == (copy.art / "data_version.txt").read_text().strip()
-    assert registry["git_commit"] == "0123456789abcdef0123456789abcdef01234567"
-    assert registry["mlflow_run_id"] == run["mlflow"]["run_id"]
-    assert registry["image_digest"] == "us-east1-docker.pkg.dev/p/r/brt-train@sha256:abc"
-    assert (registry["gates_sha256"], registry["fairness_group_sha256"]) == (report["gates_sha256"], report["fairness_group_sha256"])
-    assert registry["windows"] == {"train": {"first": "2015-01-01", "last": "2023-12-31"},
-                                   "validation": {"first": "2024-01-01", "last": "2024-12-31"},
-                                   "test": {"first": "2025-01-01", "last": "2026-06-30"}}
-    assert "::warning::" not in capsys.readouterr().out
+    assert registry["pushed"] is False and registry["model_version"] is None and "no project 2 access" in registry["skipped"]
+    assert s_champion.main(copy.args(config=False)) == 0 and not (copy.art / "champion.json").exists()
+    assert "registry push skipped" in capsys.readouterr().out
+
+    monkeypatch.setenv("MAIN_RUN", "true")
+    assert s_rescore.main(copy.args()) == 2
+    assert "needs project 2 access" in capsys.readouterr().err
+    assert s_registry.main(copy.args()) == 2
+    assert s_champion.main(copy.args(config=False)) == 2  # the push record says skipped: not on main
 
 
-def test_registry_push_warns_without_a_digest_or_a_commit(copy, capsys):
+def test_two_main_runs_push_promote_and_rescore_the_champion(copy, vertex, monkeypatch, capsys):
+    """Run 1 has no champion: its winner is pushed and becomes production. Run 2 retrains on the same data:
+    the champion is downloaded, its sha256 checked, re-scored on the same validation rows, and compared."""
+    monkeypatch.setenv("MAIN_RUN", "true")
+    as_in_the_image(copy, monkeypatch)
+    assert s_rescore.main(copy.args()) == 0
+    assert gates_and_reload(copy) == 0 and read(copy.art / "gate_report.json")["decision"] == "promote"
+    assert s_registry.main(copy.args()) == 0
+    registry = read(copy.art / "registry.json")
+    push = read(copy.art / "push.json")
+    assert registry["pushed"] is True and registry["model_version"] == push["version"] == f"{push['model_name']}@1"
+    assert registry["git_commit"] == COMMIT and registry["image_digest"] == f"{SERVING}@{DIGEST}"
+    body = vertex.versions["1"]
+    assert body["containerSpec"]["imageUri"] == f"{SERVING}@{DIGEST}" and body["versionAliases"] == ["candidate"]
+    assert body["labels"]["git_commit"] == COMMIT
+    assert registry["files_uri"].startswith(f"gs://{R.load_settings().model_bucket}/surge-forecast/ci-")
+    winner = read(copy.art / "evaluation.json")["winner"]
+    assert body["labels"]["model"] == winner
+    assert s_champion.main(copy.args(config=False)) == 0
+    assert read(copy.art / "champion.json") == {"action": "set champion", "model_name": push["model_name"],
+                                                "model_version": "1", "previous": None}
+    assert vertex.aliases() == {"1": ["candidate", "production"]}
+    first_counts = read(copy.art / "metrics.json")["candidate"]
+
+    # run 2: a fresh artifacts folder, trained again on the same data
+    shutil.rmtree(copy.root / "runs")
+    shutil.rmtree(copy.art)
+    for step in (s_pull, s_train, s_evaluate):
+        assert step.main(copy.args()) == 0
+    as_in_the_image(copy, monkeypatch)
+    assert s_rescore.main(copy.args()) == 0
+    champion = read(copy.art / "metrics.json")["champion"]
+    assert champion["model_version"] == "1" and champion["data_version"] == read(copy.art / "metrics.json")["data_version"]
+    if read(copy.art / "evaluation.json")["winner"] == winner:  # the same model, the same rows: the same counts
+        assert {k: champion[k] for k in ("tp", "fp", "fn")} == first_counts
+    code = gates_and_reload(copy)
+    decision = read(copy.art / "gate_report.json")["decision"]
+    assert (code, decision) in ((0, "promote"), (0, "keep_champion"))
+    assert s_registry.main(copy.args()) == 0
+    assert read(copy.art / "push.json")["version_id"] == "2"  # a new folder: the MLflow run id differs
+    assert s_champion.main(copy.args(config=False)) == 0
+    if decision == "promote":
+        assert vertex.aliases() == {"1": ["previous"], "2": ["candidate", "production"]}
+    else:
+        assert vertex.aliases() == {"1": ["production"], "2": ["candidate"]}
+        assert not (copy.art / "champion.json").exists() and "keep champion" in capsys.readouterr().out
+
+
+def test_registry_push_checks_the_reload_check_and_the_data_version(copy, vertex, monkeypatch):
+    as_in_the_image(copy, monkeypatch)
     write_gate_report(copy.art)
-    assert s_registry.main(copy.args()) == 0
-    registry = read(copy.art / "registry.json")
-    assert registry["image_digest"] is None and registry["git_commit"] is None
-    assert capsys.readouterr().out.count("::warning::") == 2
+    (copy.art / "reload_check.json").unlink(missing_ok=True)  # the shared build may hold one from another test
+    assert s_registry.main(copy.args()) == 2  # no reload_check.json: the reload check did not pass
+    assert s_reload.main(copy.args()) == 0
+    reload = read(copy.art / "reload_check.json")
+    (copy.art / "reload_check.json").write_text(json.dumps({**reload, "model": "another"}))
+    assert s_registry.main(copy.args()) == 2  # the reload check was for another model
+    (copy.art / "reload_check.json").write_text(json.dumps(reload))
+    report = read(copy.art / "gate_report.json")
+    (copy.art / "gate_report.json").write_text(json.dumps({**report, "data_version": "sha256:" + "0" * 64}))
+    assert s_registry.main(copy.args()) == 2  # the gates judged another data version
+    assert vertex.versions == {} and vertex.objects == {}
 
 
 @pytest.mark.parametrize("decision", ["blocked", "error", None])
-def test_registry_push_refuses_other_decisions(copy, decision):
+def test_registry_push_refuses_other_decisions(copy, vertex, decision):
     write_gate_report(copy.art, decision)
     assert s_registry.main(copy.args()) == 2
-    assert not (copy.art / "registry.json").exists()
+    assert not (copy.art / "registry.json").exists() and vertex.calls == []
 
 
-def test_registry_push_exits_2_without_its_inputs(copy):
+def test_registry_push_digest_and_commit_are_warnings_off_main_and_errors_on_main(copy, vertex, monkeypatch, capsys):
+    as_in_the_image(copy, monkeypatch, digest=False)  # a pull request's local image ID
+    write_gate_report(copy.art)
+    assert s_reload.main(copy.args()) == 0
+    monkeypatch.setenv("MAIN_RUN", "true")
+    assert s_registry.main(copy.args()) == 2 and "holds no registry digest" in capsys.readouterr().err
+    monkeypatch.delenv("MAIN_RUN")
+    assert s_registry.main(copy.args()) == 0
+    assert "::warning::" in capsys.readouterr().out
+    assert vertex.versions["1"]["containerSpec"]["imageUri"] == SERVING  # no digest: the bare image
+    monkeypatch.setenv("MAIN_RUN", "true")
+    monkeypatch.delenv("GITHUB_SHA")
+    (copy.art / "image_digest.txt").write_text(f"{SERVING}@{DIGEST}\n")
+    assert s_registry.main(copy.args()) == 2 and "GITHUB_SHA is not set" in capsys.readouterr().err
+
+
+def test_registry_push_exits_2_without_its_inputs(copy, vertex, monkeypatch):
+    as_in_the_image(copy, monkeypatch)
     assert s_registry.main(copy.args()) == 2  # no gate report yet
     write_gate_report(copy.art)
+    assert s_reload.main(copy.args()) == 0
     run = copy.settings().runs_dir / read(copy.art / "evaluation.json")["winner_run"]
     data = read(run / "run.json")
     del data["settings"]["splits"]
@@ -671,21 +781,31 @@ def test_registry_push_exits_2_without_its_inputs(copy):
     assert s_registry.main(copy.args()) == 2
     (run / "model.joblib").unlink()
     assert s_registry.main(copy.args()) == 2
+    assert vertex.versions == {}
 
 
-def test_set_champion_promote_writes_would_set(copy, capsys):
-    write_gate_report(copy.art)
-    s_registry.main(copy.args())
+def test_set_champion_keep_changes_nothing(copy, vertex, monkeypatch, capsys):
+    """Version 1 is champion; a second push judged keep_champion against it stays a challenger."""
+    monkeypatch.setenv("MAIN_RUN", "true")
+    as_in_the_image(copy, monkeypatch)
+    assert s_rescore.main(copy.args()) == 0 and gates_and_reload(copy) == 0
+    assert s_registry.main(copy.args()) == 0 and s_champion.main(copy.args(config=False)) == 0
+    assert vertex.aliases() == {"1": ["candidate", "production"]}
+    (copy.art / "champion.json").unlink()
+
+    run = copy.settings().runs_dir / read(copy.art / "evaluation.json")["winner_run"]
+    data = read(run / "run.json")
+    data["mlflow"]["run_id"] = "f" * 32  # another training run of the same model: a new bucket folder
+    (run / "run.json").write_text(json.dumps(data))
+    report = read(copy.art / "gate_report.json")
+    champion = {"model_version": "1", "data_version": report["data_version"], "tp": 1, "fp": 0, "fn": 0, "f1": 0.5}
+    (copy.art / "gate_report.json").write_text(json.dumps({**report, "decision": "keep_champion", "champion": champion}))
+    assert s_registry.main(copy.args()) == 0 and read(copy.art / "push.json")["version_id"] == "2"
+    capsys.readouterr()
     assert s_champion.main(copy.args(config=False)) == 0
-    assert read(copy.art / "champion.json")["action"] == "would set champion"
-    assert "would set champion" in capsys.readouterr().out
-
-
-def test_set_champion_keep_changes_nothing(copy, capsys):
-    write_gate_report(copy.art, "keep_champion")
-    assert s_champion.main(copy.args(config=False)) == 0
-    assert not (copy.art / "champion.json").exists()
-    assert "keep champion" in capsys.readouterr().out
+    assert vertex.aliases() == {"1": ["production"], "2": ["candidate"]}
+    assert not (copy.art / "champion.json").exists() and "keep champion" in capsys.readouterr().out
+    assert read(copy.art / "promotion.json")["decision"] == "keep_champion"
 
 
 @pytest.mark.parametrize("decision", ["blocked", "error", None])
@@ -694,25 +814,37 @@ def test_set_champion_rejects_other_decisions(tmp_path, decision):
     assert s_champion.main(["--artifacts", str(tmp_path)]) == 2
 
 
-def test_set_champion_rejects_a_non_object_report(tmp_path):
+def test_set_champion_rejects_a_non_object_report_or_no_push(tmp_path):
     (tmp_path / "gate_report.json").write_text("[]")
     assert s_champion.main(["--artifacts", str(tmp_path)]) == 2
+    (tmp_path / "gate_report.json").write_text(json.dumps({"decision": "promote"}))
+    assert s_champion.main(["--artifacts", str(tmp_path)]) == 2  # no push.json: the push step did not run
 
 
-def test_the_real_chain_end_to_end(copy, monkeypatch):
-    """pull, train, evaluate on a fresh artifacts folder of the copy, then gates, reload and the stubs."""
+def test_main_run_reads_the_workflow_variable(monkeypatch):
+    monkeypatch.delenv("MAIN_RUN", raising=False)
+    assert C.main_run() is False
+    monkeypatch.setenv("MAIN_RUN", "false")
+    assert C.main_run() is False
+    monkeypatch.setenv("MAIN_RUN", "true")
+    assert C.main_run() is True
+
+
+def test_the_real_chain_end_to_end(copy, vertex, monkeypatch):
+    """pull, train, evaluate on a fresh artifacts folder of the copy, then re-score, gates, reload, push and
+    set champion, as model.yml runs them on main."""
     shutil.rmtree(copy.root / "runs")
     shutil.rmtree(copy.art)
-    monkeypatch.setenv("GITHUB_SHA", "c" * 40)
+    monkeypatch.setenv("MAIN_RUN", "true")
     for step in (s_pull, s_train, s_evaluate):
         assert step.main(copy.args()) == 0
-    assert s_rescore.main(copy.args(config=False)) == 0
-    code = G.main(["--metrics", str(copy.art / "metrics.json"), "--out", str(copy.art / "gate_report.json")])
+    as_in_the_image(copy, monkeypatch)
+    assert s_rescore.main(copy.args()) == 0
+    code = gates_and_reload(copy)
     assert code in (0, 1)
-    assert s_reload.main(copy.args()) == 0
     if code == 0:
         assert s_registry.main(copy.args()) == 0 and s_champion.main(copy.args(config=False)) == 0
-        assert read(copy.art / "registry.json")["git_commit"] == "c" * 40
+        assert read(copy.art / "registry.json")["git_commit"] == COMMIT
 
 
 # --- notify ----------------------------------------------------------------------------

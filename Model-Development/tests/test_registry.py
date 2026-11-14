@@ -234,7 +234,7 @@ def test_push_registers_the_winner_as_candidate(settings, training):
     assert record["version"] == f"{MODEL}@1" and record["alias"] == "candidate"
     assert client.aliases() == {"1": ["candidate"]}
     assert client.calls[0] == "find_model"  # the access check comes before anything is written
-    folder = f"surge-forecast/{RUN_ID}"
+    folder = f"surge-forecast/{RUN_ID}/{MLFLOW_RUN}"
     assert sorted(client.objects) == sorted(f"{folder}/{n}" for n in (
         "model.joblib", "run.json", "metrics.json", "validation_counts.json", "selection.json",
         "gate_report.json", "metadata.json"))

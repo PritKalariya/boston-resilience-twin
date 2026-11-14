@@ -18,6 +18,7 @@ crash.*.log
 !.env.example
 *-key.json
 *credentials*.json
+gha-creds-*.json
 *.pem
 
 # Data (versioned by DVC, never committed)

@@ -233,10 +233,32 @@ def _commit(run: dict, allow_dirty: bool = False) -> str:
     return commit
 
 
+def winner_from_evaluation(evaluation_path: Path, training: training_data.Settings) -> tuple[dict, dict]:
+    """The model workflow's winner (#112, ADR-032): (a selection.json-shaped report, its winner's row) from
+    the evaluate step's evaluation.json and the run's metrics.json, validation block only (no step reads a
+    test metric). The report's data version is the run's; build_push checks it against the gate report."""
+    evaluation = _read_json(evaluation_path, "evaluation report")
+    name, folder = evaluation.get("winner"), evaluation.get("winner_run")
+    if not name or not folder:
+        raise RegistryError(f"{evaluation_path} names no winner and winner_run: {evaluation.get('selected')!r}")
+    run_dir = Path(training.runs_dir) / str(folder)
+    run = _read_json(run_dir / "run.json", "run record")
+    validation = _read_json(run_dir / "metrics.json", "run metrics").get("validation")
+    row = {"model": name, "run_folder": str(folder), "mlflow_run_id": (run.get("mlflow") or {}).get("run_id"),
+           "validation": validation, "test": None}
+    report = {"winner": name, "ranking": [row], "data_version": run.get("data_version"),
+              "selection_id": None, "decision": evaluation.get("selected")}
+    return report, row
+
+
 def build_push(settings: Settings, training: training_data.Settings, gate_report: dict,
-               image_digest: str | None = None, allow_dirty: bool = False) -> dict:
+               image_digest: str | None = None, allow_dirty: bool = False,
+               evaluation_path: Path | None = None) -> dict:
     """Everything a push sends, read and checked before any call to project 2: the files to upload,
-    their sha256 values and the version's metadata. Fails naming what is wrong."""
+    their sha256 values and the version's metadata. Fails naming what is wrong.
+
+    The winner comes from selection.json (training.csv reports_dir), or, with evaluation_path, from
+    the model workflow's evaluation.json (the evaluate step picks it after the bias check)."""
     decision = gate_report.get("decision")
     if decision not in PUSH_DECISIONS:
         raise RegistryError(f"the gates decided {decision!r}; only {' or '.join(PUSH_DECISIONS)} is registered")
@@ -246,16 +268,20 @@ def build_push(settings: Settings, training: training_data.Settings, gate_report
     if image_digest is not None and not DIGEST_PATTERN.fullmatch(image_digest):
         raise RegistryError(f"--image-digest must be sha256:<64 hex>, got {image_digest!r}")
 
-    selection_path = Path(training.reports_dir) / "selection.json"
-    selection = _read_json(selection_path, "selection report")
-    row = _winner(selection)
+    if evaluation_path is None:
+        selection_path = Path(training.reports_dir) / "selection.json"
+        selection = _read_json(selection_path, "selection report")
+        row = _winner(selection)
+    else:
+        selection_path = Path(evaluation_path)
+        selection, row = winner_from_evaluation(selection_path, training)
     run_dir = Path(training.runs_dir) / row["run_folder"]
     run = _read_json(run_dir / "run.json", "run record")
     missing = [name for name in RUN_FILES if not (run_dir / name).is_file()]
     if missing:
         raise RegistryError(f"the winner's run folder {run_dir} is missing {missing}")
 
-    versions = {"selection.json": selection.get("data_version"), "run.json": run.get("data_version"),
+    versions = {selection_path.name: selection.get("data_version"), "run.json": run.get("data_version"),
                 "gate report": gate_report.get("data_version")}
     if len(set(versions.values())) != 1 or not versions["run.json"]:
         raise RegistryError(f"the data versions differ: {versions}")
@@ -267,9 +293,13 @@ def build_push(settings: Settings, training: training_data.Settings, gate_report
         raise RegistryError(f"run.json settings.splits must name {list(training_data.SPLITS)}: {splits!r}")
 
     commit = _commit(run, allow_dirty)
-    folder = f"{settings.model_display_name}/{run['run_id']}"
+    if not re.fullmatch(r"[0-9a-zA-Z_-]+", str(mlflow_run_id)):
+        raise RegistryError(f"the MLflow run id is not a plain id: {mlflow_run_id!r}")
+    # The MLflow run id makes the folder unique per training run: the model workflow reuses the run ids
+    # ci-<model> on every run, and the bucket never overwrites a file.
+    folder = f"{settings.model_display_name}/{run['run_id']}/{mlflow_run_id}"
     files = {name: run_dir / name for name in RUN_FILES}
-    files["selection.json"] = selection_path
+    files[selection_path.name] = selection_path  # selection.json, or the workflow's evaluation.json
     metadata = {
         "model": row["model"], "run_id": run["run_id"], "selection_id": selection.get("selection_id"),
         "data_version": versions["run.json"], "git_commit": commit, "mlflow_run_id": mlflow_run_id,
@@ -326,9 +356,9 @@ def tag_mlflow(training: training_data.Settings, mlflow_run_id: str, tags: dict[
 
 
 def push(settings: Settings, training: training_data.Settings, client, gate_report: dict,
-         image_digest: str | None = None) -> dict:
+         image_digest: str | None = None, evaluation_path: Path | None = None) -> dict:
     """Register the winner as a new version with the candidate alias; returns the push record."""
-    plan = build_push(settings, training, gate_report, image_digest)
+    plan = build_push(settings, training, gate_report, image_digest, evaluation_path=evaluation_path)
     parent = client.find_model()  # the access check: a NoAccess here means skip, before anything is written
     with _access_checked():
         return _push(settings, training, client, plan, gate_report, parent)
@@ -616,8 +646,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default=DEFAULT_CONFIG, help="registry.csv")
     parser.add_argument("--training-config", default=training_data.DEFAULT_CONFIG, help="training.csv")
     commands = parser.add_subparsers(dest="command", required=True)
+    require = {"action": "store_true",
+               "help": "no project 2 access is an error (exit 2), not a skip: the model workflow on main"}
     cmd = commands.add_parser("push", help="register selection.json's winner as the candidate")
     cmd.add_argument("--gate-report", required=True, help="gates.py --out file for this model")
+    cmd.add_argument("--evaluation", help="the model workflow's evaluation.json: its winner instead of selection.json's")
+    cmd.add_argument("--require-access", **require)
     cmd.add_argument("--image-digest", help="the training image digest, sha256:<64 hex>")
     cmd.add_argument("--out", help="write the push record JSON here (also when skipped)")
     cmd.add_argument("--dry-run", action="store_true", help="check the inputs and print the plan; no calls")
@@ -625,6 +659,7 @@ def _parser() -> argparse.ArgumentParser:
     cmd.add_argument("--push-record", required=True, help="push --out file")
     cmd.add_argument("--gate-report", required=True, help="the gates.py --out file the push used")
     cmd.add_argument("--out", help="write the promotion record JSON here (also when skipped)")
+    cmd.add_argument("--require-access", **require)
     cmd = commands.add_parser("rollback", help="set the champion back to the previous version")
     cmd.add_argument("--to", help="a version id to roll back to instead of the one holding previous")
     cmd.add_argument("--out", help="write the rollback record JSON here")
@@ -632,6 +667,7 @@ def _parser() -> argparse.ArgumentParser:
     cmd = commands.add_parser("rescore", help="score the champion on this data version into the gates input")
     cmd.add_argument("--metrics", required=True, help="the gates input; its champion is set in place")
     cmd.add_argument("--out", help="write the re-score record JSON here")
+    cmd.add_argument("--require-access", **require)
     return parser
 
 
@@ -671,15 +707,19 @@ def _cmd_push(args, settings: Settings, vertex_client) -> int:
     training = training_data.load_settings(args.training_config)
     gate_report = _read_json(Path(args.gate_report), "gate report")
     # bad inputs fail even without access; a dry run only warns about a dirty tree
-    plan = build_push(settings, training, gate_report, args.image_digest, allow_dirty=args.dry_run)
+    evaluation = Path(args.evaluation) if args.evaluation else None
+    plan = build_push(settings, training, gate_report, args.image_digest, allow_dirty=args.dry_run,
+                      evaluation_path=evaluation)
     if args.dry_run:
         plan["files"] = {name: str(path) for name, path in plan["files"].items()}
         print(json.dumps(plan, indent=2, sort_keys=True))
         return 0
     try:
         client = vertex_client.VertexClient(settings)
-        record = push(settings, training, client, gate_report, args.image_digest)
+        record = push(settings, training, client, gate_report, args.image_digest, evaluation_path=evaluation)
     except vertex_client.NoAccess as exc:
+        if args.require_access:
+            raise RegistryError(f"registry push needs project 2 access: {exc}") from None
         _write({"skipped": f"no project 2 access ({exc})"}, args.out)
         print(f"registry push skipped: no project 2 access ({exc})")
         return 0
@@ -691,6 +731,8 @@ def _cmd_push(args, settings: Settings, vertex_client) -> int:
 
 def _cmd_promote(args, settings: Settings, vertex_client) -> int:
     push_record = _read_json(Path(args.push_record), "push record")
+    if "skipped" in push_record and args.require_access:
+        raise RegistryError(f"the push was skipped, but this run needs project 2 access: {push_record['skipped']}")
     if "skipped" in push_record:
         _write({"skipped": push_record["skipped"]}, args.out)
         print(f"promotion skipped: the push was skipped ({push_record['skipped']})")
@@ -700,6 +742,8 @@ def _cmd_promote(args, settings: Settings, vertex_client) -> int:
         client = vertex_client.VertexClient(settings)
         record = promote(settings, client, push_record, gate_report)
     except vertex_client.NoAccess as exc:
+        if args.require_access:
+            raise RegistryError(f"promotion needs project 2 access: {exc}") from None
         _write({"skipped": f"no project 2 access ({exc})"}, args.out)
         print(f"promotion skipped: no project 2 access ({exc})")
         return 0
@@ -721,6 +765,8 @@ def _cmd_rescore(args, settings: Settings, vertex_client) -> int:
         client = vertex_client.VertexClient(settings)
         block, record = rescore(settings, training, client)
     except vertex_client.NoAccess as exc:
+        if args.require_access:
+            raise RegistryError(f"the champion re-score needs project 2 access: {exc}") from None
         block, record = None, {"champion": None, "skipped": f"no project 2 access ({exc})"}
         print(f"champion re-score skipped: no project 2 access ({exc}); champion stays null")
     path.write_text(json.dumps(set_champion_block(metrics, block), indent=2) + "\n", encoding="utf-8")
