@@ -4,8 +4,12 @@
 # training image (Model-Development/Dockerfile) through .github/scripts/in_image.sh, which
 # defines the one `docker run` prefix and its mounts. The data pull is on the runner, with
 # DVC and the CI identity from project 2 (#131, ADR-030); the image never holds data or a
-# credential. The registry push and the champion step are still stubs (#111), and the
-# per-group counts in the evaluate step are interim (#110): both are marked in their files.
+# credential. The champion re-score, the registry push and the champion step are still stubs
+# (#111), marked in their files with the interface #111 plugs into. The evaluate step is real
+# (#110, ADR-033): it ranks the candidates by validation F1, keeps the first whose ADR-026
+# fairness gate passes (the top-ranked one when none does, so gates.py blocks it), writes the
+# gates' per-group counts from that winner's validation predictions, and writes the winner's
+# validation bias report to artifacts/bias/ and to its MLflow run.
 #
 # The workflow runs on every pull request, so the check always reports. The `changes`
 # job finds out whether model files changed (Model-Development/, this file, the script it
