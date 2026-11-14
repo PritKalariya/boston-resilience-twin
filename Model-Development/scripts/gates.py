@@ -288,6 +288,19 @@ def _check_groups_file(gates: Gates) -> None:
             )
 
 
+def poverty_groups(gates: Gates) -> dict[str, str]:
+    """neighborhood -> its group (one of fairness_groups, or UNGROUPED) from the poverty groups file.
+    load_gates has already checked the file against fairness_group_sha256, its labels and the median
+    rule, so this only reads it: the one reader of the file for the bias check (#110) and the model
+    workflow's evaluate step."""
+    source = (REPO_ROOT / gates.fairness_group_source).resolve()
+    try:
+        rows = list(csv.reader(source.read_text(encoding="utf-8").splitlines()))
+    except OSError as exc:
+        raise ConfigError(f"fairness_group_source {gates.fairness_group_source!r} cannot be read") from exc
+    return {row[0].strip(): row[2].strip() for row in rows[1:] if len(row) >= 3 and row[0].strip()}
+
+
 class Undefined(Exception):
     """An input the gates cannot be evaluated on (decision 'error')."""
 
