@@ -97,6 +97,24 @@ def read_data_version(artifacts: Path) -> str:
     return text
 
 
+def main_run() -> bool:
+    """A run on main (model.yml MAIN_RUN, passed in by in_image.sh): the registry steps need project 2
+    access there, so a refusal fails the step instead of skipping it (#111)."""
+    import os
+
+    return os.environ.get("MAIN_RUN", "").strip() == "true"
+
+
+def registry_main(args: list[str], what: str) -> None:
+    """Run registry.py's command line in this process; a non-zero exit is a pipeline failure."""
+    import registry
+
+    flags = ["--require-access"] if main_run() else []
+    code = registry.main([*args, *flags])
+    if code != 0:
+        raise StepError(f"registry.py {what} exited {code}")
+
+
 def run(step, argv: list[str] | None) -> int:
     """Run a step body; any exception is a pipeline failure, exit 2 (exit 1 is the gates').
 

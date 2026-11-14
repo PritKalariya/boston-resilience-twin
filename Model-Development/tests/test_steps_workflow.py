@@ -134,3 +134,86 @@ def test_the_failed_step_names_slack_gets_are_real_step_names(steps):
     for named in re.findall(r'check "([^"]+)"', notify):
         assert any(n.startswith(named) for n in names), named
     assert "--failed-step" in notify and "--gates-exit" in notify
+
+
+# --- Google credentials only in the three main-only registry steps (ADR-035) --------------------
+
+REGISTRY_STEPS = ("Re-score the champion (main only)", "Registry push (main only)", "Set champion (main only)")
+
+
+def test_only_the_three_registry_steps_mount_credentials(workflow, steps):
+    flagged = [s["name"] for s in steps if "MOUNT_GCP_CREDENTIALS" in (s.get("env") or {})]
+    assert sorted(flagged) == sorted(REGISTRY_STEPS)
+    assert all(step(steps, name)["env"]["MOUNT_GCP_CREDENTIALS"] == "1" for name in REGISTRY_STEPS)
+    assert all(step(steps, name)["if"] == "env.MAIN_RUN == 'true'" for name in REGISTRY_STEPS)
+    assert "MOUNT_GCP_CREDENTIALS" not in (workflow["jobs"]["pipeline"].get("env") or {})
+    assert "MOUNT_GCP_CREDENTIALS" not in (workflow.get("env") or {})
+
+
+def test_the_script_never_mounts_the_workspace():
+    script = SCRIPT.read_text(encoding="utf-8")
+    sources = re.findall(r"source=([^,\"]+)", script)
+    assert sources and all(s != "$PWD" and s.rstrip("/") != "$PWD" for s in sources), sources
+    assert all(not s.startswith("$PWD") or s.startswith(("$PWD/Data-Pipeline/", "$PWD/Model-Development/config"))
+               for s in sources), sources
+
+
+def test_the_credentials_file_stays_out_of_the_image():
+    """.gitignore names it too; the compose test service does not mount .gitignore, so it is not read here."""
+    ignore = (ROOT / "Model-Development" / "Dockerfile.dockerignore").read_text(encoding="utf-8").splitlines()
+    assert "gha-creds-*.json" in ignore and "**/gha-creds-*.json" in ignore
+
+
+@pytest.fixture
+def fake_docker(tmp_path):
+    """in_image.sh run with a docker that records its arguments instead of starting a container."""
+    import os
+    import shutil
+    import subprocess
+
+    if shutil.which("bash") is None:
+        pytest.skip("bash is not installed")
+    bin_dir, record = tmp_path / "bin", tmp_path / "docker_args.txt"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{record}"\n', encoding="utf-8")
+    docker.chmod(0o755)
+
+    def run(**env_changes):
+        env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "IMAGE": "brt-train:test",
+               "ARTIFACTS_DIR": str(tmp_path / "artifacts")}
+        env.pop("MOUNT_GCP_CREDENTIALS", None)
+        env.update(env_changes)
+        record.unlink(missing_ok=True)
+        done = subprocess.run(["bash", str(SCRIPT), "python", "-c", "pass"], cwd=tmp_path, env=env,
+                              capture_output=True, text=True, timeout=60)
+        args = record.read_text(encoding="utf-8").splitlines() if record.exists() else None
+        return done, args
+
+    return run
+
+
+def test_no_credentials_without_the_flag(fake_docker, tmp_path):
+    creds = tmp_path / "gha-creds-x.json"
+    creds.write_text("{}", encoding="utf-8")
+    done, args = fake_docker(GOOGLE_APPLICATION_CREDENTIALS=str(creds))  # exported by the auth step, flag unset
+    assert done.returncode == 0, done.stderr
+    assert not any("/run/gcp" in a or "gha-creds" in a or a.startswith("GOOGLE_APPLICATION_CREDENTIALS") for a in args)
+
+
+def test_the_flag_mounts_the_file_read_only(fake_docker, tmp_path):
+    creds = tmp_path / "gha-creds-x.json"
+    creds.write_text("{}", encoding="utf-8")
+    done, args = fake_docker(MOUNT_GCP_CREDENTIALS="1", GOOGLE_APPLICATION_CREDENTIALS=str(creds))
+    assert done.returncode == 0, done.stderr
+    assert f"type=bind,source={creds.resolve()},target=/run/gcp/credentials.json,readonly" in args
+    assert "GOOGLE_APPLICATION_CREDENTIALS=/run/gcp/credentials.json" in args
+    assert args.index("brt-train:test") > args.index("GOOGLE_APPLICATION_CREDENTIALS=/run/gcp/credentials.json")
+
+
+@pytest.mark.parametrize("creds", ["", "missing.json"])
+def test_the_flag_without_a_file_exits_2_and_runs_nothing(fake_docker, tmp_path, creds):
+    done, args = fake_docker(MOUNT_GCP_CREDENTIALS="1",
+                             GOOGLE_APPLICATION_CREDENTIALS=str(tmp_path / creds) if creds else "")
+    assert done.returncode == 2 and args is None
+    assert "names no file" in done.stderr

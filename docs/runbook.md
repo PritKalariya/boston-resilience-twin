@@ -902,6 +902,53 @@ python Model-Development/scripts/sensitivity.py --selection Model-Development/ru
   - The tuning importances depend on the platform. They match `importance.csv` on the machine that ran the studies; on Linux they differ by up to 0.004 (0.0037 measured), in the same order. `hp_importance.csv`, the LightGBM and XGBoost importance charts and the tuning lines of `report.md` differ with them.
   - The other charts, except the beeswarm, are not byte-identical between the platforms either, but they match pixel for pixel: only their PNG compression differs.
 
+### Model registry (#111, ADR-006)
+
+The Vertex AI Model Registry in project 2 holds one model, `surge-forecast`; every push is a new version of it. The settings are in `Model-Development/registry/registry.csv`, not in `Model-Development/config`, because the training stage depends on that whole folder and a registry setting must not retrain the model. Credentials are Application Default Credentials: the CI identity in GitHub Actions (#131), or `gcloud auth application-default login` on a laptop. Calls are billed to project 2, so a personal login needs no quota project.
+
+- **Credentials in the training image** (ADR-035). On main, only the re-score, registry push and set champion steps get ci-writer's credentials file, mounted read-only by `in_image.sh` with `MOUNT_GCP_CREDENTIALS=1`; every other step and every pull request run has none. To run one of these steps in the image from a laptop, after `gcloud auth application-default login`:
+
+  ```bash
+  MOUNT_GCP_CREDENTIALS=1 GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json \
+    ARTIFACTS_DIR=<dir> IMAGE=brt-train:local bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_rescore_champion.py --artifacts artifacts
+  ```
+
+  A user login is billed through the quota project `registry.py` sets (project 2). The file is your own login: never set the flag on a step that does not need project 2.
+- **Aliases.** `candidate` is the newest pushed version, `production` the champion, `previous` what a rollback restores. `default` is never used: Vertex moves it by itself when a version is deleted.
+- **One run, in this order** (`registry.py` subcommands; on main the model workflow, #112, calls them through `step_rescore_champion.py`, `step_registry_push.py` with `--evaluation artifacts/evaluation.json`, and `step_set_champion.py`):
+  1. `rescore --metrics <gates input>`: downloads the `production` version from the model bucket, checks its `model.joblib` against the sha256 in its `metadata.json`, scores it on the validation rows of this data version with the shared threshold rule, and writes the `champion` block into the gates input (null with no champion). Exits 2 when the champion needs an input this data does not have, or does not load.
+  2. `gates.py --metrics <gates input> --out gate_report.json` (ADR-026).
+  3. `push --gate-report gate_report.json [--image-digest sha256:...] --out push.json`: only for `promote` or `keep_champion`. Uploads the winner's files to `gs://boston-resilience-twin-p2-models/surge-forecast/<run id>/<MLflow run id>/` (never overwritten; the MLflow run id makes the folder new for every training run, since the workflow's run ids are always `ci-<model>`), with `metadata.json`: metrics, data version, git commit, MLflow run id, image digest, the train, validation and test windows, the `gates.csv` sha256 and every file's sha256. Registers the version, gives it `candidate`, and tags the MLflow run with `registry_version` when MLflow answers. It refuses a run trained on a tree with uncommitted changes; `--dry-run` only warns and prints the plan.
+  4. `promote --push-record push.json --gate-report gate_report.json --out promotion.json`: the rollback rule. With `promote`, the old champion gets `previous` and the pushed version `production`; with `keep_champion`, nothing moves. It refuses a gate report whose champion is not the version holding `production` on this data version, and a gate report other than the one the push uploaded (the version's `gate_report` label).
+- **Without project 2 access** `rescore` leaves `champion` null, `push` logs `registry push skipped: ...` and writes `{"skipped": ...}` to `--out`, and `promote` skips on that record. All exit 0, so the run still succeeds. On main the steps pass `--require-access`: ci-writer's credentials are always mounted there (ADR-035), so no access fails the step (exit 2) and Slack names it, instead of a green run that registered nothing. The push step on main also fails without `GITHUB_SHA` or without the registry digest of the training image. Only a refusal of the first call is a skip: once project 2 has answered, a 401 or 403 (a missing role, expired credentials) is an error and exits 2, so a run cannot go green with the registry half changed.
+- **A push that failed after uploading** (the files are in `gs://boston-resilience-twin-p2-models/surge-forecast/<run id>/<MLflow run id>/` but no version names them) cannot be pushed again from the same training run: the bucket never overwrites, so the second try fails on the first file. Rerun the model workflow, which trains again under a new MLflow run id and so writes a new folder. The orphaned folder costs cents; after `registry.py status` shows no version naming it, a bucket admin may delete it (`gcloud storage rm -r gs://boston-resilience-twin-p2-models/surge-forecast/<run id>/<MLflow run id>/`; `ci-writer` cannot delete).
+- **A promotion that failed partway.** If moving `production` fails, `promote` puts `previous` back and exits 2. If putting it back fails too, it exits 2 with both errors and the alias state, for example "`previous` is on version 4 and should be on version 3; `production` is still on version 4". Run `registry.py status`, then move `previous` back to the named version (or remove it) with the Vertex AI `mergeVersionAliases` call, or in the console's version list. `production` has not moved, so the champion is unchanged.
+- **See what serves:**
+
+  ```bash
+  python Model-Development/scripts/registry.py status
+  ```
+
+- **Roll back** (a person runs it; no access is an error here):
+
+  ```bash
+  python Model-Development/scripts/registry.py rollback            # production back to the version holding previous
+  python Model-Development/scripts/registry.py rollback --to 3     # or to a named version
+  ```
+
+  Afterwards `production` and `previous` name the same version until the next promotion (ADR-006 step 5). Only the aliases move: there is no forecast API on Cloud Run yet, so no traffic moves.
+- **The champion loads with today's libraries.** A scikit-learn or XGBoost upgrade that cannot read an old `model.joblib` makes `rescore` exit 2, naming the error. Load models only from the project's own bucket: joblib can run code while loading.
+
+### dvc.lock check (#111)
+
+CI fails when a code dependency in `Data-Pipeline/dvc.lock` or `Model-Development/dvc.lock` (a script, a config file or folder, another lock) no longer matches the file in the tree, because the data version a model records is the sha256 of a lock. Data dependencies are not checked: they are not in git. A folder is hashed from its git-tracked files only, as a CI checkout has it, so a local `__pycache__` or scratch file is no mismatch, while a new file counts once it is added to git. Run it locally from an LF checkout:
+
+```bash
+python Model-Development/scripts/lock_check.py
+```
+
+It names each stale dependency and prints the `dvc repro --single-item <stage>` command that refreshes the lock; refresh it as in "Training stage (DVC, #107)" or "Stages (#18, ADR-024)" and commit the lock.
+
 ## Versioned data (DVC)
 
 The DVC remote is `gs://boston-resilience-twin-data/dvc` (`.dvc/config`), a
