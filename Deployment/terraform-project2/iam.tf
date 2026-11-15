@@ -38,9 +38,10 @@ resource "google_artifact_registry_repository_iam_member" "ci_writer_images" {
 # --- Vertex AI service agent ------------------------------------------------
 
 # models:upload checks that the Vertex AI service agent can read the version's
-# container image, and the agent's default role does not cover brt-images: the
-# first main run failed with 400 "does not have permission to access Artifact
-# Registry repository" (#111). Read on the one repository, not project wide.
+# container image, and the agent's default role lacks a permission that check
+# needs on brt-images: the first main run failed with 400 "does not have
+# permission to access Artifact Registry repository" (#111). Read on the one
+# repository, not project wide.
 # Google creates the agent when the Vertex AI API is enabled; its email is
 # fixed by the project number.
 resource "google_artifact_registry_repository_iam_member" "vertex_agent_images" {

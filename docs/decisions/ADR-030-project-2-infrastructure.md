@@ -5,7 +5,7 @@
 - Owner: Kirtan10
 - Phase: model
 - Amends ADR-009: Cloud Storage for model files is in project 2, not project 1
-- Note (2026-11-15): the Vertex AI service agent (`service-<project number>@gcp-sa-aiplatform.iam.gserviceaccount.com`) gets `roles/artifactregistry.reader` on `brt-images` only. `models:upload` checks that the agent can read the version's container image, and its default role does not cover the repository: the first main run that reached the push failed with a 400 on it (run 43749795990, #111). This is the agent grant the Consequences foresee; `ci-writer`'s roles do not change.
+- Note (2026-11-15): the Vertex AI service agent (`service-<project number>@gcp-sa-aiplatform.iam.gserviceaccount.com`) gets `roles/artifactregistry.reader` on `brt-images` only. `models:upload` checks that the agent can read the version's container image, and its default role (`roles/aiplatform.serviceAgent`) lacks a permission that check needs: the first main run that reached the push failed with a 400 on it (run 43749795990, #111). This is the agent grant the Consequences foresee; `ci-writer`'s roles do not change.
 
 ## Context
 
@@ -71,7 +71,7 @@ gcloud storage buckets update gs://boston-resilience-twin-p2-tfstate --versionin
 - #111 uploads with `ci-writer` through `google-github-actions/auth` with the `workload_identity_provider` output, writes each version's files under its own path in the model bucket, and skips the push without project 2 access.
 - #112 part 3 authenticates PR runs as `ci-reader` and main runs as `ci-writer`, and pushes the training image to the `image_repository` output.
 - Prit adds both service account emails (outputs `ci_reader_email`, `ci_writer_email`) as `storage.objectViewer` on `boston-resilience-twin-data` in project 1's Terraform.
-- The Vertex AI service agent reads model files in its own project with its default role, but not `brt-images`: it has `artifactregistry.reader` on that repository (note of 2026-11-15). If an upload fails on access, the fix is a grant to that agent here, not a broader CI role.
+- The Vertex AI service agent reads model files in its own project with its default role; for the image check at upload it also has `artifactregistry.reader` on `brt-images` (note of 2026-11-15). If an upload fails on access, the fix is a grant to that agent here, not a broader CI role.
 - Budget alerts email the billing account's admins: the project 2 owner.
 - Costs: APIs, service accounts, the pool, the budget and the registry are free while nothing is deployed. Storage and images are cents a month. Teardown: `terraform destroy -var-file=terraform.tfvars` in `Deployment/terraform-project2/` after emptying the model bucket, then delete the state bucket and the project by hand.
 
