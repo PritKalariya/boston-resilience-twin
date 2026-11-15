@@ -44,6 +44,14 @@ jobs:
           pip install ruff==0.17.2
           ruff check --output-format=github .
 
+      # Every code dependency in Data-Pipeline/dvc.lock and Model-Development/dvc.lock must match the
+      # file in the tree (#111): the data version a model records is the sha256 of a lock, so a stale
+      # lock would tie a model to code that is no longer there. Needs git and PyYAML only, no data.
+      - name: Check dvc.lock against the tree
+        run: |
+          pip install PyYAML==6.0.3
+          python Model-Development/scripts/lock_check.py
+
       # The README and runbook command: builds the Airflow image (airflow.Dockerfile),
       # prints the Python version and stops unless it is 3.12, then runs every test
       # and fails below the coverage bar in .coveragerc.

@@ -1,0 +1,10 @@
+setting,value,options,note
+project,boston-resilience-twin-p2,GCP project id,project 2 holds the Vertex AI Model Registry (ADR-009)
+region,us-east1,GCP region,must match the model bucket and the image repository (ADR-006; Deployment/terraform-project2 variable region)
+model_display_name,surge-forecast,text,the one registry model for the surge forecast; every push is a new version of it (ADR-006)
+model_bucket,boston-resilience-twin-p2-models,bucket name,model files at a new path per version that is never overwritten (ADR-006; terraform output model_bucket)
+serving_image,us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images/brt-train,image URI without tag,the container each version names; the training image until the forecast API image exists; Vertex copies it at upload but never runs it (no endpoint)
+alias_candidate,candidate,alias,a new version gets it on push (ADR-006 step 2)
+alias_production,production,alias,the champion; moves only on promotion or rollback; never default (ADR-006)
+alias_previous,previous,alias,the version a rollback restores (ADR-006 step 4)
+dvc_locks,Data-Pipeline/dvc.lock;Model-Development/dvc.lock,paths from the repo root separated by ;,code dependency md5 values checked against the tree (step 6)

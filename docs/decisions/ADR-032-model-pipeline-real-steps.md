@@ -1,6 +1,6 @@
 # ADR-032: The model pipeline on real steps: runner-side data pull, a pinned training image, reload check on every ref
 
-- Status: accepted
+- Status: accepted; decision 1 amended by [ADR-035](ADR-035-registry-step-credentials.md)
 - Date: 2026-11-11
 - Owner: PritKalariya
 - Phase: model
