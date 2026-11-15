@@ -4,7 +4,8 @@ The models for Boston Resilience Twin, and the tools they train and log with. Ea
 
 1. [MLflow tracking server (M1)](#mlflow-tracking-server-m1)
 2. [Hyperparameter tuning with Optuna (M6)](#hyperparameter-tuning-with-optuna-m6)
-3. [Sensitivity analysis: SHAP and hyperparameter importance (M10)](#sensitivity-analysis-shap-and-hyperparameter-importance-m10)
+3. [Model bias check (M7)](#model-bias-check-m7)
+4. [Sensitivity analysis: SHAP and hyperparameter importance (M10)](#sensitivity-analysis-shap-and-hyperparameter-importance-m10)
 
 ## MLflow tracking server (M1)
 
@@ -210,6 +211,56 @@ The other models are not tuned, so both runs give them the same numbers. LightGB
 - `tests/test_tune.py` (the settings, the search spaces, the confirmation rule, a 2-trial run, that no validation or test row reaches a trial, and that the same seed gives the same studies) and `tests/test_compare_tuned.py` (the comparison), both in the full test suite.
 
 The operating steps, with the exact commands of the promotion, are in the runbook's [Hyperparameter tuning (#109)](../docs/runbook.md#hyperparameter-tuning-109).
+
+## Model bias check (M7)
+
+The bias part of model selection (#110, ADR-033). It checks every candidate against ADR-026's fairness gate on validation, picks the winner after that check, and reports how the model does for the groups #32 found. Every command here was run on main at `2afe4bc` on 2026-11-14 (macOS arm64, Docker Desktop), on data `a719afeb`.
+
+**What it does**
+
+- **Gates on poverty.** The gate compares recall on validation surge days between the two ACS poverty groups of `config/poverty_groups.csv`. Groups with fewer than 5 surges are pooled, and the gap must be at most 0.15. All of it comes from `config/gates.csv` through `gates.evaluate()`, so the check and `gates.py` use one definition.
+- **Picks the winner after bias.** In the model workflow, `step_evaluate.py` ranks the candidates by validation F1 and picks the first whose gate passes. `gates.py` still decides promotion.
+- **Reports the other groups, not gated:** people of color, limited English, flood zone and each neighborhood, on validation and test, with Fairlearn's `MetricFrame`. It also shows the higher-poverty group in two parts, student areas and the rest (#126).
+- **Checks ADR-026's reopen conditions,** and reports them for the gate's owner without blocking promotion.
+- **States the residual reporting bias:** storm requests per 1,000 residents a year by poverty group, which the labels still carry.
+
+**How to run it** (from the repo root, after the data pull; the runbook's "Model bias check (#110, ADR-033)" has the details):
+
+```bash
+docker build -f Model-Development/Dockerfile -t brt-train:local .
+A=$(mktemp -d); export IMAGE=brt-train:local ARTIFACTS_DIR=$A
+for s in pull_data train evaluate; do bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_$s.py --artifacts artifacts || break; done
+bash .github/scripts/in_image.sh python Model-Development/scripts/bias.py --run Model-Development/runs/ci-lightgbm   # validation and test, for one run
+```
+
+After a change to #32's groups or the static layers, rewrite `config/slice_groups.csv` on the host (the runbook's "Regenerate `slice_groups.csv`" has the drift test and the `select` stage refresh):
+
+```bash
+python Data-Pipeline/scripts/model_groups.py
+```
+
+On this data version every candidate passes: LightGBM 0.043, XGBoost 0.046, logistic regression 0.015. LightGBM, the best validation F1 (0.3435), is selected, and `gates.py` gives `promote`. The neighborhood reopen condition holds for West End and Fenway on validation. ADR-026's owner decided not to reopen (ADR-026, note of 2026-11-12).
+
+**What it produces**
+
+- `bias.json` (the gate, every group's numbers, the reopen conditions and the reporting bias), `bias_slices.csv`, `bias_report.md` and `bias_recall.png` (validation recall by group, the gated groups dark, with a line at the best gated recall minus the limit).
+- In the workflow: the winner's validation report in `artifacts/bias/`, and `evaluation.json` with each candidate's gap and how the winner was chosen.
+- In MLflow: the same files in the winner's run under `bias/`, the tags `bias_gate`, `bias_reopen_neighborhoods` and `bias_reopen_two_parts`, and the metric `validation_worst_group_recall_gap`.
+
+**Where results live**
+
+- **Workflow runs:** the `model-artifacts` upload of each model workflow run (`bias/`, `evaluation.json`, `metrics.json`).
+- **A `bias.py` run:** the run folder `Model-Development/runs/<run id>/` (gitignored), or `--out-dir`.
+- **MLflow:** the `model-training` experiment, in the winner's run.
+- **The per-group numbers on this data version** are in ADR-033's "Results".
+
+**Code**
+
+- `scripts/bias.py`: the check, the slicing, the report and the CLI.
+- `scripts/steps/step_evaluate.py`: selection after bias in the workflow.
+- `scripts/gates.py`: `gates.evaluate()` and `gates.poverty_groups()`, the one reader of `poverty_groups.csv`.
+- `config/slice_groups.csv`: the reported groups, written by `Data-Pipeline/scripts/model_groups.py` from #32's code, since the image has neither geopandas nor the static layers.
+- `tests/test_bias.py` and `tests/test_steps.py`. In Data-Pipeline, `tests/test_bias_slicing.py` has the drift test for `slice_groups.csv`, which skips without the static layers, as in CI.
 
 ## Sensitivity analysis: SHAP and hyperparameter importance (M10)
 
