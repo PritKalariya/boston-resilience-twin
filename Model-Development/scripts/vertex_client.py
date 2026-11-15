@@ -17,6 +17,7 @@ Errors:
 from __future__ import annotations
 
 import time
+import warnings
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from urllib.parse import quote
@@ -45,16 +46,27 @@ class HttpError(RegistryError):
 
 
 def default_session(quota_project: str):
-    """An authorized requests session from Application Default Credentials, or NoAccess. Calls are
-    billed to quota_project (project 2), so end-user credentials need no quota project of their own."""
+    """An authorized requests session from Application Default Credentials, or NoAccess.
+
+    Only an end-user login (`authorized_user`, from `gcloud auth application-default login`) is billed
+    to quota_project (project 2): Google needs a quota project for user credentials. Workload Identity
+    (`external_account`, the CI identity) and service accounts get none. With one, the token exchange's
+    impersonation call is billed to project 2 by the GitHub identity, which has no
+    serviceusage.services.use there: 403 USER_PROJECT_DENIED on iamcredentials (#111, run 43689682827).
+    Granting it that role would break ADR-030's least privilege."""
     import google.auth
     from google.auth.exceptions import DefaultCredentialsError
     from google.auth.transport.requests import AuthorizedSession
+    from google.oauth2.credentials import Credentials as UserCredentials
 
     try:
-        credentials, _ = google.auth.default(scopes=list(SCOPES), quota_project_id=quota_project)
+        with warnings.catch_warnings():  # a user login gets its quota project on the next lines
+            warnings.filterwarnings("ignore", message=".*without a quota project", category=UserWarning)
+            credentials, _ = google.auth.default(scopes=list(SCOPES))
     except DefaultCredentialsError as exc:
         raise NoAccess(f"no Google credentials: {exc}") from None
+    if isinstance(credentials, UserCredentials):
+        credentials = credentials.with_quota_project(quota_project)
     return AuthorizedSession(credentials)
 
 

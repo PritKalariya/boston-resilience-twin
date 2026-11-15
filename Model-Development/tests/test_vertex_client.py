@@ -187,17 +187,54 @@ def test_no_credentials_is_no_access(monkeypatch):
         V.VertexClient(R.load_settings())
 
 
-def test_calls_are_billed_to_project_2(monkeypatch):
+def _user_credentials():
+    from google.oauth2.credentials import Credentials
+
+    return Credentials(token="t", refresh_token="r", client_id="c", client_secret="s",
+                       token_uri="https://oauth2.googleapis.com/token")
+
+
+def _workload_identity_credentials():
+    """What google-github-actions/auth writes: an external_account config that impersonates ci-writer."""
+    from google.auth import identity_pool
+
+    return identity_pool.Credentials.from_info({
+        "type": "external_account",
+        "audience": "//iam.googleapis.com/projects/570429679915/locations/global/workloadIdentityPools/github"
+                    "/providers/github-oidc",
+        "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+        "token_url": "https://sts.googleapis.com/v1/token",
+        "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/"
+                                             "serviceAccounts/ci-writer@boston-resilience-twin-p2."
+                                             "iam.gserviceaccount.com:generateAccessToken",
+        "credential_source": {"url": "https://token.actions.githubusercontent.com/?audience=x",
+                              "headers": {"Authorization": "Bearer request-token"},
+                              "format": {"type": "json", "subject_token_field_name": "value"}},
+    })
+
+
+def _service_account_credentials():
+    from google.oauth2 import service_account
+
+    return service_account.Credentials(signer=None, service_account_email="sa@example.iam.gserviceaccount.com",
+                                       token_uri="https://oauth2.googleapis.com/token")
+
+
+@pytest.mark.parametrize("make, quota", [
+    (_user_credentials, "boston-resilience-twin-p2"),  # a laptop login needs a quota project
+    (_workload_identity_credentials, None),  # CI: a quota project gave 403 USER_PROJECT_DENIED (run 43689682827)
+    (_service_account_credentials, None),
+])
+def test_only_a_user_login_is_billed_to_project_2(monkeypatch, make, quota):
     import google.auth
 
     seen = {}
 
-    def fake_default(scopes=None, quota_project_id=None):
-        seen.update(scopes=scopes, quota=quota_project_id)
-        from google.auth.credentials import AnonymousCredentials
-
-        return AnonymousCredentials(), None
+    def fake_default(scopes=None, **kwargs):
+        seen.update(scopes=scopes, **kwargs)
+        return make(), None
 
     monkeypatch.setattr(google.auth, "default", fake_default)
-    V.VertexClient(R.load_settings())
-    assert seen == {"scopes": list(V.SCOPES), "quota": "boston-resilience-twin-p2"}
+    client = V.VertexClient(R.load_settings())
+    assert seen == {"scopes": list(V.SCOPES)}  # no quota project for every credential type
+    assert client.session.credentials.quota_project_id == quota
