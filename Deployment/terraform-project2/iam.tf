@@ -35,6 +35,24 @@ resource "google_artifact_registry_repository_iam_member" "ci_writer_images" {
   member     = "serviceAccount:${google_service_account.ci_writer.email}"
 }
 
+# --- Vertex AI service agent ------------------------------------------------
+
+# models:upload checks that the Vertex AI service agent can read the version's
+# container image, and the agent's default role does not cover brt-images: the
+# first main run failed with 400 "does not have permission to access Artifact
+# Registry repository" (#111). Read on the one repository, not project wide.
+# Google creates the agent when the Vertex AI API is enabled; its email is
+# fixed by the project number.
+resource "google_artifact_registry_repository_iam_member" "vertex_agent_images" {
+  project    = google_artifact_registry_repository.images.project
+  location   = google_artifact_registry_repository.images.location
+  repository = google_artifact_registry_repository.images.name
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:service-${data.google_project.this.number}@gcp-sa-aiplatform.iam.gserviceaccount.com"
+
+  depends_on = [google_project_service.project_2]
+}
+
 # Create and read model files. objectCreator cannot delete, so it cannot
 # overwrite an existing object either: each version's files stay intact.
 # Reading is for re-scoring the champion before a comparison (#111).
