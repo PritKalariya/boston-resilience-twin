@@ -14,3 +14,7 @@ Model-Development/mlruns
 **/__pycache__
 **/*.pyc
 **/.pytest_cache
+# The Google auth step's credentials file in the workspace root (ADR-035): already outside
+# !Model-Development, named here so loosening the allowlist cannot let it into an image.
+gha-creds-*.json
+**/gha-creds-*.json

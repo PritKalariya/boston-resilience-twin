@@ -5,7 +5,8 @@ The models for Boston Resilience Twin, and the tools they train and log with. Ea
 1. [MLflow tracking server (M1)](#mlflow-tracking-server-m1)
 2. [Project 2 infrastructure: registry, image repository, CI identities (M2)](#project-2-infrastructure-registry-image-repository-ci-identities-m2)
 3. [Hyperparameter tuning with Optuna (M6)](#hyperparameter-tuning-with-optuna-m6)
-4. [Sensitivity analysis: SHAP and hyperparameter importance (M10)](#sensitivity-analysis-shap-and-hyperparameter-importance-m10)
+4. [Model bias check (M7)](#model-bias-check-m7)
+5. [Sensitivity analysis: SHAP and hyperparameter importance (M10)](#sensitivity-analysis-shap-and-hyperparameter-importance-m10)
 
 ## MLflow tracking server (M1)
 
@@ -50,7 +51,7 @@ The operating steps, the port, memory and stopping are in the runbook's "MLflow 
 
 ## Project 2 infrastructure: registry, image repository, CI identities (M2)
 
-The Google Cloud resources the model work runs on, in project 2 (`boston-resilience-twin-p2`, ADR-009), all from Terraform in [`Deployment/terraform-project2/`](../Deployment/terraform-project2/) (#105, ADR-030). Project 1 keeps the VM, the data and the DVC remote; project 2 holds what models and images need: a Docker repository for the training image (#112), a bucket for model files and the Vertex AI Model Registry they are registered in (#111, ADR-006), and the two keyless identities GitHub Actions uses. Every command here was run on main (`b9d69ce`) on 2026-11-14 (macOS, Terraform 1.16.4, google provider 8.10.0 from `.terraform.lock.hcl`).
+The Google Cloud resources the model work runs on, in project 2 (`boston-resilience-twin-p2`, ADR-009), all from Terraform in [`Deployment/terraform-project2/`](../Deployment/terraform-project2/) (#105, ADR-030). Project 1 keeps the VM, the data and the DVC remote; project 2 holds what models and images need: a Docker repository for the training image (#112), a bucket for model files and the Vertex AI Model Registry they are registered in (#111, ADR-006), and the two keyless identities GitHub Actions uses. Every command here was run on main (`b9d69ce`) on 2026-11-14 (macOS, Terraform 1.16.4, google provider 8.10.0 from `.terraform.lock.hcl`); the plan again on `c87bffb` on 2026-11-15, after the Vertex AI service agent's grant (#153).
 
 **What it does**
 
@@ -58,6 +59,7 @@ The Google Cloud resources the model work runs on, in project 2 (`boston-resilie
 - **Two identities.** `ci-reader` for any run of the repository, pull requests included: no project 2 roles, only read access to project 1's DVC data, which project 1's Terraform grants (`Deployment/terraform/iam.tf`). `ci-writer` for runs on `refs/heads/main` only: it pushes the training image and registers models, with the narrowest roles that allow it (table below). A fork pull request gets no OIDC token, so it can use neither.
 - **Least privilege for the registry.** No predefined Vertex AI role is limited to registering models (`roles/aiplatform.user` also deletes models, trains, deploys endpoints and calls Gemini), so a custom role, `modelRegistrar`, holds only `aiplatform.models.upload`, `.get`, `.list`, `.update` (aliases) and `aiplatform.operations.list`.
 - **Model files that are never overwritten.** `ci-writer` holds `storage.objectCreator` and `storage.objectViewer` on the model bucket and nothing that deletes, so it cannot overwrite either: each registered version keeps its files, which a rollback needs (ADR-006). The bucket is versioned, with public access prevention enforced.
+- **The Vertex AI service agent reads the image repository.** `models:upload` checks that project 2's Vertex AI service agent can read the version's container image, and its default role lacks a permission that check needs, so it has `artifactregistry.reader` on `brt-images` only (#153, ADR-030 note of 2026-11-15). Without it the first push on main failed with a 400.
 - **A budget alert.** $50 (one member's credit), with emails to the billing account's admins at 25, 50 and 80 percent of spend before credits and at 80 percent of the month's forecast. Education credits bring net spend to about 0, so an alert on net spend would never fire.
 
 **How to run it** (from `Deployment/terraform-project2/`, after `gcloud auth application-default login`; `terraform.tfvars` is copied from `terraform.tfvars.example`, holds the billing account and the admins' addresses, and is gitignored):
@@ -66,7 +68,7 @@ The Google Cloud resources the model work runs on, in project 2 (`boston-resilie
 cd Deployment/terraform-project2
 terraform init                                   # the GCS state backend and the google provider
 terraform fmt -check && terraform validate       # no cloud calls; prints "Success! The configuration is valid."
-terraform plan -var-file=terraform.tfvars        # read-only; on main: "No changes. Your infrastructure matches the configuration."
+terraform plan -var-file=terraform.tfvars        # read-only; on main (c87bffb): "No changes. Your infrastructure matches the configuration."
 terraform output                                 # the six values below
 ```
 
@@ -78,12 +80,13 @@ terraform output                                 # the six values below
 |---|---|---|
 | APIs | Vertex AI, Artifact Registry, Billing Budgets, IAM, IAM Credentials, STS, Storage, Resource Manager, Service Usage | Cloud Run and Gemini are enabled with their services in Deployment |
 | Docker repository | `us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images` | The training image `brt-train`, tagged with the commit; every main run pushes one (#112). 10 images, 2,075 MB on 2026-11-14; no cleanup policy yet |
-| Model bucket | `gs://boston-resilience-twin-p2-models` | us-east1, versioned, uniform access, public access prevention enforced, `force_destroy` off; one folder per registered version (#111). Empty until the first push on main |
-| Model registry | Vertex AI Model Registry, us-east1 | Nothing to create: the model `surge-forecast`, its versions and aliases are data that #111 writes through the API. No endpoint (endpoints bill by the hour) |
+| Model bucket | `gs://boston-resilience-twin-p2-models` | us-east1, versioned, uniform access, public access prevention enforced, `force_destroy` off; one folder per training run, `surge-forecast/<run id>/<MLflow run id>/` (#111). On 2026-11-15: the folders of versions 1 and 2 and one with no version, left by the push that failed before #153 |
+| Model registry | Vertex AI Model Registry, us-east1 | Nothing to create: the model `surge-forecast`, its versions and aliases are data that #111 writes through the API. No endpoint (endpoints bill by the hour). On 2026-11-15: version 1 `production`, version 2 `candidate` |
 | Workload Identity | pool `github`, provider `github-oidc` | `ACTIVE`, condition `assertion.repository_id == '1404951557' && assertion.repository_owner_id == '71484962'` |
 | Service accounts | `ci-reader`, `ci-writer` | Bound on `attribute.repository_id/1404951557` and `attribute.ref/refs/heads/main` |
 | Custom role | `modelRegistrar` | The five permissions above |
 | Budget | `boston-resilience-twin-p2 credit`, $50 | Four alert rules (above) |
+| Vertex AI service agent grant | `artifactregistry.reader` on `brt-images` for `service-570429679915@gcp-sa-aiplatform.iam.gserviceaccount.com` | The image check at upload (#153) |
 | Teammate access | `roles/editor` and `roles/resourcemanager.projectIamAdmin` | For the members in `project_admins` (Prit), in place of `roles/owner`, which cannot be granted through the API to an account outside the project's organization |
 
 Who can do what in project 2:
@@ -92,6 +95,7 @@ Who can do what in project 2:
 |---|---|---|
 | `ci-reader@boston-resilience-twin-p2.iam.gserviceaccount.com` | Any run of the repository (`model.yml` on pull requests and branches) | None in project 2; `storage.objectViewer` on project 1's `boston-resilience-twin-data` |
 | `ci-writer@boston-resilience-twin-p2.iam.gserviceaccount.com` | Runs on main only (`model.yml` on main) | `modelRegistrar`; `artifactregistry.writer` on `brt-images` only; `storage.objectCreator` and `storage.objectViewer` on the model bucket; the same project 1 read |
+| `service-570429679915@gcp-sa-aiplatform.iam.gserviceaccount.com` (Vertex AI service agent, created by Google) | Vertex AI itself, at `models:upload` | Its default role; `artifactregistry.reader` on `brt-images` only |
 
 **Where results live.** `terraform output` on main printed:
 
@@ -277,6 +281,56 @@ The other models are not tuned, so both runs give them the same numbers. LightGB
 - `tests/test_tune.py` (the settings, the search spaces, the confirmation rule, a 2-trial run, that no validation or test row reaches a trial, and that the same seed gives the same studies) and `tests/test_compare_tuned.py` (the comparison), both in the full test suite.
 
 The operating steps, with the exact commands of the promotion, are in the runbook's [Hyperparameter tuning (#109)](../docs/runbook.md#hyperparameter-tuning-109).
+
+## Model bias check (M7)
+
+The bias part of model selection (#110, ADR-033). It checks every candidate against ADR-026's fairness gate on validation, picks the winner after that check, and reports how the model does for the groups #32 found. Every command here was run on main at `2afe4bc` on 2026-11-14 (macOS arm64, Docker Desktop), on data `a719afeb`.
+
+**What it does**
+
+- **Gates on poverty.** The gate compares recall on validation surge days between the two ACS poverty groups of `config/poverty_groups.csv`. Groups with fewer than 5 surges are pooled, and the gap must be at most 0.15. All of it comes from `config/gates.csv` through `gates.evaluate()`, so the check and `gates.py` use one definition.
+- **Picks the winner after bias.** In the model workflow, `step_evaluate.py` ranks the candidates by validation F1 and picks the first whose gate passes. `gates.py` still decides promotion.
+- **Reports the other groups, not gated:** people of color, limited English, flood zone and each neighborhood, on validation and test, with Fairlearn's `MetricFrame`. It also shows the higher-poverty group in two parts, student areas and the rest (#126).
+- **Checks ADR-026's reopen conditions,** and reports them for the gate's owner without blocking promotion.
+- **States the residual reporting bias:** storm requests per 1,000 residents a year by poverty group, which the labels still carry.
+
+**How to run it** (from the repo root, after the data pull; the runbook's "Model bias check (#110, ADR-033)" has the details):
+
+```bash
+docker build -f Model-Development/Dockerfile -t brt-train:local .
+A=$(mktemp -d); export IMAGE=brt-train:local ARTIFACTS_DIR=$A
+for s in pull_data train evaluate; do bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_$s.py --artifacts artifacts || break; done
+bash .github/scripts/in_image.sh python Model-Development/scripts/bias.py --run Model-Development/runs/ci-lightgbm   # validation and test, for one run
+```
+
+After a change to #32's groups or the static layers, rewrite `config/slice_groups.csv` on the host (the runbook's "Regenerate `slice_groups.csv`" has the drift test and the `select` stage refresh):
+
+```bash
+python Data-Pipeline/scripts/model_groups.py
+```
+
+On this data version every candidate passes: LightGBM 0.043, XGBoost 0.046, logistic regression 0.015. LightGBM, the best validation F1 (0.3435), is selected, and `gates.py` gives `promote`. The neighborhood reopen condition holds for West End and Fenway on validation. ADR-026's owner decided not to reopen (ADR-026, note of 2026-11-12).
+
+**What it produces**
+
+- `bias.json` (the gate, every group's numbers, the reopen conditions and the reporting bias), `bias_slices.csv`, `bias_report.md` and `bias_recall.png` (validation recall by group, the gated groups dark, with a line at the best gated recall minus the limit).
+- In the workflow: the winner's validation report in `artifacts/bias/`, and `evaluation.json` with each candidate's gap and how the winner was chosen.
+- In MLflow: the same files in the winner's run under `bias/`, the tags `bias_gate`, `bias_reopen_neighborhoods` and `bias_reopen_two_parts`, and the metric `validation_worst_group_recall_gap`.
+
+**Where results live**
+
+- **Workflow runs:** the `model-artifacts` upload of each model workflow run (`bias/`, `evaluation.json`, `metrics.json`).
+- **A `bias.py` run:** the run folder `Model-Development/runs/<run id>/` (gitignored), or `--out-dir`.
+- **MLflow:** the `model-training` experiment, in the winner's run.
+- **The per-group numbers on this data version** are in ADR-033's "Results".
+
+**Code**
+
+- `scripts/bias.py`: the check, the slicing, the report and the CLI.
+- `scripts/steps/step_evaluate.py`: selection after bias in the workflow.
+- `scripts/gates.py`: `gates.evaluate()` and `gates.poverty_groups()`, the one reader of `poverty_groups.csv`.
+- `config/slice_groups.csv`: the reported groups, written by `Data-Pipeline/scripts/model_groups.py` from #32's code, since the image has neither geopandas nor the static layers.
+- `tests/test_bias.py` and `tests/test_steps.py`. In Data-Pipeline, `tests/test_bias_slicing.py` has the drift test for `slice_groups.csv`, which skips without the static layers, as in CI.
 
 ## Sensitivity analysis: SHAP and hyperparameter importance (M10)
 

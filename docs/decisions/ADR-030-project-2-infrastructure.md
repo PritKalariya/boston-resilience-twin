@@ -5,6 +5,7 @@
 - Owner: Kirtan10
 - Phase: model
 - Amends ADR-009: Cloud Storage for model files is in project 2, not project 1
+- Note (2026-11-15): the Vertex AI service agent (`service-<project number>@gcp-sa-aiplatform.iam.gserviceaccount.com`) gets `roles/artifactregistry.reader` on `brt-images` only. `models:upload` checks that the agent can read the version's container image, and its default role does not cover the repository: the first main run that reached the push failed with a 400 on it (run 43749795990, #111). This is the agent grant the Consequences foresee; `ci-writer`'s roles do not change.
 
 ## Context
 
@@ -38,7 +39,7 @@ gcloud storage buckets update gs://boston-resilience-twin-p2-tfstate --versionin
 | APIs | Vertex AI, Artifact Registry, Billing Budgets, IAM, IAM Credentials, STS, Storage, Resource Manager, Service Usage. Cloud Run and Gemini wait for Deployment |
 | Region | `us-east1` for everything, the registry included (ADR-006 left it open; project 1's bucket and VM are there too) |
 | Model files | Bucket `boston-resilience-twin-p2-models`: us-east1, versioned, uniform access, public access prevention enforced, `force_destroy` off |
-| Images | One Docker repository, `brt-images`, in us-east1 |
+| Images | One Docker repository, `brt-images`, in us-east1; the Vertex AI service agent reads it (`artifactregistry.reader`, note of 2026-11-15) |
 | Registry | Nothing to create: model versions and aliases are data #111 writes through the API (ADR-006). No endpoint is created (endpoints bill by the hour) |
 | Budget | $50 with email alerts at 25, 50 and 80 percent of actual spend and at 80 percent of forecast spend, measured on usage before credits |
 
@@ -70,7 +71,7 @@ gcloud storage buckets update gs://boston-resilience-twin-p2-tfstate --versionin
 - #111 uploads with `ci-writer` through `google-github-actions/auth` with the `workload_identity_provider` output, writes each version's files under its own path in the model bucket, and skips the push without project 2 access.
 - #112 part 3 authenticates PR runs as `ci-reader` and main runs as `ci-writer`, and pushes the training image to the `image_repository` output.
 - Prit adds both service account emails (outputs `ci_reader_email`, `ci_writer_email`) as `storage.objectViewer` on `boston-resilience-twin-data` in project 1's Terraform.
-- The Vertex AI service agent reads model files and images in its own project with its default role; if an upload fails on access, the fix is a grant to that agent here, not a broader CI role.
+- The Vertex AI service agent reads model files in its own project with its default role, but not `brt-images`: it has `artifactregistry.reader` on that repository (note of 2026-11-15). If an upload fails on access, the fix is a grant to that agent here, not a broader CI role.
 - Budget alerts email the billing account's admins: the project 2 owner.
 - Costs: APIs, service accounts, the pool, the budget and the registry are free while nothing is deployed. Storage and images are cents a month. Teardown: `terraform destroy -var-file=terraform.tfvars` in `Deployment/terraform-project2/` after emptying the model bucket, then delete the state bucket and the project by hand.
 
