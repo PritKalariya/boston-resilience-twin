@@ -1023,7 +1023,7 @@ It names each stale dependency and prints the `dvc repro --single-item <stage>` 
 
 ### Training image package lock (#111)
 
-`Model-Development/requirements.lock` holds every package of the training image, transitive ones included, and the Dockerfile installs `requirements.txt` with `-c requirements.lock` (ADR-032, note of 2026-11-15). It was taken by `pip freeze` inside the image that registry version 1 records, so every later image holds the libraries the champion was trained with. Without it, a new release of a dependency (scipy, threadpoolctl, anything MLflow pulls in) would reach the next build unseen. `test_steps_requirements.py` fails when a pin in `requirements.txt` differs from the lock or a direct package is missing from it, before any build.
+`Model-Development/requirements.lock` holds every package of the training image, transitive ones included, and the Dockerfile installs `requirements.txt` with `-c requirements.lock` (ADR-032, note of 2026-11-15). It was taken by `pip freeze` inside the image that registry version 1 records, so every later image holds the libraries the champion was trained with. Without it, a new release of a dependency (scipy, threadpoolctl, anything MLflow pulls in) would reach the next build unseen. `test_steps_requirements.py` fails when a pin in `requirements.txt` differs from the lock or a direct package is missing from it, before any build, and when the lock header's `# packages:` count or `# base:` image disagrees with the file or the Dockerfile's `FROM`. The model workflow's "Check the image against the lock" step, right after the build on every ref, diffs the built image's `pip freeze` against the lock and fails on any difference, so a version edited by hand in the lock fails CI. The Dockerfile's base is pinned by digest (`python:3.12.13-slim@sha256:229a2c5b...`, the base version 1's image was built on: its uncompressed layers are the same), so a rebuilt tag cannot move the image either.
 
 - **Check an image against the lock** (from the repo root; the lock's lines are what `pip freeze` prints, after its comment header):
 
@@ -1039,18 +1039,24 @@ It names each stale dependency and prints the `dvc repro --single-item <stage>` 
   docker run --rm --platform linux/amd64 --entrypoint pip us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images/brt-train@sha256:<digest> freeze
   ```
 
-- **Change a package** (bump a pin in `requirements.txt` or add one). The lock must change in the same PR, or the build fails on the conflict. Keep everything else where it is: rebuild the lock with the old lock as constraints, minus the packages that change:
+- **Change a package** (bump a pin in `requirements.txt` or add one). The lock must change in the same PR, or the build fails on the conflict. Keep everything else where it is: rebuild the lock with the old lock as constraints, minus the packages that change. The commands write the whole file, header included: the fixed comment lines are kept, and the `# source:`, `# base:` and `# packages:` lines are written from `SOURCE`, the Dockerfile's `FROM` line and the frozen list, so the lock is made on exactly the base the image builds on:
 
   ```bash
   P='numpy'   # the packages whose pins change, separated by |
-  T=$(mktemp -d); grep '^#' Model-Development/requirements.lock > "$T/header.txt"
-  grep -v '^#' Model-Development/requirements.lock | grep -Eiv "^($P)==" > "$T/rest.txt"
-  docker run --rm --platform linux/amd64 -v "$PWD/Model-Development:/m:ro" -v "$T/rest.txt:/c.txt:ro" python:3.12.13-slim \
+  SOURCE='requirements.txt bumps numpy (PR #<n>), every other package kept from the previous lock'
+  L=Model-Development/requirements.lock
+  BASE=$(sed -n 's/^FROM //p' Model-Development/Dockerfile)
+  T=$(mktemp -d); grep '^#' "$L" | grep -Ev '^# (source|base|packages): ' > "$T/fixed.txt"
+  grep -v '^#' "$L" > "$T/all.txt"
+  if [ -n "$P" ]; then grep -Eiv "^($P)==" "$T/all.txt"; else cat "$T/all.txt"; fi > "$T/rest.txt"
+  docker run --rm --platform linux/amd64 -v "$PWD/Model-Development:/m:ro" -v "$T/rest.txt:/c.txt:ro" "$BASE" \
     sh -c 'pip install -q --root-user-action=ignore --disable-pip-version-check -r /m/requirements.txt -c /c.txt && pip check >&2 && pip freeze' > "$T/freeze.txt"
-  cat "$T/header.txt" "$T/freeze.txt" > Model-Development/requirements.lock
+  { cat "$T/fixed.txt"
+    printf '# source: %s\n# base: %s, linux/amd64\n# packages: %s\n' "$SOURCE" "$BASE" "$(grep -c . "$T/freeze.txt")"
+    cat "$T/freeze.txt"; } > "$L"
   ```
 
-  If pip reports a conflict with a pinned dependency, add that package to `P` too and run it again. Change the comment header's source line to say how this version of the lock was made, then run `test_steps_requirements.py` and the image check above. The base image is the Dockerfile's `FROM` line; with nothing in `P` the commands give back the lock unchanged. After the merge, the main run re-scores the champion with the new image; if it cannot load the old `model.joblib`, the re-score step exits 2 and Slack names it ("Model registry (#111, ADR-006)", "The champion loads with today's libraries").
+  If pip reports a conflict with a pinned dependency, add that package to `P` too and run it again. Then run `test_steps_requirements.py` and the image check above. With nothing in `P` (`P=''`) and `SOURCE` set to the lock's current `# source:` text, the commands give back the lock unchanged. To move the base image, change the digest in the Dockerfile's `FROM` first, in the same PR. After the merge, the main run re-scores the champion with the new image; if it cannot load the old `model.joblib`, the re-score step exits 2 and Slack names it ("Model registry (#111, ADR-006)", "The champion loads with today's libraries").
 - **Never edit a version by hand**, and never regenerate the whole lock from scratch without a reason in the PR: every transitive package would move at once.
 
 ## Versioned data (DVC)

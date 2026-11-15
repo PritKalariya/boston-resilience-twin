@@ -160,7 +160,20 @@ jobs:
           # next step replaces it with the registry digest.
           docker image inspect --format '{{.Id}}' "$IMAGE" > artifacts/image_digest.txt
 
-      # Right after the build, main only (ADR-032): tagged with the commit. The access token
+      # Every package of the built image against Model-Development/requirements.lock (#111): a
+      # version edited by hand in the lock, or anything pip resolved differently, fails here,
+      # before the push. The lock's lines are what pip freeze prints, after its comment header.
+      - name: Check the image against the lock
+        id: lock
+        run: |
+          bash .github/scripts/in_image.sh pip --no-cache-dir freeze > "$RUNNER_TEMP/freeze.txt"  # no cache: the runner uid has no home
+          if ! diff <(grep -v '^#' Model-Development/requirements.lock) "$RUNNER_TEMP/freeze.txt"; then
+            echo "::error::the image's pip freeze differs from Model-Development/requirements.lock (< lock, > image); runbook \"Training image package lock (#111)\""
+            exit 1
+          fi
+          echo "image matches the lock: $(grep -vc '^#' Model-Development/requirements.lock) packages"
+
+      # Right after the build and its lock check, main only (ADR-032): tagged with the commit. The access token
       # goes in on stdin from the environment, never on a command line.
       - name: Push the image (main only)
         id: push
@@ -267,6 +280,7 @@ jobs:
           OUTCOME_DVC_INSTALL: ${{ steps.dvc_install.outcome }}
           OUTCOME_DVC_PULL: ${{ steps.dvc_pull.outcome }}
           OUTCOME_BUILD: ${{ steps.build.outcome }}
+          OUTCOME_LOCK: ${{ steps.lock.outcome }}
           OUTCOME_PUSH: ${{ steps.push.outcome }}
           OUTCOME_DATA: ${{ steps.data.outcome }}
           OUTCOME_TRAIN: ${{ steps.train.outcome }}
@@ -285,6 +299,7 @@ jobs:
           check "Install DVC" "$OUTCOME_DVC_INSTALL"
           check "Pull the training data (DVC)" "$OUTCOME_DVC_PULL"
           check "Build the training image" "$OUTCOME_BUILD"
+          check "Check the image against the lock" "$OUTCOME_LOCK"
           check "Push the image" "$OUTCOME_PUSH"
           check "Check the data and record its version" "$OUTCOME_DATA"
           check "Train the baseline and the candidates" "$OUTCOME_TRAIN"
