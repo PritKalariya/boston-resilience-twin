@@ -1,10 +1,10 @@
 # ADR-035: Only the three main-only registry steps get Google credentials in the training image
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-14
 - Owner: Kirtan10
 - Phase: model
-- Amends ADR-032 decision 1 ("The image holds no DVC repo and no credential") by reference: the image still holds none, and three steps get a credentials file mounted at run time. ADR-032 is not edited.
+- Amends ADR-032 decision 1 ("The image holds no DVC repo and no credential") by reference: the image still holds none, and three steps get a credentials file mounted at run time. Only ADR-032's status line changes, to point here.
 
 ## Context
 
@@ -52,7 +52,7 @@ and it stops working when the job ends.
 
 | Option | Cost | Effort | Failure behavior |
 |---|---|---|---|
-| Pass the auth step's `access_token` output as an environment variable | none | low | The token expires after an hour and is not refreshed, so a long run fails partway; `vertex_client.py` needs a second way to build credentials, and the token sits in the `docker run` environment. |
+| Pass the auth step's `access_token` output as an environment variable | none | low | `vertex_client.py` needs a second way to build credentials, and the token sits in the `docker run` environment, where `docker inspect` and the process environment show it. Its one-hour lifetime is not the problem: the job times out after 30 minutes. |
 | Run the three steps on the runner instead of in the image | none | medium | The re-score must load the champion with the image's model libraries; on the runner they are other versions, or a second install to keep in step with the image. |
 | Mount the credentials into every step | none | low | Training and evaluate, which need no project 2 access, could reach the registry and the model bucket, against ADR-032. |
 | Copy the file to `$RUNNER_TEMP` first | none | low | The action's own file stays in the workspace anyway, so it adds a step and protects nothing. |

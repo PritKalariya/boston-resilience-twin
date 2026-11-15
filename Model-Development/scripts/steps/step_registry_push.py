@@ -21,7 +21,9 @@ version gets the `candidate` alias and the MLflow run is tagged. Before it, this
 check passed for the same winner and that the gate report is for the pulled data version. Credentials come
 from the file in_image.sh mounts (ADR-035). On main (`MAIN_RUN=true`) no project 2 access, a missing
 `GITHUB_SHA` or a missing registry digest of the training image fails the step; elsewhere the push is
-skipped with a log line, and a missing digest or commit is a warning.
+skipped with a log line, and a missing digest is a warning. A missing `GITHUB_SHA` off main is a warning
+only when run.json records the commit (a host run): in the image it records none, so the push stops
+(exit 2) before it checks access, and the local chain sets `GITHUB_SHA` for that reason.
 """
 
 from __future__ import annotations
@@ -92,7 +94,8 @@ def step(argv: list[str] | None) -> None:
     if commit is None:
         if C.main_run():
             raise C.StepError("GITHUB_SHA is not set: a registered version must name its commit")
-        print("::warning::GITHUB_SHA is not set: the push takes the commit from run.json, if any")
+        print("::warning::GITHUB_SHA is not set: the push takes the commit from run.json and stops "
+              "without one (in the image, set GITHUB_SHA=$(git rev-parse HEAD))")
 
     training = ["--training-config", str(config)] if config else []
     out = artifacts / "push.json"

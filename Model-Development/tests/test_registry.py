@@ -249,6 +249,9 @@ def test_push_registers_the_winner_as_candidate(settings, training):
     assert body["containerSpec"]["imageUri"].endswith("brt-train@sha256:" + "f" * 64)
     assert "artifactUri" not in body  # Vertex would copy the folder; nothing is served from Vertex
     assert body["labels"]["data_version"] == "a" * 32 and body["labels"]["gates_sha256"] == "d" * 32
+    uploaded = hashlib.sha256(client.objects[f"{folder}/gate_report.json"]).hexdigest()
+    assert body["labels"]["gate_report"] == uploaded[:32]  # matches a sha256sum of the file in the bucket
+    assert metadata["gate"]["report_sha256"] == "sha256:" + uploaded
     assert f"files gs://{settings.model_bucket}/{folder}/ (metadata.json)" in body["versionDescription"]
 
 

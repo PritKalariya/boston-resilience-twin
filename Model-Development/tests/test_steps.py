@@ -767,6 +767,11 @@ def test_registry_push_digest_and_commit_are_warnings_off_main_and_errors_on_mai
     monkeypatch.delenv("GITHUB_SHA")
     (copy.art / "image_digest.txt").write_text(f"{SERVING}@{DIGEST}\n")
     assert s_registry.main(copy.args()) == 2 and "GITHUB_SHA is not set" in capsys.readouterr().err
+    # off main in the image, run.json records no commit: a warning, then the push stops (the local chain sets it)
+    monkeypatch.delenv("MAIN_RUN")
+    assert s_registry.main(copy.args()) == 2
+    out, err = capsys.readouterr()
+    assert "::warning::GITHUB_SHA is not set" in out and "has no git commit" in err
 
 
 def test_registry_push_exits_2_without_its_inputs(copy, vertex, monkeypatch):

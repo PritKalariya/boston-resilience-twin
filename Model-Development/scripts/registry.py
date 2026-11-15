@@ -188,9 +188,15 @@ def _hash_label(value: str) -> str:
     return value.removeprefix("sha256:")[:HASH_LABEL]
 
 
+def _json_bytes(data: dict) -> bytes:
+    """The bytes the push uploads for a JSON file (gate_report.json, metadata.json)."""
+    return (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
 def gate_report_sha256(gate_report: dict) -> str:
-    """The sha256 of a gate report's content (sorted keys), the file the push uploads beside the model."""
-    return "sha256:" + hashlib.sha256(json.dumps(gate_report, sort_keys=True).encode("utf-8")).hexdigest()
+    """The sha256 of gate_report.json exactly as the push uploads it beside the model, so it matches a
+    sha256sum of that file in the bucket."""
+    return "sha256:" + hashlib.sha256(_json_bytes(gate_report)).hexdigest()
 
 
 @contextmanager
@@ -372,7 +378,7 @@ def _push(settings: Settings, training: training_data.Settings, client, plan: di
         uploads = dict(plan["files"])
         for name, data in extra.items():
             path = Path(scratch) / name
-            path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            path.write_bytes(_json_bytes(data))
             uploads[name] = path
         uris = {name: client.upload_file(path, f"{folder}/{name}") for name, path in uploads.items()}
     model_name, version_id = client.upload_version(plan["model"], parent)
