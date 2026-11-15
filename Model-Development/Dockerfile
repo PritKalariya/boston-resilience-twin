@@ -25,8 +25,11 @@ ENV PIP_ROOT_USER_ACTION=ignore \
 # GITHUB_SHA is the commit of record) and MLflow's import of GitPython stays quiet.
 # LOGNAME: a --user uid with no passwd entry would make MLflow warn on every run.
 WORKDIR /app
-COPY Model-Development/requirements.txt /app/Model-Development/requirements.txt
-RUN pip install --no-cache-dir -r Model-Development/requirements.txt \
+# requirements.lock holds every package, transitive ones included, as the image registry version
+# 1 records had them (#111, ADR-032 note of 2026-11-15): -c keeps a new release of a dependency
+# out of the image, so the champion re-scores with the libraries it was trained with.
+COPY Model-Development/requirements.txt Model-Development/requirements.lock /app/Model-Development/
+RUN pip install --no-cache-dir -r Model-Development/requirements.txt -c Model-Development/requirements.lock \
     && pip check
 
 # gates.py finds the repo root two folders above itself, which is /app here. The build

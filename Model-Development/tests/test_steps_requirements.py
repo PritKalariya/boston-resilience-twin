@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MODEL = ROOT / "Model-Development"
 SHARED = ROOT / "Data-Pipeline" / "requirements.txt"
 IMAGE_FILE, PULL_FILE = MODEL / "requirements.txt", MODEL / "requirements-pull.txt"
+LOCK_FILE = MODEL / "requirements.lock"  # pip freeze of the image registry version 1 records (#111)
 IMPORT_NAMES = {"sklearn": "scikit-learn", "yaml": "pyyaml", "google": "google-auth"}  # import name -> package name, where they differ
 
 
@@ -89,3 +90,48 @@ def test_every_third_party_import_of_the_scripts_is_in_the_image_file():
     missing = sorted(wanted - set(pins(IMAGE_FILE)) - {"xgboost"} - ({"xgboost"} if "xgboost-cpu" in pins(IMAGE_FILE) else set()))
     assert missing == [], f"imported by the scripts but not in Model-Development/requirements.txt: {missing}"
     assert {"lightgbm", "mlflow", "scikit-learn", "pandas", "pyarrow", "joblib", "pyyaml", "matplotlib"} <= wanted
+
+
+def lock_mismatches(image_path: Path, lock_path: Path) -> list[str]:
+    """One message per direct package of the Linux image whose pin is missing from the lock or differs
+    from it. A requirements.txt line with a marker other than linux is skipped: the image is Linux."""
+    lock = pins(lock_path)
+    problems = []
+    for name, values in sorted(pins(image_path).items()):
+        for value in values:
+            version, _, marker = value.partition("; ")
+            if marker and marker != 'sys_platform == "linux"':
+                continue
+            if name not in lock:
+                problems.append(f"{name}=={version} is in {image_path.name} but not in {lock_path.name}")
+            elif lock[name] != (f"{version}; ",):
+                problems.append(f"{name}: {version} in {image_path.name}, {lock[name]} in {lock_path.name}")
+    return problems
+
+
+def test_the_lock_agrees_with_every_direct_pin():
+    """The Dockerfile installs requirements.txt with -c requirements.lock: a pin that disagrees fails the build."""
+    lock = pins(LOCK_FILE)
+    assert all(len(values) == 1 and not values[0].split("; ")[1] for values in lock.values())  # one plain pin each
+    assert lock_mismatches(IMAGE_FILE, LOCK_FILE) == []
+    assert "scipy" in lock  # a transitive package: the reason the lock exists
+    assert "xgboost" not in lock and lock["xgboost-cpu"] == ("3.4.1; ",)  # frozen on Linux
+
+
+def test_a_changed_or_missing_direct_pin_is_named(tmp_path):
+    image, lock = tmp_path / "requirements.txt", tmp_path / "requirements.lock"
+    image.write_text('numpy==2.5.3\nxgboost==3.4.1; sys_platform != "linux"\n'
+                     'xgboost-cpu==3.4.1; sys_platform == "linux"\n', encoding="utf-8")
+    lock.write_text("# header\nnumpy==2.5.3\nscipy==1.18.1\nxgboost-cpu==3.4.1\n", encoding="utf-8")
+    assert lock_mismatches(image, lock) == []  # the non-Linux xgboost line is skipped
+    image.write_text("numpy==2.5.4\nshap==0.54.1\n", encoding="utf-8")
+    assert lock_mismatches(image, lock) == [
+        "numpy: 2.5.4 in requirements.txt, ('2.5.3; ',) in requirements.lock",
+        "shap==0.54.1 is in requirements.txt but not in requirements.lock",
+    ]
+
+
+def test_the_dockerfile_installs_with_the_lock():
+    dockerfile = (MODEL / "Dockerfile").read_text(encoding="utf-8")
+    assert "-c Model-Development/requirements.lock" in dockerfile
+    assert "Model-Development/requirements.lock" in dockerfile.split("RUN pip install")[0]  # copied before the install
