@@ -252,6 +252,82 @@ def test_the_webhook_itself_is_masked(monkeypatch):
     assert alerts.mask_secrets(f"posting to {WEBHOOK} failed") == "posting to <SLACK_ALERT_WEBHOOK> failed"
 
 
+AIRFLOW_SECRET_NAMES = (
+    "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN",
+    "AIRFLOW__CORE__FERNET_KEY",
+    "AIRFLOW__API_AUTH__JWT_SECRET",
+    "AIRFLOW__API__SECRET_KEY",
+)
+
+
+def test_the_airflow_secrets_are_on_the_masking_list():
+    assert alerts.AIRFLOW_SECRET_ENV == AIRFLOW_SECRET_NAMES
+    assert set(AIRFLOW_SECRET_NAMES) <= set(alerts.SECRET_ENV)
+
+
+@pytest.mark.parametrize("name", AIRFLOW_SECRET_NAMES)
+def test_each_airflow_secret_is_masked(monkeypatch, name):
+    value = f"value-of-{name.lower()}-0123456789"
+    monkeypatch.setenv(name, value)
+    assert alerts.mask_secrets(f"failed with {value} in the log") == f"failed with <{name}> in the log"
+
+
+def test_the_database_password_in_the_connection_url_is_masked(monkeypatch):
+    url = "postgresql+psycopg2://airflow:0123456789abcdef0123@postgres/airflow"
+    monkeypatch.setenv("AIRFLOW__DATABASE__SQL_ALCHEMY_CONN", url)
+    assert alerts.mask_secrets(f"cannot connect to {url}") == "cannot connect to <AIRFLOW__DATABASE__SQL_ALCHEMY_CONN>"
+
+
+def test_the_password_alone_is_masked_like_the_whole_connection_url(monkeypatch):
+    password = "0123456789abcdef0123"
+    url = f"postgresql+psycopg2://airflow:{password}@postgres/airflow"
+    monkeypatch.setenv("AIRFLOW__DATABASE__SQL_ALCHEMY_CONN", url)
+    name = "<AIRFLOW__DATABASE__SQL_ALCHEMY_CONN>"
+    assert alerts.mask_secrets(f"password authentication failed, password {password}") == (
+        f"password authentication failed, password {name}"
+    )
+    # The whole URL still goes first, so no half-replaced password is left behind.
+    assert alerts.mask_secrets(f"cannot connect to {url}") == f"cannot connect to {name}"
+    assert password not in alerts.mask_secrets(f"{url} then {password}")
+
+
+def test_a_short_or_missing_url_password_masks_nothing_extra(monkeypatch):
+    monkeypatch.setenv("AIRFLOW__DATABASE__SQL_ALCHEMY_CONN", "postgresql+psycopg2://airflow:short@postgres/airflow")
+    assert alerts.mask_secrets("short and airflow stay") == "short and airflow stay"
+    monkeypatch.setenv("AIRFLOW__DATABASE__SQL_ALCHEMY_CONN", "sqlite:////opt/airflow/airflow.db")
+    assert alerts.mask_secrets("airflow.db failed") == "airflow.db failed"
+    assert alerts.url_password("http://[bad") == ""
+
+
+def test_the_connection_url_is_the_only_name_with_its_password_split():
+    assert alerts.URL_SECRET_ENV == ("AIRFLOW__DATABASE__SQL_ALCHEMY_CONN",)
+
+
+def test_a_two_key_fernet_value_is_masked_whole_and_by_each_key(monkeypatch):
+    new, old = "N" * 43 + "=", "O" * 43 + "="
+    monkeypatch.setenv("AIRFLOW__CORE__FERNET_KEY", f"{new},{old}")
+    name = "<AIRFLOW__CORE__FERNET_KEY>"
+    assert alerts.mask_secrets(f"keys {new},{old} loaded") == f"keys {name} loaded"
+    assert alerts.mask_secrets(f"InvalidToken with {old}") == f"InvalidToken with {name}"
+    assert alerts.mask_secrets(f"InvalidToken with {new}") == f"InvalidToken with {name}"
+    assert alerts.mask_secrets(f"url-encoded {old.replace('=', '%3D')}") == f"url-encoded {name}"
+
+
+def test_only_the_fernet_key_is_split_on_commas(monkeypatch):
+    assert alerts.LIST_SECRET_ENV == ("AIRFLOW__CORE__FERNET_KEY",)
+    agent = "(boston-resilience-twin, contact@example.org)"
+    monkeypatch.setenv("NWS_USER_AGENT", agent)
+    # the whole value is masked, but neither part is masked on its own
+    assert alerts.mask_secrets(f"NWS said no to {agent}") == "NWS said no to <NWS_USER_AGENT>"
+    assert alerts.mask_secrets("run for (boston-resilience-twin") == "run for (boston-resilience-twin"
+    assert alerts.mask_secrets("mail contact@example.org) failed") == "mail contact@example.org) failed"
+
+
+def test_short_parts_of_a_list_are_left_alone(monkeypatch):
+    monkeypatch.setenv("AIRFLOW__CORE__FERNET_KEY", "abc," + "K" * 43 + "=")
+    assert alerts.mask_secrets("abc failed with " + "K" * 43 + "=") == "abc failed with <AIRFLOW__CORE__FERNET_KEY>"
+
+
 def test_short_or_unset_values_are_left_alone(monkeypatch):
     monkeypatch.setenv("NOAA_CDO_TOKEN", "abc")
     monkeypatch.delenv("CENSUS_API_KEY", raising=False)
