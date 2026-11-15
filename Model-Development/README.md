@@ -88,12 +88,9 @@ cd Model-Development && dvc status select                         # is the locke
 
 **Tracking**
 
+- **Where training runs:** on a laptop or in CI's training image (the model workflow, ADR-032), not on airflow-vm. No DAG trains a model there, no Airflow service mounts `Model-Development/`, and mlflow is not started there (ADR-031).
 - **By default, no server.** With `MLFLOW_TRACKING_URI` unset or empty, runs go to the local store `Model-Development/mlruns/`. Browse it with `mlflow ui --backend-store-uri sqlite:///Model-Development/mlruns/mlflow.db` (http://localhost:5000).
-- **The server.** Start it as in [MLflow tracking server (M1)](#mlflow-tracking-server-m1), then run `export MLFLOW_TRACKING_URI=http://127.0.0.1:5000` before training. If the variable is set and the server is down, a run stops within seconds with "Start the server with `docker compose up -d --wait mlflow`, or unset MLFLOW_TRACKING_URI".
-- **On airflow-vm, training runs with `MLFLOW_TRACKING_URI` empty and logs to `Model-Development/mlruns/`.**
-  - The mlflow service is behind the compose profile `mlflow`, so the plain `docker compose up` the VM runs never starts it. ADR-031 reserves no memory for it.
-  - The Airflow services there get the variable empty.
-  - Logging to the server on the VM needs `sudo docker compose up -d --wait mlflow` first, then the variable for the run.
+- **The server.** Start it with `docker compose up -d --wait mlflow` ([MLflow tracking server (M1)](#mlflow-tracking-server-m1)), then run `export MLFLOW_TRACKING_URI=http://127.0.0.1:5000` before training. If the variable is set and the server is down, a run stops within seconds with "Start the server with `docker compose up -d --wait mlflow`, or unset MLFLOW_TRACKING_URI to log to the local store".
 
 **What it produces**
 

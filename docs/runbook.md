@@ -814,14 +814,11 @@ Every `train.py` run is also an MLflow run in the experiment `model-training` (`
 
 - **Where runs go** is M1's `tracking.setup` (#104).
   - When `MLFLOW_TRACKING_URI` names a server, runs go there, once it answers `/health`. From the host that is `http://127.0.0.1:5000` after `docker compose up -d --wait mlflow`.
-  - If the server does not answer, the run stops within seconds, before training, with exit 2: `error: MLFLOW_TRACKING_URI is http://127.0.0.1:5000, but http://127.0.0.1:5000/health did not answer (...). Start the server with docker compose up -d --wait mlflow, or unset MLFLOW_TRACKING_URI`.
+  - If the server does not answer, the run stops within seconds, before training, with exit 2: `error: MLFLOW_TRACKING_URI is http://127.0.0.1:5000, but http://127.0.0.1:5000/health did not answer (...). Start the server with docker compose up -d --wait mlflow, or unset MLFLOW_TRACKING_URI to log to the local store`.
   - Otherwise they go to the local store `Model-Development/mlruns/` (gitignored): `mlflow.db` (SQLite) with the artifacts beside it.
   - `run.json` says which under `mlflow.where`. It never writes a server's address, which can hold a token.
   - What a run logs is `Model-Development/scripts/mlflow_runs.py`.
-- **On airflow-vm**, training runs with `MLFLOW_TRACKING_URI` empty and logs to `Model-Development/mlruns/`.
-  - The mlflow service is behind the compose profile `mlflow`, so the plain `docker compose up` the VM runs never starts it, and ADR-031 reserves no memory for it.
-  - The Airflow services there get the variable empty (`docker-compose.yaml`).
-  - To log to the server there, start it first with `sudo docker compose up -d --wait mlflow`, then set the variable for the run: `http://127.0.0.1:5000` from the VM's shell, `http://mlflow:5000` from a container.
+- **Where training runs:** on a laptop or in CI's training image (ADR-032), not on airflow-vm. No DAG trains a model there, no Airflow service mounts `Model-Development/`, and mlflow is not started there ("MLflow tracking server (#104)" above).
 - **On Windows with output sent to a file or a pipe**, set `PYTHONUTF8=1` before logging to the server.
   - At the end of a server run, MLflow 3.17.2 writes a "View run ... at" line that starts with an emoji. Windows' default cp1252 encoding for files and pipes cannot encode it.
   - The run then exits 2 after all its work is written, and stays `RUNNING` on the server.
