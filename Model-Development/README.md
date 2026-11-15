@@ -3,7 +3,8 @@
 The models for Boston Resilience Twin, and the tools they train and log with. Each component has a section here; the operating steps are in [docs/runbook.md](../docs/runbook.md).
 
 1. [MLflow tracking server (M1)](#mlflow-tracking-server-m1)
-2. [Sensitivity analysis: SHAP and hyperparameter importance (M10)](#sensitivity-analysis-shap-and-hyperparameter-importance-m10)
+2. [Project 2 infrastructure: registry, image repository, CI identities (M2)](#project-2-infrastructure-registry-image-repository-ci-identities-m2)
+3. [Sensitivity analysis: SHAP and hyperparameter importance (M10)](#sensitivity-analysis-shap-and-hyperparameter-importance-m10)
 
 ## MLflow tracking server (M1)
 
@@ -45,6 +46,72 @@ The smoke check prints `mlflow smoke OK` and the run's link in the UI. Container
 - `tests/test_tracking.py` and `tests/test_mlflow_service.py` (the second keeps the image tag equal to the client pin).
 
 The operating steps, the port, memory and stopping are in the runbook's "MLflow tracking server (#104)".
+
+## Project 2 infrastructure: registry, image repository, CI identities (M2)
+
+The Google Cloud resources the model work runs on, in project 2 (`boston-resilience-twin-p2`, ADR-009), all from Terraform in [`Deployment/terraform-project2/`](../Deployment/terraform-project2/) (#105, ADR-030). Project 1 keeps the VM, the data and the DVC remote; project 2 holds what models and images need: a Docker repository for the training image (#112), a bucket for model files and the Vertex AI Model Registry they are registered in (#111, ADR-006), and the two keyless identities GitHub Actions uses. Every command here was run on main (`b9d69ce`) on 2026-11-14 (macOS, Terraform 1.16.4, google provider 8.10.0 from `.terraform.lock.hcl`).
+
+**What it does**
+
+- **Keyless CI.** GitHub Actions trades its OIDC token for a short-lived token of a service account through Workload Identity Federation. No service account key exists (both accounts list 0 user-managed keys), and the provider accepts tokens from this repository only, matched on its numeric ids, which a renamed or recreated repository cannot reuse.
+- **Two identities.** `ci-reader` for any run of the repository, pull requests included: no project 2 roles, only read access to project 1's DVC data, which project 1's Terraform grants (`Deployment/terraform/iam.tf`). `ci-writer` for runs on `refs/heads/main` only: it pushes the training image and registers models, with the narrowest roles that allow it (table below). A fork pull request gets no OIDC token, so it can use neither.
+- **Least privilege for the registry.** No predefined Vertex AI role is limited to registering models (`roles/aiplatform.user` also deletes models, trains, deploys endpoints and calls Gemini), so a custom role, `modelRegistrar`, holds only `aiplatform.models.upload`, `.get`, `.list`, `.update` (aliases) and `aiplatform.operations.list`.
+- **Model files that are never overwritten.** `ci-writer` holds `storage.objectCreator` and `storage.objectViewer` on the model bucket and nothing that deletes, so it cannot overwrite either: each registered version keeps its files, which a rollback needs (ADR-006). The bucket is versioned, with public access prevention enforced.
+- **A budget alert.** $50 (one member's credit), with emails to the billing account's admins at 25, 50 and 80 percent of spend before credits and at 80 percent of the month's forecast. Education credits bring net spend to about 0, so an alert on net spend would never fire.
+
+**How to run it** (from `Deployment/terraform-project2/`, after `gcloud auth application-default login`; `terraform.tfvars` is copied from `terraform.tfvars.example`, holds the billing account and the admins' addresses, and is gitignored):
+
+```bash
+cd Deployment/terraform-project2
+terraform init                                   # the GCS state backend and the google provider
+terraform fmt -check && terraform validate       # no cloud calls; prints "Success! The configuration is valid."
+terraform plan -var-file=terraform.tfvars        # read-only; on main: "No changes. Your infrastructure matches the configuration."
+terraform output                                 # the six values below
+```
+
+`terraform apply` is human only and is never run by Claude Code; the runbook's "Project 2 infrastructure (Terraform)" has the apply, the costs and the teardown. The project and its state bucket were created by hand once (ADR-030 "Bootstrap"), because Terraform cannot create the bucket its own state lives in.
+
+**What it produces**
+
+| Resource | Name | Notes |
+|---|---|---|
+| APIs | Vertex AI, Artifact Registry, Billing Budgets, IAM, IAM Credentials, STS, Storage, Resource Manager, Service Usage | Cloud Run and Gemini are enabled with their services in Deployment |
+| Docker repository | `us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images` | The training image `brt-train`, tagged with the commit; every main run pushes one (#112). 10 images, 2,075 MB on 2026-11-14; no cleanup policy yet |
+| Model bucket | `gs://boston-resilience-twin-p2-models` | us-east1, versioned, uniform access, public access prevention enforced, `force_destroy` off; one folder per registered version (#111). Empty until the first push on main |
+| Model registry | Vertex AI Model Registry, us-east1 | Nothing to create: the model `surge-forecast`, its versions and aliases are data that #111 writes through the API. No endpoint (endpoints bill by the hour) |
+| Workload Identity | pool `github`, provider `github-oidc` | `ACTIVE`, condition `assertion.repository_id == '1404951557' && assertion.repository_owner_id == '71484962'` |
+| Service accounts | `ci-reader`, `ci-writer` | Bound on `attribute.repository_id/1404951557` and `attribute.ref/refs/heads/main` |
+| Custom role | `modelRegistrar` | The five permissions above |
+| Budget | `boston-resilience-twin-p2 credit`, $50 | Four alert rules (above) |
+| Teammate access | `roles/editor` and `roles/resourcemanager.projectIamAdmin` | For the members in `project_admins` (Prit), in place of `roles/owner`, which cannot be granted through the API to an account outside the project's organization |
+
+Who can do what in project 2:
+
+| Identity | Used by | Roles |
+|---|---|---|
+| `ci-reader@boston-resilience-twin-p2.iam.gserviceaccount.com` | Any run of the repository (`model.yml` on pull requests and branches) | None in project 2; `storage.objectViewer` on project 1's `boston-resilience-twin-data` |
+| `ci-writer@boston-resilience-twin-p2.iam.gserviceaccount.com` | Runs on main only (`model.yml` on main) | `modelRegistrar`; `artifactregistry.writer` on `brt-images` only; `storage.objectCreator` and `storage.objectViewer` on the model bucket; the same project 1 read |
+
+**Where results live.** `terraform output` on main printed:
+
+```
+ci_reader_email = "ci-reader@boston-resilience-twin-p2.iam.gserviceaccount.com"
+ci_writer_email = "ci-writer@boston-resilience-twin-p2.iam.gserviceaccount.com"
+image_repository = "us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images"
+model_bucket = "boston-resilience-twin-p2-models"
+project_number = "570429679915"
+workload_identity_provider = "projects/570429679915/locations/global/workloadIdentityPools/github/providers/github-oidc"
+```
+
+These are public identifiers, not secrets; `.github/workflows/model.yml` writes the provider and both account emails in its auth steps. The state is in `gs://boston-resilience-twin-p2-tfstate` (prefix `project2`), outside Terraform. The billing account id is only in `terraform.tfvars` and the state, never in the repository.
+
+**Code**
+
+- `Deployment/terraform-project2/`: `apis.tf`, `artifact_registry.tf`, `storage.tf`, `ci_identity.tf` (the pool, the provider and both accounts), `iam.tf` (`modelRegistrar` and every grant), `budget.tf`, `outputs.tf`, `variables.tf`, `versions.tf` (the backend), `terraform.tfvars.example`.
+- `Deployment/terraform/iam.tf`: project 1's read grant for both CI accounts on the data bucket (Prit, #112).
+- [ADR-030](../docs/decisions/ADR-030-project-2-infrastructure.md) records the choices and the rejected options; [ADR-009](../docs/decisions/ADR-009-two-project-hosting.md) the two-project split.
+
+The operating steps (cost, apply, checking the identities, a failed auth step, the budget, teardown) are in the runbook's "Project 2 infrastructure (Terraform)".
 
 ## Sensitivity analysis: SHAP and hyperparameter importance (M10)
 
