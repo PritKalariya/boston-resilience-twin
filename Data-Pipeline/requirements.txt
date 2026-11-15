@@ -45,6 +45,9 @@ pyogrio==0.13.0
 pyproj==3.8.0
 pytest==9.1.1
 pytest-cov==7.1.0
+# SHAP values of the selected model (#113). It brings slicer, and cloudpickle and
+# tqdm, which the constraints file pins.
+shap==0.54.1
 shapely==2.2.0
 # XGBoost (#107): the CPU-only build on Linux, because the standard Linux wheel
 # pulls NVIDIA's NCCL GPU library (about 430 MB in the image). The Windows and

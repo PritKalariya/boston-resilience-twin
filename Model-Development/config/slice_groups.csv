@@ -1,0 +1,25 @@
+neighborhood,poc,limited_english,flood_zone,student_area
+Allston,higher,lower,not in flood zone,student area
+Back Bay,lower,lower,not in flood zone,other
+Beacon Hill,lower,lower,not in flood zone,other
+Brighton,lower,higher,not in flood zone,other
+Charlestown,lower,lower,in flood zone,other
+Chinatown,higher,higher,not in flood zone,other
+Dorchester,higher,higher,in flood zone,other
+Downtown,lower,higher,in flood zone,student area
+East Boston,higher,higher,in flood zone,other
+Fenway,higher,lower,in flood zone,student area
+Harbor Islands,ungrouped,ungrouped,in flood zone,ungrouped
+Hyde Park,higher,higher,not in flood zone,other
+Jamaica Plain,higher,lower,not in flood zone,other
+Longwood,lower,lower,not in flood zone,student area
+Mattapan,higher,higher,not in flood zone,other
+Mission Hill,higher,higher,not in flood zone,student area
+North End,lower,lower,in flood zone,other
+Roslindale,higher,higher,not in flood zone,other
+Roxbury,higher,higher,not in flood zone,other
+South Boston,lower,lower,in flood zone,other
+South Boston Waterfront,lower,lower,in flood zone,other
+South End,lower,higher,not in flood zone,other
+West End,lower,lower,in flood zone,other
+West Roxbury,lower,lower,not in flood zone,other

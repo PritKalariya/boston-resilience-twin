@@ -673,6 +673,43 @@ python Data-Pipeline/scripts/bias_mitigation.py   # before and after numbers, ab
 - **Writes** `mitigation.csv` (every group mean) and `mitigation.md` to `Data-Pipeline/data/interim/reports/bias/`. It is not a DAG task or DVC stage: rerun it after a `dvc repro` that changes the features or labels, and copy both files to `Data-Pipeline/reports/bias/` with the #32 files.
 - **A self-relative lag is missing** until the neighborhood has a baseline (from January 2016), never filled; the leakage check reads it by date like the raw lags.
 
+## MLflow tracking server (#104)
+
+The compose service `mlflow` keeps experiment runs: `ghcr.io/mlflow/mlflow:v3.17.2` with one worker, its store in `Model-Development/mlflow/` (gitignored). It is off by default: its profiles are `mlflow` and `smoke`, so a plain `docker compose up`, as on airflow-vm, never starts it (ADR-031). Nothing needs it: with `MLFLOW_TRACKING_URI` unset, runs go to the local store ("MLflow tracking (#107)" below). Run the commands from the repo root; they were checked on 2026-11-13 with Docker Compose v5.0.1.
+
+- **Port.** The UI binds `127.0.0.1:5000` only (ADR-016). When 5000 is taken (macOS AirPlay Receiver, or another server), the start fails with `ports are not available: ... listen tcp4 127.0.0.1:5000: bind: address already in use`. Set `MLFLOW_HOST_PORT` in `.env` (for example `5050`), or before one command (`MLFLOW_HOST_PORT=5050 docker compose up -d --wait mlflow`), and use that port in place of 5000 below.
+- **Start and check:**
+
+  ```bash
+  docker compose up -d --wait mlflow                    # mlflow only
+  docker compose --profile mlflow up -d --build --wait  # or mlflow with the Airflow stack
+  docker compose ps -a                                  # mlflow: Up (healthy), 127.0.0.1:5000->5000/tcp
+  curl -fsS http://127.0.0.1:5000/health                # OK
+  ```
+
+  The UI is at http://127.0.0.1:5000.
+- **Smoke check:**
+
+  ```bash
+  docker compose run --rm --build mlflow-smoke                                                 # from a container on the compose network
+  MLFLOW_TRACKING_URI=http://127.0.0.1:5000 python Model-Development/scripts/mlflow_smoke.py   # the same from the host
+  python Model-Development/scripts/mlflow_smoke.py --local-dir "$(mktemp -d)"                  # no server: a throwaway local store
+  ```
+
+  Each logs one run in the `smoke-test` experiment with a parameter, a metric and an artifact, reads the three back and prints `mlflow smoke OK` with where to see the run. It exits 1 when something did not read back or the server did not answer.
+- **mlflow-smoke starts mlflow and leaves it running.** When mlflow is not running, `docker compose run mlflow-smoke` starts it first and waits until it is healthy. When the check ends, the smoke container is removed but mlflow keeps running, with about 355 MiB of its own memory under its 512 MiB limit, until `docker compose --profile mlflow down` (below). `docker stats` shows more, about 475 MiB after a first start, because it also counts file cache the kernel can reclaim.
+- **Log runs to it.** On the host, `export MLFLOW_TRACKING_URI=http://127.0.0.1:5000` before `train.py` or `selection.py`; containers on the compose network use `http://mlflow:5000` (`.env.example`). When the server does not answer `/health`, a run stops within seconds and says to start the server or unset the variable. Unset, runs go back to the local store.
+- **Where the runs are:** `Model-Development/mlflow/mlflow.db` (SQLite: experiments, runs, parameters and metrics) and `Model-Development/mlflow/artifacts/` (the files). Both stay when the container stops or is removed. Its `.gitkeep` keeps the folder in the checkout, so on Linux the folder is yours and not root's.
+- **Stop:**
+
+  ```bash
+  docker compose --profile mlflow down   # mlflow, and the Airflow stack if it is up; the store and the Airflow database stay
+  ```
+
+  A plain `docker compose down` stops the Airflow stack but leaves mlflow running, and prints `Network boston-resilience-twin_default Resource is still in use` (Compose v5.0.1; #135 saw v5.5.1 remove it). `--profile mlflow` removes mlflow and the network too.
+- **On airflow-vm** it is not started: ADR-031's memory budget reserves nothing for it (#61).
+- **A 403 from the server** to a container, while `/health` answers, means the host name in its URL is not in the server's `--allowed-hosts` (`docker-compose.yaml`). Use `http://mlflow:5000`.
+
 ## Training interface (#106, ADR-027)
 
 Every model trains and is scored through `Model-Development/scripts/train.py`, on the frozen labels (`sd_k2_m5`, snow_ice and tree) and the ADR-003 splits in `Model-Development/config/training.csv`. Get the data first (`cd Data-Pipeline && dvc pull`), then from the repo root:
@@ -792,11 +829,11 @@ Every `train.py` run is also an MLflow run in the experiment `model-training` (`
 `tune.py` searches each candidate's settings with Optuna on the train years, and `compare_tuned.py` compares what it found with the starting values on validation 2024. Neither changes what the training stage trains: `tuned_params.yaml` changes only through the reviewed promotion below. From the repo root:
 
 ```bash
-python Model-Development/scripts/tune.py                                # about 75 minutes for the three studies (macOS arm64, 10 cores)
-python Model-Development/scripts/compare_tuned.py                       # about a minute; the starting values against best_params.yaml on 2024
-python Model-Development/scripts/tune.py --models lightgbm --trials 2   # one short study, for timing or a smoke check
+python Model-Development/scripts/tune.py                                # about 45 minutes for the three studies (macOS arm64, 10 cores)
+python Model-Development/scripts/compare_tuned.py                       # about 30 seconds; the starting values against best_params.yaml on 2024
 ```
 
+- **Every run rewrites the committed files in `Model-Development/tuning/`**, a short one included: `--models` and `--trials` leave only that run's models in `summary.json`, `importance.csv` and `best_params.yaml`, and `compare_tuned.py` writes a new `comparison.json`. For a smoke check or a timing run, give both scripts a copy of `tuning.csv` whose `study_dir` is in the gitignored `Model-Development/runs/` ([Model-Development README](../Model-Development/README.md#hyperparameter-tuning-with-optuna-m6), "How to run it").
 - **A study** takes its settings from `Model-Development/config/tuning.csv` and its search space from `tune.SPACES`.
   - Trial 0 is the starting values of `model_params.yaml`, so every study compares tuning with them.
   - A trial fits on the train years only, once per seed in `trial_seeds`; logistic regression has no seed and is fitted once. Its value is the mean fold F1: each inner fold year (2019, 2022, 2023) is scored at the threshold the shared rule picks on that year. Validation 2024 and test are never read.
@@ -828,6 +865,43 @@ python Model-Development/scripts/tune.py --models lightgbm --trials 2   # one sh
   `-f` skips DVC's question about the changed inputs. The image's `selection.json` records no commit, as in CI; the lock ties the reports to the code.
 - **Current state** (data `a719afeb`, 2026-11-12): `tuned_params.yaml` sets nothing, so every candidate trains with its starting values. Only LightGBM's confirmation found an improvement on the train years, and on 2024 it tied the starting values: F1 0.343675 against 0.343529, with the gain's 95% interval [-0.0161, +0.0148] (`comparison.json`). The studies belong to that data version: run both scripts again on a new one.
 - **Platforms.** The committed studies come from macOS (arm64). XGBoost's fits differ slightly between platforms ("Training stage" above), so its study repeats exactly only on the same platform. LightGBM and logistic regression match across platforms in the selection; their studies were not rerun in the Airflow image. The locked reports come from the training image: XGBoost's 2024 F1 is 0.331683 there and 0.336735 on macOS, and LightGBM's is 0.343529 on both. `compare_tuned.py` runs on the host, where git can record the commit, so the XGBoost rows of `comparison.json` are the macOS value.
+
+### Sensitivity analysis (#113)
+
+`sensitivity.py` explains the selected model: SHAP values on the test window, and the tuning settings' fANOVA importance in M6's studies. It changes no model or setting, and neither the training stage nor CI runs it. What each file holds is in the Model-Development README's [Sensitivity analysis (M10)](../Model-Development/README.md#sensitivity-analysis-shap-and-hyperparameter-importance-m10). From the repo root:
+
+```bash
+python Model-Development/scripts/selection.py --reports-dir Model-Development/runs/selection   # about 40 s; skip it when this machine already has the selection's run folders
+python Model-Development/scripts/sensitivity.py --selection Model-Development/runs/selection/selection.json --out Model-Development/runs/sensitivity   # about 10 s
+```
+
+- **Run it where the selection ran.** It loads `model.joblib` from the run folder that `selection.json` names, and run folders exist only on the machine that ran `selection.py`: neither git nor DVC stores them.
+  - The locked `reports/selection.json` (`dvc pull`) comes from the training image, so on a laptop the run stops with "has no model.joblib; run selection.py again".
+  - `--selection FILE` explains another selection whose run folders are on this machine.
+- **The venv needs `shap`.** `shap==0.54.1` came with #113, so in a venv set up before it, run `pip install -r Data-Pipeline/requirements.txt` again. Without it, the run stops at `import shap` with a traceback (exit 1). Its MLflow run has already started by then, and stays `FAILED`.
+- **Keep both steps' files out of `reports/`.** `Model-Development/reports/` is the training stage's DVC output, and DVC does not ignore anything in it. Without `--reports-dir`, `selection.py` rewrites the stage's own five files there; without `--out`, `sensitivity.py` writes `Model-Development/reports/sensitivity/` into it. While such files are there, `dvc status` lists the `select` stage's `reports` as modified, and `dvc commit -f select` would record them as the stage's output. `--reports-dir Model-Development/runs/selection` and `--out Model-Development/runs/sensitivity` keep them in a gitignored folder that no stage owns.
+- **In the training image**, which needs no packages on the host, the selection and the analysis share one artifacts folder. After `docker build -f Model-Development/Dockerfile -t brt-train:local .`:
+
+  ```bash
+  A=$(mktemp -d); export ARTIFACTS_DIR=$A IMAGE=brt-train:local
+  bash .github/scripts/in_image.sh python Model-Development/scripts/selection.py     # about a minute
+  bash .github/scripts/in_image.sh python Model-Development/scripts/sensitivity.py   # about 6 s; writes $A/reports/sensitivity/ and $A/mlruns/
+  ```
+
+  The default reports folder and output are then inside `$A`, outside the checkout.
+- **It stops, exit 2, printing `sensitivity:` and the problem.** Four of the stops also say to run `selection.py` again:
+  - `selection.json` comes from another data version;
+  - a run folder has no `model.joblib`;
+  - the test rows differ from the run's `predictions.parquet`;
+  - a model no longer gives back its run's test probabilities (to within 1e-9).
+
+  It also stops when a tree model's SHAP values miss its probability by more than 1e-6, when the test split has no scored rows, and when `selection.json`, `training.csv` or `tuning.csv` is missing or invalid.
+- **MLflow:** one run, `sensitivity-<model>`, in the experiment `model-sensitivity`. It goes to the server in `MLFLOW_TRACKING_URI`, else to the `mlflow_store` named in `training.csv`.
+- **It repeats.**
+  - A rerun on #113's image selection (2026-11-13) gave the same files byte for byte, except `shap_beeswarm.png`, whose dots shap draws in a random order.
+  - New selections on main (2026-11-14), on macOS and in the image, gave identical SHAP numbers: `shap_importance.csv` and `shap_examples.csv` byte for byte, and the same SHAP and check blocks in `sensitivity.json`.
+  - The tuning importances depend on the platform. They match `importance.csv` on the machine that ran the studies; on Linux they differ by up to 0.004 (0.0037 measured), in the same order. `hp_importance.csv`, the LightGBM and XGBoost importance charts and the tuning lines of `report.md` differ with them.
+  - The other charts, except the beeswarm, are not byte-identical between the platforms either, but they match pixel for pixel: only their PNG compression differs.
 
 ## Versioned data (DVC)
 

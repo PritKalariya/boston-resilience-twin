@@ -1,6 +1,6 @@
 # The runner's packages for the data pull (#112, ADR-032): DVC with its Google Cloud
 # Storage remote, installed on the GitHub Actions runner, never in the training image.
-# Both pins are copied from Data-Pipeline/requirements.txt; test_steps_requirements.py keeps
-# the files equal.
+# Both pins are copied from Data-Pipeline/requirements.txt; test_steps_requirements.py fails
+# if a package in both files has different pins.
 dvc==3.67.1
 dvc-gs==3.1.0
