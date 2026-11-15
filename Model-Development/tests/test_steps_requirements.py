@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MODEL = ROOT / "Model-Development"
 SHARED = ROOT / "Data-Pipeline" / "requirements.txt"
 IMAGE_FILE, PULL_FILE = MODEL / "requirements.txt", MODEL / "requirements-pull.txt"
-IMPORT_NAMES = {"sklearn": "scikit-learn", "yaml": "pyyaml"}  # import name -> package name, where they differ
+IMPORT_NAMES = {"sklearn": "scikit-learn", "yaml": "pyyaml", "google": "google-auth"}  # import name -> package name, where they differ
 
 
 def pins(path: Path) -> dict[str, tuple[str, ...]]:
