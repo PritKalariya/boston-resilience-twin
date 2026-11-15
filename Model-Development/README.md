@@ -50,7 +50,7 @@ The operating steps, the port, memory and stopping are in the runbook's "MLflow 
 
 ## Training core: candidate models, tracking, selection, hold-out results (M4)
 
-The surge forecast itself (#107, on the training interface of #106). It trains a seasonal baseline and three candidate models, picks the best candidate on 2024, and scores it once on the hold-out window. Every command in this section was run on main (`b9d69ce`) on 2026-11-14: on Windows 11 with Python 3.12.15, the DVC commands in a checkout with LF line endings, and the MLflow server in Docker Desktop. The tables under "Hold-out results" are the locked selection's, made in the training image. The runs on Windows gave the same numbers, except XGBoost's (see "Platforms" below).
+The surge forecast itself (#107, on the training interface of #106). It trains a seasonal baseline and three candidate models, picks the best candidate on 2024, and scores it once on the hold-out window. Every command here was run on main on 2026-11-14 (Windows 11, Python 3.12.15, Docker Desktop), and the tables are the locked selection's, from the training image.
 
 **What it does**
 
@@ -143,13 +143,17 @@ Test, 2025-01-01 to 2026-06-30 (13,104 scored rows, 669 surges). LightGBM agains
   - freeze: a forecast low at or below 32 F;
   - heat: a forecast high of 90 F or more. Heat has only 3 surges in 9 days, so its numbers carry little weight.
 - **Test F1 is higher than validation F1** partly because the test window has more surges: 5.1% of its rows, against 4.6% in 2024.
-- **The other candidates on test.** The candidates are compared on validation only (ADR-003), but `train.py` prints every model's test numbers too. In the runs above:
-  - logistic regression had the highest test F1: 0.5386, against 0.4534 for LightGBM and 0.4793 for XGBoost on Windows;
-  - LightGBM and XGBoost kept the higher test PR-AUC, which does not depend on the threshold: 0.6072 and 0.6077, against 0.5654.
+- **The other candidates on test.** The candidates are compared on validation only (ADR-003), but the locked `selection.json` holds every candidate's test numbers too:
+  - logistic regression has the highest test F1: 0.5386, against 0.4534 for LightGBM and 0.4391 for XGBoost;
+  - LightGBM and XGBoost keep the higher test PR-AUC, which does not depend on the threshold: 0.6072 and 0.5986, against 0.5654.
 
   So the gap is mostly in how well each model's 2024 threshold carries over to the test window.
 - **Tuning (M6, #109)** found nothing better than these starting parameters, so `tuned_params.yaml` sets none.
-- **Platforms.** LightGBM, logistic regression and the baseline give the same numbers on Windows and in the image. XGBoost's Windows build sums some values in a different order: its validation F1 is 0.3318 there, against 0.3317 in the image.
+- **Platforms.**
+  - LightGBM, logistic regression and the baseline give the same numbers on Windows and in the images.
+  - XGBoost does not. Its Windows build sums some values in a different order and grows a different model: 105 trees against 89 in the images, with its own threshold and confusion counts.
+  - Its validation F1 happens to land close (0.3318 against 0.3317), but its test F1 does not (0.4793 against 0.4391).
+  - These tables quote the images.
 
 **Code**
 

@@ -802,8 +802,9 @@ The selection is also a DVC stage, `select` in `Model-Development/dvc.yaml`. It 
   - `cd Model-Development && dvc repro --single-item select` (about a minute; `--single-item` leaves the data stages alone), then `python ../Data-Pipeline/scripts/dvc_push.py` to store the reports.
   - Its record names the commit. A `dvc.lock` that an earlier run rewrote counts as an uncommitted change, so run it once per clean checkout.
 - **It fails and records nothing** when no candidate beats the baseline by the margin (`selection.py` exits 1).
-- **The numbers depend a little on the platform.**
-  - XGBoost's model differs slightly between platforms: the Linux `xgboost-cpu` build and the Windows build sum some floating-point values in a different order, so the tree count and the F1 can move in the third or fourth decimal. On data `a719afeb`, validation F1 is 0.3317 in the images and 0.3318 on a Windows laptop.
+- **XGBoost's numbers depend on the platform.**
+  - The Linux `xgboost-cpu` build and the Windows build sum some floating-point values in a different order, so they grow a different XGBoost model. On data `a719afeb`, it has 89 trees in the images and 105 on a Windows laptop, each with its own threshold and confusion counts.
+  - Validation F1 happens to land close (0.3317 against 0.3318), but test F1 does not (0.4391 against 0.4793).
   - Each platform repeats itself exactly. Logistic regression and LightGBM match across platforms, and the Airflow image and the training image gave the same numbers for every model.
   - Quote the locked reports' numbers.
 
