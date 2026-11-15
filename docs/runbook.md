@@ -711,13 +711,14 @@ The compose service `mlflow` keeps experiment runs: `ghcr.io/mlflow/mlflow:v3.17
 
 ## Training interface (#106, ADR-027)
 
-Every model trains and is scored through `Model-Development/scripts/train.py`, on the frozen labels (`sd_k2_m5`, snow_ice and tree) and the ADR-003 splits in `Model-Development/config/training.csv`. Get the data first (`cd Data-Pipeline && dvc pull`), then from the repo root:
+Every model trains and is scored through `Model-Development/scripts/train.py`, on the frozen labels (`sd_k2_m5`, snow_ice and tree) and the ADR-003 splits in `Model-Development/config/training.csv`. From the repo root, first get the two data files training reads (about 5 MB; a bare `dvc pull` fetches all of the pipeline's outputs, about 2.3 GB), then train:
 
 ```bash
-python Model-Development/scripts/train.py --model seasonal                          # about 2 s; prints the metrics
-python Model-Development/scripts/train.py --model logreg                            # about 12 s; also prints the C it chose
-python Model-Development/scripts/train.py --model xgboost                           # about 12 s; also prints the trees it chose
-python Model-Development/scripts/train.py --model lightgbm                          # about 6 s; also prints the trees it chose
+dvc pull Data-Pipeline/data/processed/labels.parquet Data-Pipeline/data/processed/features.parquet
+python Model-Development/scripts/train.py --model seasonal                          # about 8 s; prints the metrics
+python Model-Development/scripts/train.py --model logreg                            # about 20 s; also prints the C it chose
+python Model-Development/scripts/train.py --model xgboost                           # about 10 s; also prints the trees it chose
+python Model-Development/scripts/train.py --model lightgbm                          # about 8 s; also prints the trees it chose
 python Model-Development/scripts/model_params.py                                    # check the parameter files; print every value, tuned ones marked
 python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run id>   # recompute and check
 python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run id> --gates-block
@@ -760,6 +761,7 @@ python Model-Development/scripts/selection.py   # about 40 s; trains the baselin
   - Ranks the candidates by validation F1, compared as exact fractions like the gates; a tie goes to the lower validation log loss.
   - The best one wins only if its F1 is at least the baseline's plus `f1_min_margin` (0.05, inclusive; ADR-026).
 - **Exit codes.** 0 with a winner, 1 when no candidate beats the baseline by the margin, 2 on an error (an undefined baseline F1 is an error, ADR-026 `on_undefined = fail`).
+- **By hand, write the reports elsewhere:** `python Model-Development/scripts/selection.py --reports-dir Model-Development/runs/selection` (about 30 s on a laptop). Without `--reports-dir` it rewrites `Model-Development/reports/`, the training stage's output, and `dvc status` then lists the stage's `reports` as modified.
 - **Writes** `Model-Development/reports/` (`reports_dir`, gitignored; also logged to the selection run):
   - `selection.json`: the decision, the rule and every model's numbers, run folder and MLflow ids.
   - `comparison.csv` and `comparison.png`: validation F1 against the gate, with each model's training time, scoring time for one evening's rows and saved model size beside it.
@@ -786,17 +788,23 @@ The selection is also a DVC stage, `select` in `Model-Development/dvc.yaml`. It 
   - the `Model-Development/config` folder (a new `tuned_params.yaml` reruns it too);
   - every script `selection.py` loads (`tests/test_dvc_stage.py` checks the list).
 - **Its output** is `Model-Development/reports/`.
-- **Run it** from an LF checkout or the Airflow image, as for the Data-Pipeline stages (the lock hashes the scripts with LF endings):
+- **Check it and get its reports** from an LF checkout, since the lock hashes the scripts with LF endings. From the repo root:
 
   ```bash
-  cd Data-Pipeline && dvc pull      # the data version's labels and features
-  cd ../Model-Development && dvc repro --single-item select   # about a minute; --single-item leaves the data stages alone
-  python ../Data-Pipeline/scripts/dvc_push.py                 # store the reports
+  dvc pull Data-Pipeline/data/processed/labels.parquet Data-Pipeline/data/processed/features.parquet   # the data version's labels and features, about 5 MB
+  dvc pull Model-Development/reports          # the locked reports, about 140 KB; a bare `dvc pull` also fetches the pipeline's 2.3 GB
+  cd Model-Development && dvc status select   # "Data and pipelines are up to date." when the lock matches the checkout
   ```
 
-  Commit `Model-Development/dvc.lock`. On a later checkout, `dvc pull` brings the reports back.
+- **Lock a new result in the training image**, as CI runs it: "Run the training stage in the training image" under "Hyperparameter tuning (#109)" below. That is how the locks on main are made (#140, #139). Their `selection.json` records no commit, since the image has no git; the lock ties the reports to the code. Then commit `Model-Development/dvc.lock`.
+- **The stage can also run under DVC,** from an LF checkout or the Airflow image:
+  - `cd Model-Development && dvc repro --single-item select` (about a minute; `--single-item` leaves the data stages alone), then `python ../Data-Pipeline/scripts/dvc_push.py` to store the reports.
+  - Its record names the commit. A `dvc.lock` that an earlier run rewrote counts as an uncommitted change, so run it once per clean checkout.
 - **It fails and records nothing** when no candidate beats the baseline by the margin (`selection.py` exits 1).
-- **The numbers are from the Linux image.** XGBoost's model differs slightly between platforms: the Linux `xgboost-cpu` build and the Windows build sum some floating-point values in a different order, so the tree count and the F1 move in the third or fourth decimal (validation F1 0.3229 in the image, 0.3222 on a Windows laptop, on data `a719afeb`). Each platform repeats itself exactly. Logistic regression and LightGBM match across platforms. Quote the numbers of a run in the Airflow image, as the locked reports are.
+- **The numbers depend a little on the platform.**
+  - XGBoost's model differs slightly between platforms: the Linux `xgboost-cpu` build and the Windows build sum some floating-point values in a different order, so the tree count and the F1 can move in the third or fourth decimal. On data `a719afeb`, validation F1 is 0.3317 in the images and 0.3318 on a Windows laptop.
+  - Each platform repeats itself exactly. Logistic regression and LightGBM match across platforms, and the Airflow image and the training image gave the same numbers for every model.
+  - Quote the locked reports' numbers.
 
 ### MLflow tracking (#107)
 
@@ -804,9 +812,18 @@ Every `train.py` run is also an MLflow run in the experiment `model-training` (`
 
 - **Where runs go** is M1's `tracking.setup` (#104).
   - When `MLFLOW_TRACKING_URI` names a server, runs go there, once it answers `/health`. From the host that is `http://127.0.0.1:5000` after `docker compose up -d --wait mlflow`.
+  - If the server does not answer, the run stops within seconds, before training, with exit 2: `error: MLFLOW_TRACKING_URI is http://127.0.0.1:5000, but http://127.0.0.1:5000/health did not answer (...). Start the server with docker compose up -d --wait mlflow, or unset MLFLOW_TRACKING_URI`.
   - Otherwise they go to the local store `Model-Development/mlruns/` (gitignored): `mlflow.db` (SQLite) with the artifacts beside it.
   - `run.json` says which under `mlflow.where`. It never writes a server's address, which can hold a token.
   - What a run logs is `Model-Development/scripts/mlflow_runs.py`.
+- **On airflow-vm**, training runs with `MLFLOW_TRACKING_URI` empty and logs to `Model-Development/mlruns/`.
+  - The mlflow service is behind the compose profile `mlflow`, so the plain `docker compose up` the VM runs never starts it, and ADR-031 reserves no memory for it.
+  - The Airflow services there get the variable empty (`docker-compose.yaml`).
+  - To log to the server there, start it first with `sudo docker compose up -d --wait mlflow`, then set the variable for the run: `http://127.0.0.1:5000` from the VM's shell, `http://mlflow:5000` from a container.
+- **On Windows with output sent to a file or a pipe**, set `PYTHONUTF8=1` before logging to the server.
+  - At the end of a server run, MLflow 3.17.2 writes a "View run ... at" line that starts with an emoji. Windows' default cp1252 encoding for files and pipes cannot encode it.
+  - The run then exits 2 after all its work is written, and stays `RUNNING` on the server.
+  - A Command Prompt or PowerShell window is not affected, and neither is the local store.
 - **What a run logs.**
   - Tags: model, data version, git commit, split days.
   - Params: the threshold, what the model chose on the inner folds, every parameter used and the training settings.
