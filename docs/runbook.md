@@ -1452,12 +1452,15 @@ The Terraform config sets its own (`versions.tf`).
 |---|---|---|
 | APIs, the Workload Identity pool and provider, both service accounts, the custom role, IAM grants, the budget | $0 | $0 |
 | Vertex AI Model Registry (model versions and aliases) | $0: no endpoint is created (endpoints bill by the hour) | $0 |
-| `brt-images` (Artifact Registry, $0.10 per GB a month after 0.5 GB free) | about $0.16 a month at 2,075 MB (10 images, 2026-11-14) | same; every main run adds an image, about 0.3 GB compressed |
-| `boston-resilience-twin-p2-models` (Standard, us-east1, about $0.02 per GB a month) | cents: a version's files are under 1 MB (about 200 KB for XGBoost) | same |
-| **Total** | **under $1 a month** | **under $1 a month** |
+| `brt-images` (Artifact Registry: $0.10 per GB a month after 0.5 GB free, [pricing](https://cloud.google.com/artifact-registry/pricing)) | about $0.31 a month at 3,604 MB (16 images, 2026-11-15) | same; every main run adds an image, about 0.25 GB compressed (10 images were 2,075 MB on 2026-11-14), so about $0.025 a month more per run |
+| `boston-resilience-twin-p2-models` (Cloud Storage Standard, us-east1: $0.020 per GB a month, [pricing](https://cloud.google.com/storage/pricing)) | cents: a version's files are under 1 MB (about 200 KB for XGBoost) | same |
+| **Total** | **about $0.32 a month on 2026-11-15, growing with main runs** | **same** |
 
-There is no cleanup policy on `brt-images` yet, so its cost grows with main runs (ADR-032
-consequences). Budget is $50 of credits per member and is not pooled; project 2 runs on the
+There is no cleanup policy on `brt-images` yet, so this total has no ceiling: it grows by about
+$0.025 a month with each main run and never shrinks (ADR-032 consequences): 100 more main runs
+add about $2.50 a month. Check the size with
+`gcloud artifacts repositories describe brt-images --location=us-east1 --project=boston-resilience-twin-p2`
+(`Repository Size`). Budget is $50 of credits per member and is not pooled; project 2 runs on the
 owner's credits.
 
 ### Apply (human only)
@@ -1475,12 +1478,14 @@ cd Deployment/terraform-project2
 cp terraform.tfvars.example terraform.tfvars   # the billing account (gcloud billing accounts list) and project_admins
 terraform init
 terraform fmt -check && terraform validate     # prints "Success! The configuration is valid."
-terraform plan -var-file=terraform.tfvars -out=tfplan
-terraform apply tfplan
+terraform plan -var-file=terraform.tfvars -out=project2.tfplan
+terraform apply project2.tfplan
+rm project2.tfplan
 ```
 
-`terraform.tfvars` and `tfplan` are gitignored. Never commit either: `terraform.tfvars` holds the
-billing account id. A plan prints that id in the budget's resource id, so do not paste plan output
+`terraform.tfvars` and `project2.tfplan` are gitignored (`*.tfvars`, `*.tfplan`; `git check-ignore -v
+project2.tfplan` names the rule). Never commit either: both hold the billing account id, the plan
+file in the budget resource. A plan prints that id in the budget's resource id, so do not paste plan output
 into an issue or PR without removing it.
 
 Run `terraform plan -var-file=terraform.tfvars` once more after the apply. On main it prints
@@ -1557,9 +1562,15 @@ run's OIDC token through the provider above.
 
 ### Budget alerts
 
-The budget emails the billing account's admins (the project 2 owner) at 25, 50 and 80 percent of
-$50 spent before credits, and when the month's forecast crosses 80 percent. To check it is there,
-without printing the billing account id:
+The budget emails at 25, 50 and 80 percent of $50 spent before credits, and when the month's
+forecast crosses 80 percent. It has no notification channel, so the recipients are Google's
+default: the Billing Account Administrators and Billing Account Users of the billing account, which
+is the project 2 owner. Teammates in `project_admins` hold project roles only and get no alert; to
+alert someone else, add a monitoring notification channel to `budget.tf` in a reviewed PR.
+
+The budget lives on the billing account, not in the project. Reading it needs a billing account
+role, `roles/billing.viewer` or above (the owner has it); a project role such as `roles/editor`
+is refused. To check it is there, without printing the billing account id:
 
 ```bash
 cd Deployment/terraform-project2
@@ -1572,6 +1583,10 @@ unset BA
 It prints `boston-resilience-twin-p2 credit`, `50`, `EXCLUDE_ALL_CREDITS` and `4`. An alert at 50
 percent or more means something is running that should not be: an endpoint, or `brt-images` grown
 large. Look in the project's billing report by service.
+
+`terraform destroy` removes the budget. Deleting the project alone does not: the budget stays on the
+billing account, filtered on a project that no longer exists, until it is deleted there
+(`gcloud billing budgets delete`, with the same billing role) or by a destroy run first.
 
 ### Tear down (human only)
 
@@ -1589,6 +1604,26 @@ Then destroy the project 2 resources:
 cd Deployment/terraform-project2
 terraform destroy -var-file=terraform.tfvars
 ```
+
+A destroy cannot simply be undone by applying again. Google keeps a deleted Workload Identity pool,
+provider and custom role for a while and their ids cannot be reused meanwhile: the pool `github` and
+the provider `github-oidc` for 30 days, the role `modelRegistrar` for up to 37 (7 days deleted, then
+up to 30 more before it is purged). An apply in that window fails with "already exists". Undelete
+and import them instead of renaming:
+
+```bash
+P=boston-resilience-twin-p2
+gcloud iam workload-identity-pools undelete github --location=global --project=$P
+gcloud iam workload-identity-pools providers undelete github-oidc --workload-identity-pool=github --location=global --project=$P
+gcloud iam roles undelete modelRegistrar --project=$P
+terraform import -var-file=terraform.tfvars google_iam_workload_identity_pool.github projects/$P/locations/global/workloadIdentityPools/github
+terraform import -var-file=terraform.tfvars google_iam_workload_identity_pool_provider.github projects/$P/locations/global/workloadIdentityPools/github/providers/github-oidc
+terraform import -var-file=terraform.tfvars google_project_iam_custom_role.model_registrar projects/$P/roles/modelRegistrar
+```
+
+Then plan, and apply what remains. A deleted project's id can never be reused, so after `gcloud projects delete`
+below, project 2 cannot come back under the name `boston-resilience-twin-p2`: a new project means a
+new id, new tfvars and new identifiers in `model.yml`.
 
 The APIs stay enabled (`disable_on_destroy = false`), and the Vertex AI model versions are data, not
 Terraform resources: delete them in Vertex AI first if they must go. The state bucket
