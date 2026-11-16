@@ -1768,7 +1768,7 @@ A destroy cannot simply be undone by applying again: Google keeps deleted Worklo
 providers and custom roles for a while, their ids cannot be reused meanwhile, and an apply in that
 window fails with "already exists".
 
-- **The pool `github` and the provider `github-oidc`**: held for 30 days, and undeletable all that
+- **The pool `github` and the provider `github-oidc`**: held for 30 days, and can be undeleted all that
   time. Undelete and import them:
 
   ```bash
@@ -1783,6 +1783,7 @@ window fails with "already exists".
   - **Days 1 to 7**: undelete and import it:
 
     ```bash
+    P=boston-resilience-twin-p2
     gcloud iam roles undelete modelRegistrar --project=$P
     terraform import -var-file=terraform.tfvars google_project_iam_custom_role.model_registrar projects/$P/roles/modelRegistrar
     ```
