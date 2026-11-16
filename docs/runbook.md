@@ -999,7 +999,7 @@ The Vertex AI Model Registry in project 2 holds one model, `surge-forecast`; eve
     ARTIFACTS_DIR=<dir> IMAGE=brt-train:local bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_rescore_champion.py --artifacts artifacts
   ```
 
-  A user login is billed through the quota project `vertex_client.py` sets for user credentials only (project 2). The CI identity (Workload Identity) and service accounts get none: with one, the token exchange is billed to project 2 by the GitHub identity and fails with `403 USER_PROJECT_DENIED` on iamcredentials. The file is your own login: never set the flag on a step that does not need project 2.
+  A user login is billed through the quota project `vertex_client.py` sets for user credentials only (project 2). Every other credential type gets none (the CI identity's Workload Identity, service accounts, impersonated service accounts, compute credentials): with one, the token exchange is billed to project 2 by the GitHub identity and fails with `403 USER_PROJECT_DENIED` on iamcredentials. The file is your own login: never set the flag on a step that does not need project 2.
 - **Aliases.** `candidate` is the newest pushed version, `production` the champion, `previous` what a rollback restores. `default` is never used: Vertex moves it by itself when a version is deleted.
 - **One run, in this order** (`registry.py` subcommands; on main the model workflow, #112, calls them through `step_rescore_champion.py`, `step_registry_push.py` with `--evaluation artifacts/evaluation.json`, and `step_set_champion.py`):
   1. `rescore --metrics <gates input>`: downloads the `production` version from the model bucket, checks its `model.joblib` against the sha256 in its `metadata.json`, scores it on the validation rows of this data version with the shared threshold rule, and writes the `champion` block into the gates input (null with no champion). Exits 2 when the champion needs an input this data does not have, or does not load.
@@ -1007,6 +1007,7 @@ The Vertex AI Model Registry in project 2 holds one model, `surge-forecast`; eve
   3. `push --gate-report gate_report.json [--image-digest sha256:...] --out push.json`: only for `promote` or `keep_champion`. Uploads the winner's files to `gs://boston-resilience-twin-p2-models/surge-forecast/<run id>/<MLflow run id>/` (never overwritten; the MLflow run id makes the folder new for every training run, since the workflow's run ids are always `ci-<model>`), with `metadata.json`: metrics, data version, git commit, MLflow run id, image digest, the train, validation and test windows, the `gates.csv` sha256 and every file's sha256. Registers the version, gives it `candidate`, and tags the MLflow run with `registry_version` when MLflow answers. It refuses a run trained on a tree with uncommitted changes; `--dry-run` only warns and prints the plan.
   4. `promote --push-record push.json --gate-report gate_report.json --out promotion.json`: the rollback rule. With `promote`, the old champion gets `previous` and the pushed version `production`; with `keep_champion`, nothing moves. It refuses a gate report whose champion is not the version holding `production` on this data version, and a gate report other than the one the push uploaded (the version's `gate_report` label).
 - **Without project 2 access** `rescore` leaves `champion` null, `push` logs `registry push skipped: ...` and writes `{"skipped": ...}` to `--out`, and `promote` skips on that record. All exit 0, so the run still succeeds, with one exception: in the image without `GITHUB_SHA`, run.json records no commit, so `push` stops (exit 2) before it checks access; the local chain in CLAUDE.md sets `GITHUB_SHA` for that reason. On main the steps pass `--require-access`: ci-writer's credentials are always mounted there (ADR-035), so no access fails the step (exit 2) and Slack names it, instead of a green run that registered nothing. The push step on main also fails without `GITHUB_SHA` or without the registry digest of the training image. Only a refusal of the first call is a skip: once project 2 has answered, a 401 or 403 (a missing role, expired credentials) is an error and exits 2, so a run cannot go green with the registry half changed.
+- **Upload refused with 400 "Vertex AI Service Agent ... does not have permission to access Artifact Registry repository"**: `models:upload` checks that project 2's Vertex AI service agent can read the version's image. `Deployment/terraform-project2/iam.tf` grants it `artifactregistry.reader` on `brt-images` (ADR-030, note of 2026-11-15); if the grant is missing, a project 2 admin runs `terraform plan` and `apply` there, then reruns the failed job (`gh run rerun <run id> --failed`), which trains again and so writes a new model folder (next item).
 - **A push that failed after uploading** (the files are in `gs://boston-resilience-twin-p2-models/surge-forecast/<run id>/<MLflow run id>/` but no version names them) cannot be pushed again from the same training run: the bucket never overwrites, so the second try fails on the first file. Rerun the model workflow, which trains again under a new MLflow run id and so writes a new folder. The orphaned folder costs cents; after `registry.py status` shows no version naming it, a bucket admin may delete it (`gcloud storage rm -r gs://boston-resilience-twin-p2-models/surge-forecast/<run id>/<MLflow run id>/`; `ci-writer` cannot delete).
 - **A promotion that failed partway.** If moving `production` fails, `promote` puts `previous` back and exits 2. If putting it back fails too, it exits 2 with both errors and the alias state, for example "`previous` is on version 4 and should be on version 3; `production` is still on version 4". Run `registry.py status`, then move `previous` back to the named version (or remove it) with the Vertex AI `mergeVersionAliases` call, or in the console's version list. `production` has not moved, so the champion is unchanged.
 - **See what serves:**
@@ -1034,6 +1035,44 @@ python Model-Development/scripts/lock_check.py
 ```
 
 It names each stale dependency and prints the `dvc repro --single-item <stage>` command that refreshes the lock; refresh it as in "Training stage (DVC, #107)" or "Stages (#18, ADR-024)" and commit the lock.
+
+### Training image package lock (#111)
+
+`Model-Development/requirements.lock` holds every package of the training image, transitive ones included, and the Dockerfile installs `requirements.txt` with `-c requirements.lock` (ADR-032, note of 2026-11-15). It was taken by `pip freeze` inside the image that registry version 1 records, so every later image holds the libraries the champion was trained with. Without it, a new release of a dependency (scipy, threadpoolctl, anything MLflow pulls in) would reach the next build unseen. `test_steps_requirements.py` fails when a pin in `requirements.txt` differs from the lock or a direct package is missing from it, before any build, and when the lock header's `# packages:` count or `# base:` image disagrees with the file or the Dockerfile's `FROM`. The model workflow's "Check the image against the lock" step, right after the build on every ref, diffs the built image's `pip freeze` against the lock and fails on any difference: a package in the image that the lock lacks, a lock line the image lacks, or a version pip installed differently. It cannot catch a version edited by hand that pip can install, because `-c` installs the edited version and the freeze then matches the lock; a hand edit is caught in review, where the lock's diff shows in the PR. The Dockerfile's base is pinned by digest (`python:3.12.13-slim@sha256:229a2c5b...`, the base version 1's image was built on: its uncompressed layers are the same), so a rebuilt tag cannot move the image either.
+
+- **Check an image against the lock** (from the repo root; the lock's lines are what `pip freeze` prints, after its comment header):
+
+  ```bash
+  docker build -f Model-Development/Dockerfile -t brt-train:local .
+  docker run --rm --entrypoint pip brt-train:local freeze | diff <(grep -v '^#' Model-Development/requirements.lock) - && echo "image matches the lock"
+  ```
+
+  On 2026-11-15 a linux/arm64 build and a linux/amd64 build (CI's platform) both printed `image matches the lock`.
+- **Read the packages of a registered version's image**, for example to compare with the lock (after `gcloud auth configure-docker us-east1-docker.pkg.dev`, once per machine; the digest is `training_image_digest` in the version's `metadata.json`):
+
+  ```bash
+  docker run --rm --platform linux/amd64 --entrypoint pip us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images/brt-train@sha256:<digest> freeze
+  ```
+
+- **Change a package** (bump a pin in `requirements.txt` or add one). The lock must change in the same PR, or the build fails on the conflict. Keep everything else where it is: rebuild the lock with the old lock as constraints, minus the packages that change. The commands write the whole file, header included: the fixed comment lines are kept, and the `# source:`, `# base:` and `# packages:` lines are written from `SOURCE`, the Dockerfile's `FROM` line and the frozen list, so the lock is made on exactly the base the image builds on:
+
+  ```bash
+  P='numpy'   # the packages whose pins change, separated by |
+  L=Model-Development/requirements.lock
+  SOURCE="requirements.txt bumps numpy (PR #<n>), every other package kept from the previous lock"
+  BASE=$(sed -n 's/^FROM //p' Model-Development/Dockerfile)
+  T=$(mktemp -d); grep '^#' "$L" | grep -Ev '^# (source|base|packages): ' > "$T/fixed.txt"
+  grep -v '^#' "$L" > "$T/all.txt"
+  if [ -n "$P" ]; then grep -Eiv "^($P)==" "$T/all.txt"; else cat "$T/all.txt"; fi > "$T/rest.txt"
+  docker run --rm --platform linux/amd64 -v "$PWD/Model-Development:/m:ro" -v "$T/rest.txt:/c.txt:ro" "$BASE" \
+    sh -c 'pip install -q --root-user-action=ignore --disable-pip-version-check -r /m/requirements.txt -c /c.txt && pip check >&2 && pip freeze' > "$T/freeze.txt"
+  { cat "$T/fixed.txt"
+    printf '# source: %s\n# base: %s, linux/amd64\n# packages: %s\n' "$SOURCE" "$BASE" "$(grep -c . "$T/freeze.txt")"
+    cat "$T/freeze.txt"; } > "$L"
+  ```
+
+  If pip reports a conflict with a pinned dependency, add that package to `P` too and run it again. Then run `test_steps_requirements.py` and the image check above. With nothing in `P` (`P=''`) and `SOURCE="$(sed -n 's/^# source: //p' "$L")"` (the current `# source:` text, read from the lock rather than pasted: it holds an apostrophe), the commands give back the lock unchanged. To move the base image, change the digest in the Dockerfile's `FROM` first, in the same PR. After the merge, the main run re-scores the champion with the new image; if it cannot load the old `model.joblib`, the re-score step exits 2 and Slack names it ("Model registry (#111, ADR-006)", "The champion loads with today's libraries").
+- **Never edit a version by hand**, and never regenerate the whole lock from scratch without a reason in the PR: every transitive package would move at once.
 
 ## Versioned data (DVC)
 
@@ -1438,6 +1477,227 @@ reading. Remove it by hand, last, after the destroy has finished:
 
 ```bash
 gcloud storage rm -r --all-versions gs://boston-resilience-twin-tfstate
+```
+
+## Project 2 infrastructure (Terraform)
+
+Config lives in `Deployment/terraform-project2/` (#105, ADR-030). It covers project 2 only
+(`boston-resilience-twin-p2`, ADR-009): its APIs, the Docker repository `brt-images`, the model
+bucket `boston-resilience-twin-p2-models`, the Workload Identity pool and provider for GitHub
+Actions, the service accounts `ci-reader` and `ci-writer` with their grants, the custom role
+`modelRegistrar`, the $50 budget and teammate access. It shares nothing with project 1's
+config: its own state, its own variables. What each resource is for is in
+`Model-Development/README.md`, "Project 2 infrastructure". Every command below was run on main
+(`b9d69ce`) on 2026-11-14, except `apply`, the bootstrap and the teardown, which are human only.
+
+State is in the GCS bucket `boston-resilience-twin-p2-tfstate` under the prefix `project2`, in
+project 2. That bucket, the project and its billing link were created by hand once (ADR-030,
+"Bootstrap"), before the first `terraform init`, and Terraform never manages them.
+
+Calls with your own login bill a quota project. gcloud's default project is project 1, where
+the Billing Budgets call is refused (`USER_PROJECT_DENIED`), so pass
+`--project=boston-resilience-twin-p2` or `--billing-project=boston-resilience-twin-p2` as below.
+The Terraform config sets its own (`versions.tf`).
+
+### Cost before you apply
+
+| Resource | Running | Idle |
+|---|---|---|
+| APIs, the Workload Identity pool and provider, both service accounts, the custom role, IAM grants, the budget | $0 | $0 |
+| Vertex AI Model Registry (model versions and aliases) | $0: no endpoint is created (endpoints bill by the hour) | $0 |
+| `brt-images` (Artifact Registry: $0.10 per GB a month after 0.5 GB free, [pricing](https://cloud.google.com/artifact-registry/pricing)) | about $0.31 a month at 3,604 MB (16 images, 2026-11-15) | same; every main run adds an image, about 0.25 GB compressed (10 images were 2,075 MB on 2026-11-14), so about $0.025 a month more per run |
+| `boston-resilience-twin-p2-models` (Cloud Storage Standard, us-east1: $0.020 per GB a month, [pricing](https://cloud.google.com/storage/pricing)) | cents: a version's files are under 1 MB (about 200 KB for XGBoost) | same |
+| **Total** | **about $0.32 a month on 2026-11-15, growing with main runs** | **same** |
+
+There is no cleanup policy on `brt-images` yet, so this total has no ceiling: it grows by about
+$0.025 a month with each main run and never shrinks (ADR-032 consequences): 100 more main runs
+add about $2.50 a month. Check the size with
+`gcloud artifacts repositories describe brt-images --location=us-east1 --project=boston-resilience-twin-p2`
+(`Repository Size`). Budget is $50 of credits per member and is not pooled; project 2 runs on the
+owner's credits.
+
+### Apply (human only)
+
+Never run by Claude Code. One time, if not already done:
+
+```bash
+gcloud auth application-default login
+```
+
+Then:
+
+```bash
+cd Deployment/terraform-project2
+cp terraform.tfvars.example terraform.tfvars   # the billing account (gcloud billing accounts list) and project_admins
+terraform init
+terraform fmt -check && terraform validate     # prints "Success! The configuration is valid."
+terraform plan -var-file=terraform.tfvars -out=project2.tfplan
+terraform apply project2.tfplan
+rm project2.tfplan
+```
+
+`terraform.tfvars` and `project2.tfplan` are gitignored (`*.tfvars`, `*.tfplan`; `git check-ignore -v
+project2.tfplan` names the rule). Never commit either: both hold the billing account id, the plan
+file in the budget resource. A plan prints that id in the budget's resource id, so do not paste plan output
+into an issue or PR without removing it.
+
+Run `terraform plan -var-file=terraform.tfvars` once more after the apply. On main it prints
+`No changes. Your infrastructure matches the configuration.`, the check that the config matches
+the project.
+
+A grant to a teammate in `project_admins` who has never signed in to Google Cloud fails with
+"User ... does not exist", as in project 1: they sign in once, then the apply is run again.
+
+### Read the outputs
+
+```bash
+cd Deployment/terraform-project2 && terraform output
+```
+
+Six values: `ci_reader_email`, `ci_writer_email`, `image_repository`
+(`us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images`), `model_bucket`, `project_number`
+(`570429679915`) and `workload_identity_provider`
+(`projects/570429679915/locations/global/workloadIdentityPools/github/providers/github-oidc`).
+They are public identifiers: `.github/workflows/model.yml` writes the provider and both emails in its
+two auth steps. If one changes (a recreated pool or account), change `model.yml` in the same PR.
+
+### Check the CI identities
+
+```bash
+P=boston-resilience-twin-p2
+gcloud iam workload-identity-pools providers describe github-oidc --project=$P --location=global \
+  --workload-identity-pool=github --format='value(state,attributeCondition)'
+for sa in ci-reader ci-writer; do
+  gcloud iam service-accounts keys list --iam-account=$sa@$P.iam.gserviceaccount.com --managed-by=user --format='value(name)' | wc -l
+  gcloud iam service-accounts get-iam-policy $sa@$P.iam.gserviceaccount.com --format='value(bindings.members)'
+done
+gcloud iam roles describe modelRegistrar --project=$P --format='value(includedPermissions)'
+gcloud artifacts repositories get-iam-policy brt-images --location=us-east1 --project=$P \
+  --format='table(bindings.role,bindings.members)'
+```
+
+On main the first prints `ACTIVE` and
+`assertion.repository_id == '1404951557' && assertion.repository_owner_id == '71484962'`. Each
+account lists `0` user-managed keys; `ci-reader` is bound on `.../attribute.repository_id/1404951557`
+(any run of the repository) and `ci-writer` on `.../attribute.ref/refs/heads/main` (main only). The
+role prints
+`aiplatform.models.get;aiplatform.models.list;aiplatform.models.update;aiplatform.models.upload;aiplatform.operations.list`.
+The repository policy (run on 2026-11-15) lists `roles/artifactregistry.reader` for
+`service-570429679915@gcp-sa-aiplatform.iam.gserviceaccount.com`, the Vertex AI service agent (#153),
+and `roles/artifactregistry.writer` for `ci-writer`. A key in either list is a leak: delete it (`gcloud iam service-accounts keys delete`) and tell the
+team. The organization also enforces `iam.disableServiceAccountKeyCreation`, so a new key cannot be
+made.
+
+Project 1's read grant for both accounts on `boston-resilience-twin-data` is in project 1's config
+(`Deployment/terraform/iam.tf`, `ci_data_bucket_reader`) and only a project 1 admin can read the
+bucket policy; a model workflow run whose "Pull the training data (DVC)" step passes shows it works.
+
+### A failed auth step in the model workflow
+
+The steps "Authenticate to Google Cloud (ci-reader)" and "(ci-writer)" in `model.yml` exchange the
+run's OIDC token through the provider above.
+
+- **A fork pull request** has no OIDC token and fails here by design. A maintainer reruns it from a
+  branch of this repository.
+- **`ci-writer` outside main**: `model.yml` uses it only when `MAIN_RUN` is true. Any other ref is
+  refused by the `refs/heads/main` binding when the auth step asks for a token. Do not widen the binding: pull requests must not push images or register models.
+- **Both refused on main**: the repository was recreated or moved, so its numeric ids no longer
+  match the provider's condition or `ci-reader`'s binding. Update `github_repository_id` and
+  `github_repository_owner_id` in `variables.tf`
+  (`gh api repos/PritKalariya/boston-resilience-twin -q '.id, .owner.id'`) and apply. A rename alone
+  changes nothing.
+- **Auth passes, a later call is refused** (403 on the image push, the model bucket or Vertex AI): a
+  grant in `iam.tf` is missing or was changed by hand. Compare with the plan; never fix it with a
+  broader role in the console.
+- **Upload refused with 400, naming the Vertex AI Service Agent and `brt-images`**: the agent's
+  `artifactregistry.reader` grant is missing, not a `ci-writer` role. See "Model registry (#111,
+  ADR-006)" above.
+
+### Budget alerts
+
+The budget emails at 25, 50 and 80 percent of $50 spent before credits, and when the month's
+forecast crosses 80 percent. It has no notification channel, so the recipients are Google's
+default: the Billing Account Administrators and Billing Account Users of the billing account, which
+is the project 2 owner. Teammates in `project_admins` hold project roles only and get no alert; to
+alert someone else, add a monitoring notification channel to `budget.tf` in a reviewed PR.
+
+The budget lives on the billing account, not in the project. Reading it needs a billing account
+role, `roles/billing.viewer` or above (the owner has it); a project role such as `roles/editor`
+is refused. To check it is there, without printing the billing account id:
+
+```bash
+cd Deployment/terraform-project2
+BA=$(awk -F'"' '/^billing_account/{print $2}' terraform.tfvars)
+gcloud billing budgets list --billing-account="$BA" --billing-project=boston-resilience-twin-p2 \
+  --format='table(displayName,amount.specifiedAmount.units,budgetFilter.creditTypesTreatment,thresholdRules.len())'
+unset BA
+```
+
+It prints `boston-resilience-twin-p2 credit`, `50`, `EXCLUDE_ALL_CREDITS` and `4`. An alert at 50
+percent or more means something is running that should not be: an endpoint, or `brt-images` grown
+large. Look in the project's billing report by service.
+
+`terraform destroy` removes the budget. Deleting the project alone does not: the budget stays on the
+billing account, filtered on a project that no longer exists, until it is deleted there
+(`gcloud billing budgets delete`, with the same billing role) or by a destroy run first.
+
+### Tear down (human only)
+
+The model bucket has `force_destroy = false`, so a destroy fails while it holds files. Empty it
+first, deliberately, only when no registered version is needed (every version's files are there,
+and a rollback needs them):
+
+```bash
+gcloud storage rm -r --all-versions gs://boston-resilience-twin-p2-models/**
+```
+
+Then destroy the project 2 resources:
+
+```bash
+cd Deployment/terraform-project2
+terraform destroy -var-file=terraform.tfvars
+```
+
+A destroy cannot simply be undone by applying again: Google keeps deleted Workload Identity pools,
+providers and custom roles for a while, their ids cannot be reused meanwhile, and an apply in that
+window fails with "already exists".
+
+- **The pool `github` and the provider `github-oidc`**: held for 30 days, and undeletable all that
+  time. Undelete and import them:
+
+  ```bash
+  P=boston-resilience-twin-p2
+  gcloud iam workload-identity-pools undelete github --location=global --project=$P
+  gcloud iam workload-identity-pools providers undelete github-oidc --workload-identity-pool=github --location=global --project=$P
+  terraform import -var-file=terraform.tfvars google_iam_workload_identity_pool.github projects/$P/locations/global/workloadIdentityPools/github
+  terraform import -var-file=terraform.tfvars google_iam_workload_identity_pool_provider.github projects/$P/locations/global/workloadIdentityPools/github/providers/github-oidc
+  ```
+
+- **The custom role `modelRegistrar`**, by days since the destroy:
+  - **Days 1 to 7**: undelete and import it:
+
+    ```bash
+    gcloud iam roles undelete modelRegistrar --project=$P
+    terraform import -var-file=terraform.tfvars google_project_iam_custom_role.model_registrar projects/$P/roles/modelRegistrar
+    ```
+
+  - **Days 8 to 37**: it is pending permanent deletion. `gcloud iam roles undelete` fails and the id
+    cannot be reused. Wait, or change `role_id` in `iam.tf` (for example `modelRegistrar2`) in a
+    reviewed PR and apply.
+  - **After day 37**: the id is free; apply normally.
+
+Then plan, and apply what remains. A deleted project's id can never be reused, so after `gcloud projects delete`
+below, project 2 cannot come back under the name `boston-resilience-twin-p2`: a new project means a
+new id, new tfvars and new identifiers in `model.yml`.
+
+The APIs stay enabled (`disable_on_destroy = false`), and the Vertex AI model versions are data, not
+Terraform resources: delete them in Vertex AI first if they must go. The state bucket
+`boston-resilience-twin-p2-tfstate`, the billing link and the project are outside Terraform. Remove
+them by hand, last (ADR-030):
+
+```bash
+gcloud storage rm -r --all-versions gs://boston-resilience-twin-p2-tfstate
+gcloud projects delete boston-resilience-twin-p2
 ```
 
 ## Airflow on the VM

@@ -238,3 +238,34 @@ def test_only_a_user_login_is_billed_to_project_2(monkeypatch, make, quota):
     client = V.VertexClient(R.load_settings())
     assert seen == {"scopes": list(V.SCOPES)}  # no quota project for every credential type
     assert client.session.credentials.quota_project_id == quota
+
+
+_CREDENTIAL_FILES = {
+    "authorized_user": {"type": "authorized_user", "client_id": "c", "client_secret": "s", "refresh_token": "r"},
+    "external_account": {
+        "type": "external_account",
+        "audience": "//iam.googleapis.com/projects/570429679915/locations/global/workloadIdentityPools/github"
+                    "/providers/github-oidc",
+        "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+        "token_url": "https://sts.googleapis.com/v1/token",
+        "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/"
+                                             "serviceAccounts/ci-writer@boston-resilience-twin-p2."
+                                             "iam.gserviceaccount.com:generateAccessToken",
+        "credential_source": {"file": "token.txt", "format": {"type": "text"}},
+    },
+}
+
+
+@pytest.mark.parametrize("kind, quota", [
+    ("authorized_user", "boston-resilience-twin-p2"),
+    ("external_account", None),  # the file google-github-actions/auth writes (run 43689682827)
+])
+def test_a_credentials_file_through_google_auth_itself(monkeypatch, tmp_path, kind, quota):
+    """No mock of google.auth.default: the file goes through google-auth's own loading, offline."""
+    path = tmp_path / "credentials.json"
+    path.write_text(json.dumps(_CREDENTIAL_FILES[kind]))
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(path))
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "boston-resilience-twin-p2")
+    monkeypatch.delenv("GOOGLE_CLOUD_QUOTA_PROJECT", raising=False)
+    session = V.default_session("boston-resilience-twin-p2")
+    assert session.credentials.quota_project_id == quota
