@@ -12,6 +12,8 @@ IE7374 MLOps, Northeastern University, Fall 2026.
 
 **Data Pipeline submission:** [Data-Pipeline/README.md](Data-Pipeline/README.md) has the full pipeline documentation: setup, getting the data, running each step and the DAG, a one-year small run, code structure, DVC, and where each evaluation criterion is met.
 
+**Model Development submission:** [Model-Development/README.md](Model-Development/README.md) has the model and its results, how to train, evaluate and check bias without our cloud, MLflow screenshots, the comparison, bias and SHAP plots, the CI runs, and [where each item of the assignment is met](Model-Development/README.md#assignment-criteria).
+
 ## Repository structure
 
 ```
@@ -110,7 +112,7 @@ docker compose run --rm --build test       # the full suite with coverage, on Py
 pip install ruff==0.17.2 && ruff check .   # lint, as CI runs it
 ```
 
-The test command needs Docker only, no Python on the host. It builds the Airflow image (`brt-airflow:local`; cached after the first build), prints the Python version and stops unless it is 3.12 (ADR-013), then runs every test in `Data-Pipeline/tests` and `Model-Development/tests`, the DAG tests included, and prints the line coverage of each module in `Data-Pipeline/scripts/`. It fails below 70 percent (`.coveragerc`). The test container gets no `.env`, no keys and no network, and an empty folder hides `Data-Pipeline/data`, so a run on a laptop sees what CI sees. Arguments replace the full suite and go to pytest, for example `docker compose run --rm test Data-Pipeline/tests/test_dvc_push.py --no-cov`.
+The test command needs Docker only, no Python on the host. It builds the Airflow image (`brt-airflow:local`; cached after the first build), prints the Python version and stops unless it is 3.12 (ADR-013), then runs every test in `Data-Pipeline/tests` and `Model-Development/tests`, the DAG tests included, and prints the line coverage of each module in `Data-Pipeline/scripts/`. It fails below 70 percent (`.coveragerc`). The test container gets no `.env`, no keys and no network, and an empty folder hides `Data-Pipeline/data`, so a run on a laptop sees what CI sees. Arguments replace the full suite and go to pytest, for example `docker compose run --rm --build test Data-Pipeline/tests/test_dvc_push.py --no-cov`.
 
 CI (`.github/workflows/ci.yml`) runs the same lint and test command for every pull request and every push to main. Tests may not reach the network: `Data-Pipeline/tests/conftest.py` fails any test that tries, so use fixture files or fakes.
 
@@ -172,11 +174,11 @@ A slice run with an injected bad file (`2025.csv` without its `open_dt` column) 
 
 Full builds of `daily_pipeline` (2015 to 2026) on a laptop, 2026-10-24: Docker Desktop with 16 GB, the `brt-airflow:local` image, `map_311.py` after #68, and the raw 311 files of 2026-10-19.
 
-**Before.** One `parse_legacy_311` task parsed the 12 yearly legacy files one after another, 95 of the run's 124 seconds:
+**Before** (2026-10-24). One `parse_legacy_311` task parsed the 12 yearly legacy files one after another, 95 of the run's 124 seconds:
 
 ![Gantt chart before: one long parse_legacy_311 bar](docs/images/gantt-before.jpeg)
 
-**After.** `parse_legacy_311` runs once per year, at most 4 at a time (`LEGACY_PARALLEL`, 4 unless `.env` sets it, the same as Airflow's parallelism; see the runbook), and a new `merge_legacy_311` task joins the years with the rule `legacy_311.read_years` uses for case ids repeated across years. `legacy_311.py` itself is unchanged.
+**After** (2026-10-24). `parse_legacy_311` runs once per year, at most 4 at a time (`LEGACY_PARALLEL`, 4 unless `.env` sets it, the same as Airflow's parallelism; see the runbook), and a new `merge_legacy_311` task joins the years with the rule `legacy_311.read_years` uses for case ids repeated across years. `legacy_311.py` itself is unchanged.
 
 ![Gantt chart after: the years side by side, then merge_legacy_311](docs/images/gantt-after.jpeg)
 
