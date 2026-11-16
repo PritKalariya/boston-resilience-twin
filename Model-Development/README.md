@@ -4,10 +4,11 @@ The models for Boston Resilience Twin, and the tools they train and log with. Ea
 
 1. [MLflow tracking server (M1)](#mlflow-tracking-server-m1)
 2. [Project 2 infrastructure: registry, image repository, CI identities (M2)](#project-2-infrastructure-registry-image-repository-ci-identities-m2)
-3. [Hyperparameter tuning with Optuna (M6)](#hyperparameter-tuning-with-optuna-m6)
-4. [Model bias check (M7)](#model-bias-check-m7)
-5. [Model CI/CD pipeline and training image (M9)](#model-cicd-pipeline-and-training-image)
-6. [Sensitivity analysis: SHAP and hyperparameter importance (M10)](#sensitivity-analysis-shap-and-hyperparameter-importance-m10)
+3. [Training core: candidate models, tracking, selection, hold-out results (M4)](#training-core-candidate-models-tracking-selection-hold-out-results-m4)
+4. [Hyperparameter tuning with Optuna (M6)](#hyperparameter-tuning-with-optuna-m6)
+5. [Model bias check (M7)](#model-bias-check-m7)
+6. [Model CI/CD pipeline and training image (M9)](#model-cicd-pipeline-and-training-image)
+7. [Sensitivity analysis: SHAP and hyperparameter importance (M10)](#sensitivity-analysis-shap-and-hyperparameter-importance-m10)
 
 ## MLflow tracking server (M1)
 
@@ -118,6 +119,133 @@ These are public identifiers, not secrets; `.github/workflows/model.yml` writes 
 - [ADR-030](../docs/decisions/ADR-030-project-2-infrastructure.md) records the choices and the rejected options; [ADR-009](../docs/decisions/ADR-009-two-project-hosting.md) the two-project split.
 
 The operating steps (cost, apply, checking the identities, a failed auth step, the budget, teardown) are in the runbook's "Project 2 infrastructure (Terraform)".
+
+## Training core: candidate models, tracking, selection, hold-out results (M4)
+
+The surge forecast itself (#107, on the training interface of #106). It trains a seasonal baseline and three candidate models, picks the best candidate on 2024, and scores it once on the hold-out window. Every command here was run on main on 2026-11-14 (Windows 11, Python 3.12.15, Docker Desktop), and the tables are the locked selection's, from the training image.
+
+**What it does**
+
+- **The question.** For each of the 24 neighborhoods (ADR-004) and each day: will the next day bring a surge of storm-related 311 requests? The labels are the frozen rule `sd_k2_m5` on the snow and ice and the tree groups (ADR-005, ADR-027), in the Data Pipeline's `labels.parquet`. The inputs are the columns of `features.parquet` that `Data-Pipeline/config/feature_catalog.csv` marks for the model, each known by 18:00 the evening before.
+- **Time splits, never shuffled** (ADR-003): train 2015 to 2023, validation 2024, test 2025-01-01 to 2026-06-30. Rows from 2020 and 2021 weigh 0.5 in training.
+- **Four models** (`scripts/models.py`):
+  - the seasonal baseline: the share of surge days within two weeks of the same date in the 3 years before (ADR-005);
+  - logistic regression;
+  - XGBoost;
+  - LightGBM.
+- **Each candidate tunes itself on the train years only.** It uses three inner folds, 2019, 2022 and 2023, each fit on every train day before it. On them logistic regression picks its C, and XGBoost and LightGBM pick their number of trees. 2024 then picks only each model's alarm threshold (the one with the highest F1) and the winner. The test window is scored once, at the end.
+- **The winner** (`scripts/selection.py`, ADR-026) is the candidate with the highest validation F1, if that F1 is at least the baseline's plus 0.05. Otherwise nothing wins and the command exits 1.
+- **Days with no forecast are not scored.** Validation and test take their weather from the forecast issued the day before (ADR-003). 2024-01-01 to 2024-01-20 have none, so those 480 rows get no prediction and no say in the threshold. They stay in the data as the baseline's history.
+- **Tracked and versioned.** Every model run is an MLflow run in the experiment `model-training`. The selection is the DVC stage `select` (`Model-Development/dvc.yaml`), whose `dvc.lock` ties the reports to the data version and the code.
+
+**How to run it** (from the repo root, in the Python 3.12 venv of the Data Pipeline README's [Environment setup](../Data-Pipeline/README.md#environment-setup)).
+
+- **LightGBM needs the OpenMP runtime.** The Airflow and training images have it. A Linux host needs `libgomp1`. On macOS, LightGBM's install notes say `brew install libomp` (not tried here).
+- **Training reads two data files.** With access to the DVC bucket, pull just those (about 5 MB). Without it, build the data with the Data Pipeline README's full build: a one-year slice holds no train years.
+
+```bash
+dvc pull Data-Pipeline/data/processed/labels.parquet Data-Pipeline/data/processed/features.parquet
+python Model-Development/scripts/train.py --model lightgbm         # one model: trains, scores both windows, prints a table; about 8 s
+python Model-Development/scripts/selection.py --reports-dir Model-Development/runs/selection   # the four models and the decision; about 30 s
+python Model-Development/scripts/evaluate.py --run Model-Development/runs/<run id>   # recompute a run's metrics and check its prediction file
+python Model-Development/scripts/model_params.py                  # the parameters each candidate trains with
+cd Model-Development && dvc status select                         # is the locked selection current for this checkout?
+```
+
+- **`train.py`.** `--model` takes `seasonal`, `logreg`, `xgboost` or `lightgbm`. Each run takes 8 to 20 s on a laptop. It exits 0, or 2 with `error:` and the reason.
+- **`selection.py`.** It exits 0 with a winner, 1 when no candidate reaches the baseline plus 0.05, and 2 on an error. Keep `--reports-dir` outside `Model-Development/reports/`: without it, `selection.py` rewrites the DVC stage's own output there (see "Keep both steps' files out of `Model-Development/reports/`" under M10 below).
+- **`dvc status select`** needs a checkout with LF line endings. `dvc.lock` hashes the scripts with LF endings, so a Windows checkout with `core.autocrlf` shows the stage as changed.
+- **Locking a new selection.** After a new data version or promoted tuning, follow the runbook's "Run the training stage in the training image", so the lock holds CI's numbers.
+
+**Tracking**
+
+- **Where training runs:** on a laptop or in CI's training image (the model workflow, ADR-032), not on airflow-vm. No DAG trains a model there, no Airflow service mounts `Model-Development/`, and mlflow is not started there (ADR-031).
+- **By default, no server.** With `MLFLOW_TRACKING_URI` unset or empty, runs go to the local store `Model-Development/mlruns/`. Browse it with `mlflow ui --backend-store-uri sqlite:///Model-Development/mlruns/mlflow.db` (http://localhost:5000).
+- **The server.** Start it with `docker compose up -d --wait mlflow` ([MLflow tracking server (M1)](#mlflow-tracking-server-m1)), then run `export MLFLOW_TRACKING_URI=http://127.0.0.1:5000` before training. If the variable is set and the server is down, a run stops within seconds with "Start the server with `docker compose up -d --wait mlflow`, or unset MLFLOW_TRACKING_URI to log to the local store".
+
+**What it produces**
+
+- **A run folder per model run**, `Model-Development/runs/<run id>/`:
+  - `predictions.parquet`: every scored row's probability and alarm, the contract in `scripts/predictions.py` that M6, M7, M9 and M10 build on;
+  - `metrics.json`: per split, F1, precision and recall at the threshold, and AUC, PR-AUC, log loss and Brier skill, which do not depend on it;
+  - `validation_counts.json`: validation tp, fp and fn with the data version, the gates' input (ADR-026);
+  - `run.json`: the threshold, data version, git commit, settings, row counts, what the model chose on the inner folds, and where MLflow logged it;
+  - `model.joblib`, for a candidate.
+- **A selection's reports**, in `--reports-dir`:
+  - `selection.json`: the decision, the rule and every model's numbers;
+  - `comparison.csv` and `comparison.png`: validation F1 against the gate, with training time, scoring time for one evening's 24 rows and model size;
+  - `confusion_matrix.png`: the winner's validation counts;
+  - `test_slices.csv`: the winner against the baseline on the test window, overall and on storm, freeze and heat days.
+- **MLflow runs** in `model-training`. Each model gets one run with its parameters, metrics, tags (model, data version, git commit) and files. A selection gets one parent run with its models nested in it.
+
+**Where results live**
+
+- **Run folders:** `Model-Development/runs/`, gitignored, only on the machine that ran them.
+- **The locked selection:** `Model-Development/reports/`, the DVC stage's output, named by `Model-Development/dvc.lock`. `dvc pull Model-Development/reports` brings back its five files (about 140 KB). It comes from the training image, so the run folders it names are not on your machine.
+- **MLflow:** the local store `Model-Development/mlruns/` or the server's store `Model-Development/mlflow/`, both gitignored. A run's `run.json` says which under `mlflow.where`.
+
+**Hold-out results** (the locked selection `20261113T234855Z-selection`, from the training image; data version `a719afeb`)
+
+Validation, 2024 (8,304 scored rows, 379 surges; each model at its own threshold):
+
+| Model | Role | F1 | Precision | Recall | PR-AUC |
+|---|---|---|---|---|---|
+| LightGBM | selected | 0.3435 | 0.3100 | 0.3852 | 0.3368 |
+| XGBoost | candidate | 0.3317 | 0.3124 | 0.3536 | 0.3214 |
+| Logistic regression | candidate | 0.2888 | 0.4571 | 0.2111 | 0.2888 |
+| Seasonal | baseline | 0.1219 | 0.0691 | 0.5198 | 0.0625 |
+
+The gate is 0.1719, the baseline's F1 plus 0.05, and all three candidates reach it. A random ranking would have a PR-AUC of about 0.046, the surge rate.
+
+Test, 2025-01-01 to 2026-06-30 (13,104 scored rows, 669 surges). LightGBM against the baseline, each at its validation threshold, with a 95% bootstrap interval over whole days for the F1 gain:
+
+| Days | Count | Surges | LightGBM F1 | Baseline F1 | F1 gain (95% interval) |
+|---|---|---|---|---|---|
+| All | 546 | 669 | 0.4534 | 0.1549 | +0.2985 (+0.2257 to +0.3659) |
+| Storm | 72 | 199 | 0.4790 | 0.2596 | +0.2194 (+0.0847 to +0.3315) |
+| Freeze | 157 | 560 | 0.4954 | 0.2903 | +0.2051 (+0.1445 to +0.2597) |
+| Heat | 9 | 3 | 0.0000 | 0.0385 | -0.0385 (-0.0870 to 0.0000) |
+
+- **On the whole test window** LightGBM catches 71% of the surges (recall 0.7085), and one alarm in three is right (precision 0.3333). The baseline catches 76%, but fewer than one alarm in eleven is right (0.0862).
+- **The kinds of day** are what the model knew by 18:00 the evening before (`config/slices.csv`):
+  - storm: an alert in effect, an inch of forecast snow or rain, or a forecast gust of 46 mph;
+  - freeze: a forecast low at or below 32 F;
+  - heat: a forecast high of 90 F or more. Heat has only 3 surges in 9 days, so its numbers carry little weight.
+- **Test F1 is higher than validation F1** partly because the test window has more surges: 5.1% of its rows, against 4.6% in 2024.
+- **The other candidates on test.** The candidates are compared on validation only (ADR-003), but the locked `selection.json` holds every candidate's test numbers too:
+  - logistic regression has the highest test F1: 0.5386, against 0.4534 for LightGBM and 0.4391 for XGBoost;
+  - LightGBM and XGBoost keep the higher test PR-AUC, which does not depend on the threshold: 0.6072 and 0.5986, against 0.5654.
+
+  So the gap is mostly in how well each model's 2024 threshold carries over to the test window.
+- **Tuning (M6, #109)** found nothing better than these starting parameters, so `tuned_params.yaml` sets none.
+- **Platforms.**
+  - LightGBM, logistic regression and the baseline give the same numbers on Windows and in the images.
+  - XGBoost does not. Its Windows build sums some values in a different order and grows a different model: 105 trees against 89 in the images, with its own threshold and confusion counts.
+  - Its validation F1 happens to land close (0.3318 against 0.3317), but its test F1 does not (0.4793 against 0.4391).
+  - These tables quote the images.
+
+**Code**
+
+- **Training and selection:**
+  - `scripts/train.py`: trains one model by name and writes its run (#106; the interface ADR-027 fixes);
+  - `scripts/selection.py`: the selection;
+  - `scripts/slices.py`: the test results by kind of day;
+  - `scripts/threshold.py`: the shared threshold rule and the surge metrics.
+- **The models:**
+  - `scripts/models.py`: the four models behind one interface;
+  - `scripts/seasonal_baseline.py`: the baseline;
+  - `scripts/inner_folds.py`: the inner folds;
+  - `scripts/model_params.py`: each candidate's parameters (`config/model_params.yaml`, with M6's `config/tuned_params.yaml` over it).
+- **Data and runs:**
+  - `scripts/training_data.py`: the labels joined to the inputs, the splits and the unscored days;
+  - `scripts/predictions.py`: the prediction file's contract;
+  - `scripts/evaluate.py`: a run's check;
+  - `scripts/mlflow_runs.py`: what a run logs to MLflow, through M1's `scripts/tracking.py`.
+- **Settings:** `config/training.csv` (splits, weights, inner folds, forecast inputs, paths, candidates), `config/model_params.yaml` and `config/slices.csv`. The baseline and the 0.05 margin come from `config/gates.csv` (ADR-026).
+- **The training stage:** `Model-Development/dvc.yaml` and `dvc.lock`.
+- **Tests,** all in `tests/`, with `tests/training_helpers.py`: `test_train.py`, `test_selection.py`, `test_models.py`, `test_training_data.py`, `test_inner_folds.py`, `test_slices.py`, `test_threshold.py`, `test_seasonal_baseline.py`, `test_predictions.py`, `test_model_params.py`, `test_mlflow_runs.py`, and `test_dvc_stage.py`, which checks the stage's dependency list.
+
+The operating steps are in the runbook's [Training interface (#106, ADR-027)](../docs/runbook.md#training-interface-106-adr-027) and the three sections after it: Model selection, Training stage (DVC) and MLflow tracking.
 
 ## Hyperparameter tuning with Optuna (M6)
 
