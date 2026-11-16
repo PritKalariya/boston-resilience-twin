@@ -1464,6 +1464,227 @@ reading. Remove it by hand, last, after the destroy has finished:
 gcloud storage rm -r --all-versions gs://boston-resilience-twin-tfstate
 ```
 
+## Project 2 infrastructure (Terraform)
+
+Config lives in `Deployment/terraform-project2/` (#105, ADR-030). It covers project 2 only
+(`boston-resilience-twin-p2`, ADR-009): its APIs, the Docker repository `brt-images`, the model
+bucket `boston-resilience-twin-p2-models`, the Workload Identity pool and provider for GitHub
+Actions, the service accounts `ci-reader` and `ci-writer` with their grants, the custom role
+`modelRegistrar`, the $50 budget and teammate access. It shares nothing with project 1's
+config: its own state, its own variables. What each resource is for is in
+`Model-Development/README.md`, "Project 2 infrastructure". Every command below was run on main
+(`b9d69ce`) on 2026-11-14, except `apply`, the bootstrap and the teardown, which are human only.
+
+State is in the GCS bucket `boston-resilience-twin-p2-tfstate` under the prefix `project2`, in
+project 2. That bucket, the project and its billing link were created by hand once (ADR-030,
+"Bootstrap"), before the first `terraform init`, and Terraform never manages them.
+
+Calls with your own login bill a quota project. gcloud's default project is project 1, where
+the Billing Budgets call is refused (`USER_PROJECT_DENIED`), so pass
+`--project=boston-resilience-twin-p2` or `--billing-project=boston-resilience-twin-p2` as below.
+The Terraform config sets its own (`versions.tf`).
+
+### Cost before you apply
+
+| Resource | Running | Idle |
+|---|---|---|
+| APIs, the Workload Identity pool and provider, both service accounts, the custom role, IAM grants, the budget | $0 | $0 |
+| Vertex AI Model Registry (model versions and aliases) | $0: no endpoint is created (endpoints bill by the hour) | $0 |
+| `brt-images` (Artifact Registry: $0.10 per GB a month after 0.5 GB free, [pricing](https://cloud.google.com/artifact-registry/pricing)) | about $0.31 a month at 3,604 MB (16 images, 2026-11-15) | same; every main run adds an image, about 0.25 GB compressed (10 images were 2,075 MB on 2026-11-14), so about $0.025 a month more per run |
+| `boston-resilience-twin-p2-models` (Cloud Storage Standard, us-east1: $0.020 per GB a month, [pricing](https://cloud.google.com/storage/pricing)) | cents: a version's files are under 1 MB (about 200 KB for XGBoost) | same |
+| **Total** | **about $0.32 a month on 2026-11-15, growing with main runs** | **same** |
+
+There is no cleanup policy on `brt-images` yet, so this total has no ceiling: it grows by about
+$0.025 a month with each main run and never shrinks (ADR-032 consequences): 100 more main runs
+add about $2.50 a month. Check the size with
+`gcloud artifacts repositories describe brt-images --location=us-east1 --project=boston-resilience-twin-p2`
+(`Repository Size`). Budget is $50 of credits per member and is not pooled; project 2 runs on the
+owner's credits.
+
+### Apply (human only)
+
+Never run by Claude Code. One time, if not already done:
+
+```bash
+gcloud auth application-default login
+```
+
+Then:
+
+```bash
+cd Deployment/terraform-project2
+cp terraform.tfvars.example terraform.tfvars   # the billing account (gcloud billing accounts list) and project_admins
+terraform init
+terraform fmt -check && terraform validate     # prints "Success! The configuration is valid."
+terraform plan -var-file=terraform.tfvars -out=project2.tfplan
+terraform apply project2.tfplan
+rm project2.tfplan
+```
+
+`terraform.tfvars` and `project2.tfplan` are gitignored (`*.tfvars`, `*.tfplan`; `git check-ignore -v
+project2.tfplan` names the rule). Never commit either: both hold the billing account id, the plan
+file in the budget resource. A plan prints that id in the budget's resource id, so do not paste plan output
+into an issue or PR without removing it.
+
+Run `terraform plan -var-file=terraform.tfvars` once more after the apply. On main it prints
+`No changes. Your infrastructure matches the configuration.`, the check that the config matches
+the project.
+
+A grant to a teammate in `project_admins` who has never signed in to Google Cloud fails with
+"User ... does not exist", as in project 1: they sign in once, then the apply is run again.
+
+### Read the outputs
+
+```bash
+cd Deployment/terraform-project2 && terraform output
+```
+
+Six values: `ci_reader_email`, `ci_writer_email`, `image_repository`
+(`us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images`), `model_bucket`, `project_number`
+(`570429679915`) and `workload_identity_provider`
+(`projects/570429679915/locations/global/workloadIdentityPools/github/providers/github-oidc`).
+They are public identifiers: `.github/workflows/model.yml` writes the provider and both emails in its
+two auth steps. If one changes (a recreated pool or account), change `model.yml` in the same PR.
+
+### Check the CI identities
+
+```bash
+P=boston-resilience-twin-p2
+gcloud iam workload-identity-pools providers describe github-oidc --project=$P --location=global \
+  --workload-identity-pool=github --format='value(state,attributeCondition)'
+for sa in ci-reader ci-writer; do
+  gcloud iam service-accounts keys list --iam-account=$sa@$P.iam.gserviceaccount.com --managed-by=user --format='value(name)' | wc -l
+  gcloud iam service-accounts get-iam-policy $sa@$P.iam.gserviceaccount.com --format='value(bindings.members)'
+done
+gcloud iam roles describe modelRegistrar --project=$P --format='value(includedPermissions)'
+gcloud artifacts repositories get-iam-policy brt-images --location=us-east1 --project=$P \
+  --format='table(bindings.role,bindings.members)'
+```
+
+On main the first prints `ACTIVE` and
+`assertion.repository_id == '1404951557' && assertion.repository_owner_id == '71484962'`. Each
+account lists `0` user-managed keys; `ci-reader` is bound on `.../attribute.repository_id/1404951557`
+(any run of the repository) and `ci-writer` on `.../attribute.ref/refs/heads/main` (main only). The
+role prints
+`aiplatform.models.get;aiplatform.models.list;aiplatform.models.update;aiplatform.models.upload;aiplatform.operations.list`.
+The repository policy (run on 2026-11-15) lists `roles/artifactregistry.reader` for
+`service-570429679915@gcp-sa-aiplatform.iam.gserviceaccount.com`, the Vertex AI service agent (#153),
+and `roles/artifactregistry.writer` for `ci-writer`. A key in either list is a leak: delete it (`gcloud iam service-accounts keys delete`) and tell the
+team. The organization also enforces `iam.disableServiceAccountKeyCreation`, so a new key cannot be
+made.
+
+Project 1's read grant for both accounts on `boston-resilience-twin-data` is in project 1's config
+(`Deployment/terraform/iam.tf`, `ci_data_bucket_reader`) and only a project 1 admin can read the
+bucket policy; a model workflow run whose "Pull the training data (DVC)" step passes shows it works.
+
+### A failed auth step in the model workflow
+
+The steps "Authenticate to Google Cloud (ci-reader)" and "(ci-writer)" in `model.yml` exchange the
+run's OIDC token through the provider above.
+
+- **A fork pull request** has no OIDC token and fails here by design. A maintainer reruns it from a
+  branch of this repository.
+- **`ci-writer` outside main**: `model.yml` uses it only when `MAIN_RUN` is true. Any other ref is
+  refused by the `refs/heads/main` binding when the auth step asks for a token. Do not widen the binding: pull requests must not push images or register models.
+- **Both refused on main**: the repository was recreated or moved, so its numeric ids no longer
+  match the provider's condition or `ci-reader`'s binding. Update `github_repository_id` and
+  `github_repository_owner_id` in `variables.tf`
+  (`gh api repos/PritKalariya/boston-resilience-twin -q '.id, .owner.id'`) and apply. A rename alone
+  changes nothing.
+- **Auth passes, a later call is refused** (403 on the image push, the model bucket or Vertex AI): a
+  grant in `iam.tf` is missing or was changed by hand. Compare with the plan; never fix it with a
+  broader role in the console.
+- **Upload refused with 400, naming the Vertex AI Service Agent and `brt-images`**: the agent's
+  `artifactregistry.reader` grant is missing, not a `ci-writer` role. See "Model registry (#111,
+  ADR-006)" above.
+
+### Budget alerts
+
+The budget emails at 25, 50 and 80 percent of $50 spent before credits, and when the month's
+forecast crosses 80 percent. It has no notification channel, so the recipients are Google's
+default: the Billing Account Administrators and Billing Account Users of the billing account, which
+is the project 2 owner. Teammates in `project_admins` hold project roles only and get no alert; to
+alert someone else, add a monitoring notification channel to `budget.tf` in a reviewed PR.
+
+The budget lives on the billing account, not in the project. Reading it needs a billing account
+role, `roles/billing.viewer` or above (the owner has it); a project role such as `roles/editor`
+is refused. To check it is there, without printing the billing account id:
+
+```bash
+cd Deployment/terraform-project2
+BA=$(awk -F'"' '/^billing_account/{print $2}' terraform.tfvars)
+gcloud billing budgets list --billing-account="$BA" --billing-project=boston-resilience-twin-p2 \
+  --format='table(displayName,amount.specifiedAmount.units,budgetFilter.creditTypesTreatment,thresholdRules.len())'
+unset BA
+```
+
+It prints `boston-resilience-twin-p2 credit`, `50`, `EXCLUDE_ALL_CREDITS` and `4`. An alert at 50
+percent or more means something is running that should not be: an endpoint, or `brt-images` grown
+large. Look in the project's billing report by service.
+
+`terraform destroy` removes the budget. Deleting the project alone does not: the budget stays on the
+billing account, filtered on a project that no longer exists, until it is deleted there
+(`gcloud billing budgets delete`, with the same billing role) or by a destroy run first.
+
+### Tear down (human only)
+
+The model bucket has `force_destroy = false`, so a destroy fails while it holds files. Empty it
+first, deliberately, only when no registered version is needed (every version's files are there,
+and a rollback needs them):
+
+```bash
+gcloud storage rm -r --all-versions gs://boston-resilience-twin-p2-models/**
+```
+
+Then destroy the project 2 resources:
+
+```bash
+cd Deployment/terraform-project2
+terraform destroy -var-file=terraform.tfvars
+```
+
+A destroy cannot simply be undone by applying again: Google keeps deleted Workload Identity pools,
+providers and custom roles for a while, their ids cannot be reused meanwhile, and an apply in that
+window fails with "already exists".
+
+- **The pool `github` and the provider `github-oidc`**: held for 30 days, and undeletable all that
+  time. Undelete and import them:
+
+  ```bash
+  P=boston-resilience-twin-p2
+  gcloud iam workload-identity-pools undelete github --location=global --project=$P
+  gcloud iam workload-identity-pools providers undelete github-oidc --workload-identity-pool=github --location=global --project=$P
+  terraform import -var-file=terraform.tfvars google_iam_workload_identity_pool.github projects/$P/locations/global/workloadIdentityPools/github
+  terraform import -var-file=terraform.tfvars google_iam_workload_identity_pool_provider.github projects/$P/locations/global/workloadIdentityPools/github/providers/github-oidc
+  ```
+
+- **The custom role `modelRegistrar`**, by days since the destroy:
+  - **Days 1 to 7**: undelete and import it:
+
+    ```bash
+    gcloud iam roles undelete modelRegistrar --project=$P
+    terraform import -var-file=terraform.tfvars google_project_iam_custom_role.model_registrar projects/$P/roles/modelRegistrar
+    ```
+
+  - **Days 8 to 37**: it is pending permanent deletion. `gcloud iam roles undelete` fails and the id
+    cannot be reused. Wait, or change `role_id` in `iam.tf` (for example `modelRegistrar2`) in a
+    reviewed PR and apply.
+  - **After day 37**: the id is free; apply normally.
+
+Then plan, and apply what remains. A deleted project's id can never be reused, so after `gcloud projects delete`
+below, project 2 cannot come back under the name `boston-resilience-twin-p2`: a new project means a
+new id, new tfvars and new identifiers in `model.yml`.
+
+The APIs stay enabled (`disable_on_destroy = false`), and the Vertex AI model versions are data, not
+Terraform resources: delete them in Vertex AI first if they must go. The state bucket
+`boston-resilience-twin-p2-tfstate`, the billing link and the project are outside Terraform. Remove
+them by hand, last (ADR-030):
+
+```bash
+gcloud storage rm -r --all-versions gs://boston-resilience-twin-p2-tfstate
+gcloud projects delete boston-resilience-twin-p2
+```
+
 ## Airflow on the VM
 
 How Airflow runs on `airflow-vm`, and why: ADR-016, with the boot provisioning and the checkout owner in ADR-029. The VM runs the same `docker-compose.yaml` as the local stack, checked out from `main` at `/opt/boston-resilience-twin` and owned by the host user `airflow` (UID 50000). Run docker commands on the VM with `sudo` and git commands as `sudo -u airflow`. Nobody joins the `docker` group: it is root-equivalent, and `sudo` keeps the operator list equal to ADR-018's. The VM's `.env` is mode 600 and owned by UID 50000, so only that user and root can read it. `sudo docker compose` runs as root and reads it; `docker compose` without `sudo` cannot, so every compose command in this runbook uses `sudo`, and the file's mode is never loosened.
