@@ -1,11 +1,12 @@
 # ADR-030: Project 2 infrastructure provisioned by Terraform, with two keyless CI identities
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-06
 - Owner: Kirtan10
 - Phase: model
 - Amends ADR-009: Cloud Storage for model files is in project 2, not project 1
 - Note (2026-11-15): the Vertex AI service agent (`service-<project number>@gcp-sa-aiplatform.iam.gserviceaccount.com`) gets `roles/artifactregistry.reader` on `brt-images` only. `models:upload` checks that the agent can read the version's container image, and its default role does not cover the repository: the first main run that reached the push failed with a 400 on it (run 43749795990, #111). This is the agent grant the Consequences foresee; `ci-writer`'s roles do not change.
+- Note (2026-11-16): "`objectCreator` cannot delete, so it cannot overwrite an object" under CI identities holds for `ci-writer` only. People with project roles can overwrite or delete objects: the project's Owner and the Editors in `project_admins`. The backstop for them is the bucket's versioning: a replaced or deleted object stays as a noncurrent copy (no lifecycle rule removes them), restorable from its generation (`Model-Development/README.md`, "CI cannot overwrite model files", #118).
 
 ## Context
 
