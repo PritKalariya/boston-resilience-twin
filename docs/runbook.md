@@ -1611,9 +1611,9 @@ The Terraform config sets its own (`versions.tf`).
 |---|---|---|
 | APIs, the Workload Identity pool and provider, both service accounts, the custom role, IAM grants, the budget | $0 | $0 |
 | Vertex AI Model Registry (model versions and aliases) | $0: no endpoint is created (endpoints bill by the hour) | $0 |
-| `brt-images` (Artifact Registry: $0.10 per GB a month after 0.5 GB free, [pricing](https://cloud.google.com/artifact-registry/pricing)) | about $0.31 a month at 3,604 MB (16 images, 2026-11-15) | same; every main run adds an image, about 0.25 GB compressed (10 images were 2,075 MB on 2026-11-14), so about $0.025 a month more per run |
+| `brt-images` (Artifact Registry: $0.10 per GB a month after 0.5 GB free, [pricing](https://cloud.google.com/artifact-registry/pricing)) | about $0.41 a month at 4,622 MB (18 images, as of main run 43792327977, 2026-11-16) | same; every main run adds an image, about 0.25 GB compressed (10 images were 2,075 MB on 2026-11-14), so about $0.025 a month more per run |
 | `boston-resilience-twin-p2-models` (Cloud Storage Standard, us-east1: $0.020 per GB a month, [pricing](https://cloud.google.com/storage/pricing)) | cents: a version's files are under 1 MB (about 200 KB for XGBoost) | same |
-| **Total** | **about $0.32 a month on 2026-11-15, growing with main runs** | **same** |
+| **Total** | **about $0.42 a month as of main run 43792327977, growing with main runs** | **same** |
 
 There is no cleanup policy on `brt-images` yet, so this total has no ceiling: it grows by about
 $0.025 a month with each main run and never shrinks (ADR-032 consequences): 100 more main runs

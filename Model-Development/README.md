@@ -82,9 +82,9 @@ terraform output                                 # the six values below
 | Resource | Name | Notes |
 |---|---|---|
 | APIs | Vertex AI, Artifact Registry, Billing Budgets, IAM, IAM Credentials, STS, Storage, Resource Manager, Service Usage | Cloud Run and Gemini are enabled with their services in Deployment |
-| Docker repository | `us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images` | The training image `brt-train`, tagged with the commit; every main run pushes one (#112). 17 images, 4,368 MB on 2026-11-16 (16 and 3,604 MB on 2026-11-15); no cleanup policy yet, so it grows with every main run |
-| Model bucket | `gs://boston-resilience-twin-p2-models` | us-east1, versioned, uniform access, public access prevention enforced, `force_destroy` off; one folder per training run, `surge-forecast/<run id>/<MLflow run id>/` (#111). On 2026-11-16: six folders, one per version 1 to 5 and one with no version, left by the push that failed before #153 |
-| Model registry | Vertex AI Model Registry, us-east1 | Nothing to create: the model `surge-forecast`, its versions and aliases are data that #111 writes through the API. No endpoint (endpoints bill by the hour). On 2026-11-16: versions 1 to 5, version 1 `production`, version 5 `candidate` |
+| Docker repository | `us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images` | The training image `brt-train`, tagged with the commit; every main run pushes one (#112). 18 images, 4,622 MB as of main run 43792327977 (the #148 merge, 2026-11-16); no cleanup policy yet, so it grows with every main run |
+| Model bucket | `gs://boston-resilience-twin-p2-models` | us-east1, versioned, uniform access, public access prevention enforced, `force_destroy` off; one folder per training run, `surge-forecast/<run id>/<MLflow run id>/` (#111). As of main run 43792327977 (2026-11-16): seven folders, one per version 1 to 6 and one with no version, left by the push that failed before #153 |
+| Model registry | Vertex AI Model Registry, us-east1 | Nothing to create: the model `surge-forecast`, its versions and aliases are data that #111 writes through the API. No endpoint (endpoints bill by the hour). As of main run 43792327977 (2026-11-16): versions 1 to 6, version 1 `production`, version 6 `candidate`. Every main run that retrains adds a version, so `registry.py status` has the current list |
 | Workload Identity | pool `github`, provider `github-oidc` | `ACTIVE`, condition `assertion.repository_id == '1404951557' && assertion.repository_owner_id == '71484962'` |
 | Service accounts | `ci-reader`, `ci-writer` | Bound on `attribute.repository_id/1404951557` and `attribute.ref/refs/heads/main` |
 | Custom role | `modelRegistrar` | The five permissions above |
@@ -513,7 +513,7 @@ version    2  candidate                    lightgbm  data a719afeb9695 commit c8
 version    1  default,production           lightgbm  data a719afeb9695 commit b42316cc985a gates promote       2026-11-15T20:18:10.470870Z
 ```
 
-Every later merge that touches `Model-Development/` retrains and pushes again, so `status` grows by a version each time: the merges of #151, #155 and #150 added versions 3, 4 and 5, each `keep_champion` against version 1 with the same re-scored numbers.
+Every later merge that touches `Model-Development/` retrains and pushes again, so `status` grows by a version each time: the merges of #151, #155, #150 and #148 added versions 3 to 6, each `keep_champion` against version 1 with the same re-scored numbers (main run 43792327977 registered version 6).
 
 **Rollback, exercised live** (2026-11-16, a laptop login, on versions 1 to 5). Versions 1 and 2 hold the same `model.joblib` and nothing serves from the registry yet, so only aliases moved, and the second command put `production` back on version 1:
 
