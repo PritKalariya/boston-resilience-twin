@@ -1,6 +1,185 @@
 # Model Development
 
-The models for Boston Resilience Twin, and the tools they train and log with. Each component has a section here; the operating steps are in [docs/runbook.md](../docs/runbook.md).
+The models for Boston Resilience Twin, and the tools they train and log with. This page starts with the submission: what the model does and how well, how to run it without our cloud, the evidence, and where each item of the assignment is met. Each component then has its own section; the operating steps are in [docs/runbook.md](../docs/runbook.md).
+
+- [The model and its results](#the-model-and-its-results)
+- [Run it without our cloud](#run-it-without-our-cloud)
+- [Evidence](#evidence)
+- [Assignment criteria](#assignment-criteria)
+- [Component sections](#component-sections)
+
+## The model and its results
+
+Each evening the model forecasts, for each of Boston's 24 neighborhoods (ADR-004), whether the next day brings a surge of storm-related 311 requests: snow and ice, or fallen trees (the frozen label rule `sd_k2_m5`, ADR-005 and ADR-027). Its inputs are the columns of the Data Pipeline's `features.parquet` that are known by 18:00 the evening before: self-relative 311 lags, the day-before weather forecast, NWS alerts, predicted tides, the calendar and fixed neighborhood attributes.
+
+- **Splits by time, never shuffled** (ADR-003): train 2015 to 2023, validation 2024, test 2025-01-01 to 2026-06-30. The candidates tune themselves on inner folds of the train years; 2024 picks only each model's alarm threshold and the winner; the test window is scored once.
+- **Four models:** a seasonal baseline (the share of surge days around the same date in the 3 years before) and three candidates, logistic regression, XGBoost and LightGBM.
+- **Selected: LightGBM.** Validation F1 0.3435, against 0.3317 for XGBoost, 0.2888 for logistic regression and 0.1219 for the baseline. It wins because it has the best validation F1, it reaches the gate (the baseline plus 0.05, 0.1719, ADR-026), and its recall gap between the two ACS poverty groups is 0.043, under the 0.15 limit.
+- **On the hold-out test window** LightGBM's F1 is 0.4534 against the baseline's 0.1549, a gain of +0.30 with a 95% interval over whole days of +0.23 to +0.37. It catches 71% of the surges (recall 0.7085), and one alarm in three is right (precision 0.3333).
+- **Tuning** (Optuna, 80 trials per candidate on the train years) found nothing that beat the starting values on 2024, so they stay active (M6).
+- **On main** every change to the model code or its data retrains in a pinned Docker image, applies the performance and fairness gates, registers the winner in Vertex AI Model Registry and changes the champion only when the gates say `promote` (M8, M9).
+
+These numbers are on data version `a719afeb` (the sha256 of `Data-Pipeline/dvc.lock`) and are the locked selection's, `Model-Development/reports/` (`dvc pull Model-Development/reports`).
+
+## Run it without our cloud
+
+Training, evaluation and the bias checks need only Docker and the two data files the Data Pipeline writes. Nothing here calls Google Cloud; the registry steps see no credentials and skip.
+
+**1. The data.** Build it with the Data Pipeline README's [Run it in Airflow](../Data-Pipeline/README.md#run-it-in-airflow), with your own free NOAA token and NWS user agent ([API keys](../Data-Pipeline/README.md#api-keys)). It writes `Data-Pipeline/data/processed/labels.parquet` and `features.parquet`. Use the full build, not the one-year slice: a label compares a day with the 3 years before it, and training needs the train years 2015 to 2023. The first build downloads about 1.7 GB of 311 files, and the alert history fetches 1,134 first bulletins, about 20 minutes. With access to the team's bucket, `dvc pull Data-Pipeline/data/processed/labels.parquet Data-Pipeline/data/processed/features.parquet` fetches the same two files instead (about 5 MB).
+
+**2. Train, evaluate and check bias** in the training image, from the repo root:
+
+```bash
+docker build -f Model-Development/Dockerfile -t brt-train:local .
+export IMAGE=brt-train:local ARTIFACTS_DIR=$(mktemp -d) GITHUB_SHA=$(git rev-parse HEAD)
+for s in pull_data train evaluate rescore_champion; do bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_$s.py --artifacts artifacts || break; done
+bash .github/scripts/in_image.sh python Model-Development/scripts/gates.py --metrics artifacts/metrics.json --out artifacts/gate_report.json
+for s in reload_check registry_push set_champion; do bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_$s.py --artifacts artifacts || break; done
+bash .github/scripts/in_image.sh python Model-Development/scripts/bias.py --run Model-Development/runs/ci-lightgbm
+bash .github/scripts/in_image.sh python Model-Development/scripts/selection.py
+bash .github/scripts/in_image.sh python Model-Development/scripts/sensitivity.py
+```
+
+- **The chain** (the two loops and `gates.py`) is what `model.yml` runs on main, about 85 s: it checks the data and records its version, trains the baseline and the three candidates, picks the winner after the bias check, applies the gates and reloads the saved model. `gates.py` writes the decision to `$ARTIFACTS_DIR/gate_report.json` and exits 0 (promote or keep the champion), 1 (a gate failed) or 2; here it is `promote`, with `margin 0.221623 >= threshold 0.05` and `gap 0.043454 <= threshold 0.15`. The reload check prints `reload check ok: lightgbm, 8304 validation rows, largest probability difference 0`.
+- **The registry steps skip:** `champion re-score skipped`, `registry push skipped` and `set champion skipped`, each with `no project 2 access`, and each exits 0. `in_image.sh` mounts Google credentials only with `MOUNT_GCP_CREDENTIALS=1`, which only main's workflow sets (ADR-035).
+- **`bias.py`** writes the winner's validation and test bias report into its run folder (about 5 s); **`selection.py`** writes the comparison plots and test slices to `$ARTIFACTS_DIR/reports/` (about 55 s); **`sensitivity.py`** writes the SHAP and tuning charts to `$ARTIFACTS_DIR/reports/sensitivity/` (about 7 s).
+- **Everything lands in `$ARTIFACTS_DIR`:** `metrics.json`, `evaluation.json`, `gate_report.json`, `bias/`, `runs/ci-<model>/` with each model's predictions, metrics and `model.joblib`, `reports/`, and `mlruns/`, the MLflow store of these runs (`mlflow.db` and the artifacts; M4's "Tracking" shows how to browse a store with `mlflow ui`).
+
+**What to expect.** This block was run as written on 2026-11-16 in a fresh clone of this branch with no `.env` and no Google credentials, on the two files of data version `a719afeb`. Every number matched the locked selection exactly: the winner, every model's validation F1, precision, recall and PR-AUC, and `test_slices.csv` byte for byte. Only timings and run ids differ. A build of the data on a later date reads newer 311 records and forecasts, so its numbers can differ from these; how much was not measured.
+
+The image is the one CI uses and the one the locked selection was made in, and on an arm64 Mac it gave the locked numbers. Outside the image, on a laptop's Python, every model gives the same numbers except XGBoost: its Windows and macOS builds grow a slightly different model (validation F1 0.3318 on Windows and 0.3367 on macOS, against 0.3317 in the image; M4, "Platforms"). The winner does not change.
+
+## Evidence
+
+**Experiment tracking (MLflow).** Every training run logs its parameters, metrics, tags and model to MLflow (M1, M4). The selection is one parent run with each model nested in it; here it was logged to the compose MLflow server (`docker compose up -d --wait mlflow`, then `selection.py` with `MLFLOW_TRACKING_URI` set):
+
+![MLflow chart view: the selection run and its four nested model runs, with charts of the baseline F1, the gate, inner log loss, saved model size and scoring time](../docs/images/model/mlflow_runs.png)
+
+The winner's run: 38 metrics, 21 parameters and the tags that tie it to the data and the checks (data version, split days, bias gate, reopen conditions). Its `git_commit` is `None` because this run was made in the training image, which has no git; on main the registry version records the commit.
+
+![MLflow run page of the LightGBM model: validation metrics, run details and tags](../docs/images/model/mlflow_run.png)
+
+**Model comparison and selection** (`selection.py`). Validation F1 against the gate, with each model's training time, scoring time for one evening's 24 rows and saved size:
+
+![Validation F1 of the four models, the gate at 0.1719, and each model's costs](../docs/images/model/comparison.png)
+
+The winner on validation 2024 at its threshold:
+
+![Confusion matrix of LightGBM on validation 2024: 146 surges caught, 233 missed, 325 false alarms](../docs/images/model/confusion_matrix.png)
+
+**Bias report** (`bias.py`, ADR-033). Validation recall by group; the gated poverty groups are dark, and the line is the best gated recall minus the 0.15 limit:
+
+![Validation recall by group for LightGBM](../docs/images/model/bias_recall.png)
+
+| Group (validation 2024) | Surge days | Caught | Recall |
+|---|---|---|---|
+| ACS poverty, lower (gated) | 197 | 80 | 0.406 |
+| ACS poverty, higher (gated) | 182 | 66 | 0.363 |
+| People of color, higher | 212 | 89 | 0.420 |
+| People of color, lower | 167 | 57 | 0.341 |
+| Limited English, higher | 227 | 96 | 0.423 |
+| Limited English, lower | 152 | 50 | 0.329 |
+| In a flood zone | 148 | 58 | 0.392 |
+| Not in a flood zone | 231 | 88 | 0.381 |
+| Higher poverty, student areas (#126) | 45 | 12 | 0.267 |
+| Higher poverty, other | 137 | 54 | 0.394 |
+
+The gated gap is 0.043. On the test window the poverty groups' recall is 0.701 (lower) and 0.718 (higher). The full report, with each neighborhood, is `bias_report.md` in the run folder.
+
+**Sensitivity analysis** (`sensitivity.py`, M10). SHAP values of LightGBM on the 13,104 scored test rows, in log-odds; population, day of week, the forecast high and the snow and ice requests two days before move the forecast most. These are associations in the test data, not causes.
+
+![SHAP beeswarm of LightGBM on the test window](../docs/images/model/shap_beeswarm.png)
+
+How fold F1 varied with LightGBM's two most important tuning settings across the 80 trials:
+
+![LightGBM fold F1 against colsample_bytree and learning_rate](../docs/images/model/hp_slice_lightgbm.png)
+
+**CI/CD runs** (`.github/workflows/model.yml`):
+
+- [43749795990](https://github.com/PritKalariya/boston-resilience-twin/actions/runs/43749795990) (attempt 2): the first run on main with the registry steps. Gates `promote`; LightGBM registered as version 1 and made `production`.
+- [43758289814](https://github.com/PritKalariya/boston-resilience-twin/actions/runs/43758289814): the champion re-scored on the same rows, gates `keep_champion` (F1 0.3435 does not beat the champion's 0.3435); version 2 registered as `candidate`, version 1 stays `production`.
+- [43794864158](https://github.com/PritKalariya/boston-resilience-twin/actions/runs/43794864158): the latest run on main as this was written, green.
+- [42273687048](https://github.com/PritKalariya/boston-resilience-twin/actions/runs/42273687048): a deliberately failing gate (2026-11-06, while the steps were still stubs): the push steps skipped and Slack said "gate failed". [42273498532](https://github.com/PritKalariya/boston-resilience-twin/actions/runs/42273498532) and [42274281564](https://github.com/PritKalariya/boston-resilience-twin/actions/runs/42274281564) sent "training complete" and "pipeline failed".
+
+## Assignment criteria
+
+Each item of sections 2 to 8 of the Model Development guidelines, with where it is met. A path is in `Model-Development/` unless it starts with another top-level folder (`.github/`, `Data-Pipeline/`).
+
+**2. Model development and ML code**
+
+| Item | Where |
+|---|---|
+| 2.1 Loading data from the data pipeline | `scripts/training_data.py` (`load_table`): the DVC-versioned `labels.parquet` and `features.parquet`, joined on unit and date, with the inputs `feature_catalog.csv` marks for the model and the data version (sha256 of `Data-Pipeline/dvc.lock`) recorded in every run. `scripts/steps/step_pull_data.py` checks the files in CI. [M4](#training-core-candidate-models-tracking-selection-hold-out-results-m4) |
+| 2.2 Training and selecting the best model | `scripts/train.py`, `scripts/models.py` (four models behind one interface), `scripts/inner_folds.py` (each candidate's own settings on the train years), `scripts/selection.py` (highest validation F1 that reaches the gate). [M4](#training-core-candidate-models-tracking-selection-hold-out-results-m4) |
+| 2.3 Model validation on a hold-out set | `scripts/threshold.py` (F1, precision, recall, AUC, PR-AUC, log loss, Brier skill), `scripts/evaluate.py`; validation 2024 picks threshold and winner, the 2025 to 2026 test window is scored once, with storm, freeze and heat slices and bootstrap intervals (`scripts/slices.py`). [Results](#the-model-and-its-results) |
+| 2.4 Bias detection with slicing (Fairlearn) | `scripts/bias.py`: Fairlearn `MetricFrame` over ACS poverty (gated), people of color, limited English, flood zone, student areas and each neighborhood, on validation and test. [M7](#model-bias-check-m7), [Bias report](#evidence) |
+| 2.5 Code to check bias, reports, mitigation | `bias.py` writes `bias_report.md`, `bias_slices.csv`, `bias.json` and `bias_recall.png`; `scripts/gates.py` applies ADR-026's fairness gate. Mitigation: see 6.3 below |
+| 2.6 Pushing the model to a registry | `scripts/registry.py push` and `scripts/steps/step_registry_push.py`: Vertex AI Model Registry in project 2, the files in its model bucket; the training image goes to Artifact Registry (`brt-images`). [M8](#model-registry-push-champion-and-rollback-m8) |
+
+**3. Hyperparameter tuning**
+
+| Item | Where |
+|---|---|
+| Technique, search space and process | `scripts/tune.py`: Optuna's TPE (Bayesian optimization), 80 trials per candidate, scored on the inner folds of the train years only, then confirmed on fresh seeds; the search space is `SPACES` in `tune.py`, tabled in [M6](#hyperparameter-tuning-with-optuna-m6); settings in `config/tuning.csv`; every study in `tuning/<model>.json`. Result: no gain beyond the noise on 2024 (`tuning/comparison.json`), so the starting values stay active |
+
+**4. Experiment tracking and results**
+
+| Item | Where |
+|---|---|
+| Tracking tool: parameters, metrics, model versions | MLflow (`scripts/tracking.py`, `scripts/mlflow_runs.py`): every run logs its parameters, metrics, tags (data version, commit, split days) and model; a registered run is tagged with its Vertex AI version (`registry_version`). [M1](#mlflow-tracking-server-m1), [screenshots](#evidence) |
+| Visualizations and how the model was selected | `comparison.png` and `confusion_matrix.png` from `selection.py`, and the selection rule above. [Evidence](#evidence) |
+
+**5. Model sensitivity analysis**
+
+| Item | Where |
+|---|---|
+| Feature importance (SHAP) | `scripts/sensitivity.py`: TreeExplainer on every scored test row, the importance table, beeswarm and three example days. [M10](#sensitivity-analysis-shap-and-hyperparameter-importance-m10) |
+| Hyperparameter sensitivity | `sensitivity.py`: seeded fANOVA importance of each setting in M6's studies, with slice plots of the top two. [M10](#sensitivity-analysis-shap-and-hyperparameter-importance-m10) |
+
+**6. Model bias detection (slicing)**
+
+| Item | Where |
+|---|---|
+| 6.1 Perform slicing | `bias.py` with the groups in `config/poverty_groups.csv` and `config/slice_groups.csv` (written from #32's slicing by `Data-Pipeline/scripts/model_groups.py`). [M7](#model-bias-check-m7) |
+| 6.2 Track metrics across slices | Recall, precision and F1 per group on validation and test, in `bias_slices.csv` and in the winner's MLflow run (`validation_worst_group_recall_gap`, tags `bias_gate`, `bias_reopen_*`). [Bias report](#evidence) |
+| 6.3 Bias mitigation | Applied at the inputs: the 311 lags are self-relative (each neighborhood's requests against its own baseline, ADR-025), because raw counts carry a reporting gap between poorer and richer neighborhoods (#32, #33). The comparison below kept them. No model-level mitigation (reweighting, per-group thresholds) was applied, since every candidate passes the gate (ADR-033, decision 8); if one fails, ADR-033 applies those with before and after numbers |
+| 6.4 Document mitigation and trade-offs | [ADR-025](../docs/decisions/ADR-025-bias-mitigation.md), [ADR-033](../docs/decisions/ADR-033-model-bias-check.md) and the table below |
+
+Raw against self-relative 311 lags, validation 2024 (#136; rerun for this README in the training image, 2026-11-16, same numbers):
+
+| Inputs | Model | Val F1 | Val PR-AUC | Recall, lower / higher poverty | Gap | Test F1 |
+|---|---|---|---|---|---|---|
+| self-relative (kept) | LightGBM | 0.3435 | 0.3368 | 0.406 / 0.363 | 0.043 | 0.4534 |
+| self-relative (kept) | XGBoost | 0.3317 | 0.3214 | 0.376 / 0.330 | 0.046 | 0.4391 |
+| raw | LightGBM | 0.3473 | 0.2952 | 0.376 / 0.324 | 0.051 | 0.4470 |
+| raw | XGBoost | 0.3250 | 0.2842 | 0.320 / 0.297 | 0.023 | 0.4440 |
+
+The trade-off: raw lags tie on F1 (LightGBM +0.004 with raw, XGBoost +0.007 with self-relative), but self-relative ranks clearly better (PR-AUC about +0.04 for both) and every gap is far under 0.15, so ADR-025's default stays. What remains is in the labels: higher-poverty neighborhoods file fewer storm requests per resident (15.72 against 25.04 per 1,000 a year in 2024), so they reach the surge floor less often; `bias_report.md` reports it with every run.
+
+**7. CI/CD pipeline automation**
+
+| Item | Where |
+|---|---|
+| 7.1 Training on every model change | `.github/workflows/model.yml`: a pull request or push that touches `Model-Development/`, the workflow, `in_image.sh`, `Data-Pipeline/dvc.lock` or the feature catalog trains in the image on GitHub Actions. [M9](#model-cicd-pipeline-and-training-image) |
+| 7.2 Automated validation with a threshold | `gates.py`: validation F1 at least the baseline's plus 0.05 (`config/gates.csv`, ADR-026); a failure blocks the push on main |
+| 7.3 Automated bias detection | `step_evaluate.py` runs the bias check on every candidate and the fairness gate (recall gap at most 0.15) blocks on main; the report is uploaded with the run's artifacts |
+| 7.4 Registry push | `step_registry_push.py` on main, after the gates and the reload check; runs [43749795990](https://github.com/PritKalariya/boston-resilience-twin/actions/runs/43749795990) and [43758289814](https://github.com/PritKalariya/boston-resilience-twin/actions/runs/43758289814) |
+| 7.5 Notifications | `scripts/steps/step_notify.py`: Slack for training complete, gate failed and pipeline failed (runs listed under [Evidence](#evidence)) |
+| 7.6 Rollback | `registry.py`: the champion (`production`) changes only on `promote`, after the old champion is re-scored on the same rows; `registry.py rollback` moves it back, exercised live on 2026-11-16. [M8](#model-registry-push-champion-and-rollback-m8) |
+
+**8. Code implementation**
+
+| Item | Where |
+|---|---|
+| 8.1 Docker | `Dockerfile` (Python 3.12, base pinned by digest, packages from `requirements.lock`), `.github/scripts/in_image.sh` runs every step in it |
+| 8.2 Loading data | `scripts/training_data.py`, `scripts/steps/step_pull_data.py` (2.1) |
+| 8.3 Training and selecting | `scripts/train.py`, `scripts/selection.py` (2.2) |
+| 8.4 Validation | `scripts/threshold.py`, `scripts/evaluate.py` (2.3) |
+| 8.5 Bias checking with reports and visualizations | `scripts/bias.py` (2.4, 2.5) |
+| 8.6 Selection after bias checking | `scripts/steps/step_evaluate.py`: ranks the candidates by validation F1 and picks the first whose fairness gate passes (ADR-033) |
+| 8.7 Push to a registry | `scripts/registry.py`, `scripts/steps/step_registry_push.py` (2.6) |
+
+## Component sections
 
 1. [MLflow tracking server (M1)](#mlflow-tracking-server-m1)
 2. [Project 2 infrastructure: registry, image repository, CI identities (M2)](#project-2-infrastructure-registry-image-repository-ci-identities-m2)
