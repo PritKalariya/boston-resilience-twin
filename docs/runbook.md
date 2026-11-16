@@ -1605,21 +1605,33 @@ cd Deployment/terraform-project2
 terraform destroy -var-file=terraform.tfvars
 ```
 
-A destroy cannot simply be undone by applying again. Google keeps a deleted Workload Identity pool,
-provider and custom role for a while and their ids cannot be reused meanwhile: the pool `github` and
-the provider `github-oidc` for 30 days, the role `modelRegistrar` for up to 37 (7 days deleted, then
-up to 30 more before it is purged). An apply in that window fails with "already exists". Undelete
-and import them instead of renaming:
+A destroy cannot simply be undone by applying again: Google keeps deleted Workload Identity pools,
+providers and custom roles for a while, their ids cannot be reused meanwhile, and an apply in that
+window fails with "already exists".
 
-```bash
-P=boston-resilience-twin-p2
-gcloud iam workload-identity-pools undelete github --location=global --project=$P
-gcloud iam workload-identity-pools providers undelete github-oidc --workload-identity-pool=github --location=global --project=$P
-gcloud iam roles undelete modelRegistrar --project=$P
-terraform import -var-file=terraform.tfvars google_iam_workload_identity_pool.github projects/$P/locations/global/workloadIdentityPools/github
-terraform import -var-file=terraform.tfvars google_iam_workload_identity_pool_provider.github projects/$P/locations/global/workloadIdentityPools/github/providers/github-oidc
-terraform import -var-file=terraform.tfvars google_project_iam_custom_role.model_registrar projects/$P/roles/modelRegistrar
-```
+- **The pool `github` and the provider `github-oidc`**: held for 30 days, and undeletable all that
+  time. Undelete and import them:
+
+  ```bash
+  P=boston-resilience-twin-p2
+  gcloud iam workload-identity-pools undelete github --location=global --project=$P
+  gcloud iam workload-identity-pools providers undelete github-oidc --workload-identity-pool=github --location=global --project=$P
+  terraform import -var-file=terraform.tfvars google_iam_workload_identity_pool.github projects/$P/locations/global/workloadIdentityPools/github
+  terraform import -var-file=terraform.tfvars google_iam_workload_identity_pool_provider.github projects/$P/locations/global/workloadIdentityPools/github/providers/github-oidc
+  ```
+
+- **The custom role `modelRegistrar`**, by days since the destroy:
+  - **Days 1 to 7**: undelete and import it:
+
+    ```bash
+    gcloud iam roles undelete modelRegistrar --project=$P
+    terraform import -var-file=terraform.tfvars google_project_iam_custom_role.model_registrar projects/$P/roles/modelRegistrar
+    ```
+
+  - **Days 8 to 37**: it is pending permanent deletion. `gcloud iam roles undelete` fails and the id
+    cannot be reused. Wait, or change `role_id` in `iam.tf` (for example `modelRegistrar2`) in a
+    reviewed PR and apply.
+  - **After day 37**: the id is free; apply normally.
 
 Then plan, and apply what remains. A deleted project's id can never be reused, so after `gcloud projects delete`
 below, project 2 cannot come back under the name `boston-resilience-twin-p2`: a new project means a
