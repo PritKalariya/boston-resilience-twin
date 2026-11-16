@@ -81,9 +81,9 @@ terraform output                                 # the six values below
 | Resource | Name | Notes |
 |---|---|---|
 | APIs | Vertex AI, Artifact Registry, Billing Budgets, IAM, IAM Credentials, STS, Storage, Resource Manager, Service Usage | Cloud Run and Gemini are enabled with their services in Deployment |
-| Docker repository | `us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images` | The training image `brt-train`, tagged with the commit; every main run pushes one (#112). 16 images, 3,604 MB on 2026-11-15; no cleanup policy yet, so it grows with every main run |
-| Model bucket | `gs://boston-resilience-twin-p2-models` | us-east1, versioned, uniform access, public access prevention enforced, `force_destroy` off; one folder per training run, `surge-forecast/<run id>/<MLflow run id>/` (#111). On 2026-11-15: the folders of versions 1 and 2 and one with no version, left by the push that failed before #153 |
-| Model registry | Vertex AI Model Registry, us-east1 | Nothing to create: the model `surge-forecast`, its versions and aliases are data that #111 writes through the API. No endpoint (endpoints bill by the hour). On 2026-11-15: version 1 `production`, version 2 `candidate` |
+| Docker repository | `us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images` | The training image `brt-train`, tagged with the commit; every main run pushes one (#112). 17 images, 4,368 MB on 2026-11-16 (16 and 3,604 MB on 2026-11-15); no cleanup policy yet, so it grows with every main run |
+| Model bucket | `gs://boston-resilience-twin-p2-models` | us-east1, versioned, uniform access, public access prevention enforced, `force_destroy` off; one folder per training run, `surge-forecast/<run id>/<MLflow run id>/` (#111). On 2026-11-16: six folders, one per version 1 to 5 and one with no version, left by the push that failed before #153 |
+| Model registry | Vertex AI Model Registry, us-east1 | Nothing to create: the model `surge-forecast`, its versions and aliases are data that #111 writes through the API. No endpoint (endpoints bill by the hour). On 2026-11-16: versions 1 to 5, version 1 `production`, version 5 `candidate` |
 | Workload Identity | pool `github`, provider `github-oidc` | `ACTIVE`, condition `assertion.repository_id == '1404951557' && assertion.repository_owner_id == '71484962'` |
 | Service accounts | `ci-reader`, `ci-writer` | Bound on `attribute.repository_id/1404951557` and `attribute.ref/refs/heads/main` |
 | Custom role | `modelRegistrar` | The five permissions above |
@@ -478,9 +478,14 @@ The last steps of the model workflow on main (#111, ADR-006). They register each
 
 In the workflow, on every push to main (`.github/workflows/model.yml`): `step_rescore_champion.py`, then `gates.py`, `step_reload_check.py`, `step_registry_push.py` and `step_set_champion.py`. Only these three registry steps get `ci-writer`'s credentials (ADR-035).
 
-On a laptop, the local chain in CLAUDE.md runs the same steps in the training image. Without `MOUNT_GCP_CREDENTIALS=1` it has no credentials, so the registry steps skip and nothing is written to project 2. Run this way, LightGBM won with validation F1 0.3435 (seasonal baseline 0.1219), the reload check passed (8,304 validation rows, largest probability difference 0), and each registry step logged `skipped: no project 2 access`. With no champion block, `gates.py` gives `promote`.
+Before them, the workflow builds the training image and checks it against `Model-Development/requirements.lock` (#155): every package of the image that version 1 was trained in, transitive ones included, which the Dockerfile installs with `-c`. The step "Check the image against the lock" diffs the built image's `pip freeze` against the lock, so the champion is always re-scored with the libraries it was trained with. On main the image is then pushed to `brt-images` (main only), and the push writes the registry digest to `artifacts/image_digest.txt`, which `step_registry_push.py` records as the version's container image. The runbook's "Training image package lock (#111)" has the check and how to change a package.
 
-From the repo root, after `gcloud auth application-default login` (the runbook's "Model registry (#111, ADR-006)" has every option and failure case):
+On a laptop, the local chain in CLAUDE.md runs the same steps in the training image. Without `MOUNT_GCP_CREDENTIALS=1` it has no credentials, so the registry steps skip and nothing is written to project 2. Run this way, LightGBM won with validation F1 0.3435 (seasonal baseline 0.1219), the reload check passed (8,304 validation rows, largest probability difference 0), and each registry step logged `skipped: no project 2 access`. Before its skip line the push step also prints `::warning::artifacts/image_digest.txt holds no registry digest of us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images/brt-train: None; the version names the image without a digest`: the local chain builds no registry image, so there is no digest (on main a missing digest is an error instead). With no champion block, `gates.py` gives `promote`.
+
+From the repo root, after `gcloud auth application-default login` (the runbook's "Model registry (#111, ADR-006)" has every option and failure case). Two things to know when running them on the local chain's output (`$A` is its `ARTIFACTS_DIR`):
+
+- `push` reads the winner's run folder from `training.csv`'s `runs_dir`, `Model-Development/runs/`, but the chain writes its runs to `$A/runs/`. Copy them first, `cp -R "$A/runs/." Model-Development/runs/` (gitignored), or the dry run stops with `cannot read the run record .../Model-Development/runs/ci-lightgbm/run.json` and exit 2. With the copy and `GITHUB_SHA` set, `push --gate-report "$A/gate_report.json" --evaluation "$A/evaluation.json" --dry-run` printed the plan and exited 0 (2026-11-16).
+- `rescore` writes the champion into its `--metrics` file in place. Run it on a copy of `$A/metrics.json` if the chain's own gates input should stay as the chain left it.
 
 ```bash
 python Model-Development/scripts/registry.py status                           # every version and its aliases
@@ -499,13 +504,44 @@ The first two runs on main:
 | 43749795990, attempt 2 (`b42316c`) | none | `promote`: F1 0.3435 against the seasonal baseline's 0.1219 (margin 0.22, at least 0.05), recall gap between the poverty groups 0.043 (at most 0.15) | version 1, then `production` |
 | 43758289814 (`c87bffb`) | version 1, re-scored: tp 146, fp 325, fn 233 at threshold 0.0960 | `keep_champion`: both gates pass, but F1 0.3435 does not beat the champion's 0.3435 | version 2 `candidate`; version 1 stays `production` |
 
-After them, with a laptop login:
+`status` with a laptop login, a snapshot after the second run (`c87bffb`, 2026-11-15):
 
 ```text
 $ python Model-Development/scripts/registry.py status
 version    2  candidate                    lightgbm  data a719afeb9695 commit c87bffbbf58c gates keep_champion 2026-11-15T20:31:49.826747Z
 version    1  default,production           lightgbm  data a719afeb9695 commit b42316cc985a gates promote       2026-11-15T20:18:10.470870Z
 ```
+
+Every later merge that touches `Model-Development/` retrains and pushes again, so `status` grows by a version each time: the merges of #151, #155 and #150 added versions 3, 4 and 5, each `keep_champion` against version 1 with the same re-scored numbers.
+
+**Rollback, exercised live** (2026-11-16, a laptop login, on versions 1 to 5). Versions 1 and 2 hold the same `model.joblib` and nothing serves from the registry yet, so only aliases moved, and the second command put `production` back on version 1:
+
+```text
+$ python Model-Development/scripts/registry.py status
+version    5  candidate                    lightgbm  data a719afeb9695 commit 19802e00d942 gates keep_champion 2026-11-16T01:10:11.182272Z
+version    4  -                            lightgbm  data a719afeb9695 commit d7001731c288 gates keep_champion 2026-11-16T00:36:33.476433Z
+version    3  -                            lightgbm  data a719afeb9695 commit 23ce40934d80 gates keep_champion 2026-11-16T00:22:49.226929Z
+version    2  -                            lightgbm  data a719afeb9695 commit c87bffbbf58c gates keep_champion 2026-11-15T20:31:49.826747Z
+version    1  default,production           lightgbm  data a719afeb9695 commit b42316cc985a gates promote       2026-11-15T20:18:10.470870Z
+$ python Model-Development/scripts/registry.py rollback --to 2
+rolled back: production moved from version 1 to 2
+$ python Model-Development/scripts/registry.py status
+version    5  candidate                    lightgbm  data a719afeb9695 commit 19802e00d942 gates keep_champion 2026-11-16T01:10:11.182272Z
+version    4  -                            lightgbm  data a719afeb9695 commit d7001731c288 gates keep_champion 2026-11-16T00:36:33.476433Z
+version    3  -                            lightgbm  data a719afeb9695 commit 23ce40934d80 gates keep_champion 2026-11-16T00:22:49.226929Z
+version    2  production                   lightgbm  data a719afeb9695 commit c87bffbbf58c gates keep_champion 2026-11-15T20:31:49.826747Z
+version    1  default                      lightgbm  data a719afeb9695 commit b42316cc985a gates promote       2026-11-15T20:18:10.470870Z
+$ python Model-Development/scripts/registry.py rollback --to 1
+rolled back: production moved from version 2 to 1
+$ python Model-Development/scripts/registry.py status
+version    5  candidate                    lightgbm  data a719afeb9695 commit 19802e00d942 gates keep_champion 2026-11-16T01:10:11.182272Z
+version    4  -                            lightgbm  data a719afeb9695 commit d7001731c288 gates keep_champion 2026-11-16T00:36:33.476433Z
+version    3  -                            lightgbm  data a719afeb9695 commit 23ce40934d80 gates keep_champion 2026-11-16T00:22:49.226929Z
+version    2  -                            lightgbm  data a719afeb9695 commit c87bffbbf58c gates keep_champion 2026-11-15T20:31:49.826747Z
+version    1  default,production           lightgbm  data a719afeb9695 commit b42316cc985a gates promote       2026-11-15T20:18:10.470870Z
+```
+
+Both rollbacks exited 0. `rollback --to` moves only `production`: no version held `previous` before, and none did after.
 
 `rescore` on the laptop chain's gates input gives the same champion numbers as the main run (`champion version 1 on sha256:a719afeb9695: tp 146 fp 325 fn 233 (threshold 0.0960)`), and `gates.py` then gives `keep_champion`. Vertex puts `default` on the first version by itself; nothing reads it.
 
