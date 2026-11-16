@@ -68,9 +68,10 @@ def test_the_pull_names_its_targets_and_never_pulls_everything(steps):
     assert pulls == ["dvc pull Data-Pipeline/data/processed/labels.parquet Data-Pipeline/data/processed/features.parquet"]
 
 
-def test_the_image_push_is_main_only_right_after_the_build(steps):
+def test_the_image_push_is_main_only_right_after_the_build_and_its_lock_check(steps):
     names = [s.get("name", "") for s in steps]
-    assert names.index("Push the image (main only)") == names.index("Build the training image") + 1
+    assert names.index("Check the image against the lock") == names.index("Build the training image") + 1
+    assert names.index("Push the image (main only)") == names.index("Check the image against the lock") + 1
     push = step(steps, "Push the image")
     assert push["if"] == "env.MAIN_RUN == 'true'"
     assert "--password-stdin" in push["run"] and "us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images/brt-train" in (
@@ -97,7 +98,7 @@ def test_a_gate_failure_warns_on_a_pr_and_fails_on_main(steps):
 
 def test_every_step_runs_in_the_image_through_the_one_script(steps):
     runs = [s["run"] for s in steps if "in_image.sh" in s.get("run", "")]
-    assert len(runs) == 8 and not any("docker run" in s.get("run", "") for s in steps)
+    assert len(runs) == 9 and not any("docker run" in s.get("run", "") for s in steps)
     script = SCRIPT.read_text(encoding="utf-8")
     assert script.count("docker run") == 1 and "MLFLOW_TRACKING_URI" in script
     # --mount, not -v: a missing source fails instead of Docker creating a root-owned directory
@@ -126,6 +127,13 @@ def test_the_aggregate_check_logic_is_unchanged(workflow):
     for text in ('[ "$CHANGES" != "success" ]', '[ "$PIPELINE" = "success" ]', '[ "$PIPELINE" = "skipped" ]'):
         assert text in run
     assert workflow["jobs"]["model-ci"]["if"] == "always()"
+
+
+def test_the_lock_check_diffs_the_whole_freeze_and_fails_on_any_difference(steps):
+    lock = step(steps, "Check the image against the lock")
+    assert "if" not in lock  # every ref: a pull request that breaks the lock fails before merge
+    assert "in_image.sh pip --no-cache-dir freeze" in lock["run"]
+    assert "diff <(grep -v '^#' Model-Development/requirements.lock)" in lock["run"] and "exit 1" in lock["run"]
 
 
 def test_the_failed_step_names_slack_gets_are_real_step_names(steps):
