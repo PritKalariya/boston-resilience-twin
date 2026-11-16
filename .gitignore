@@ -5,6 +5,7 @@
 *.tfvars
 !*.tfvars.example
 *.tfplan
+tfplan
 crash.log
 crash.*.log
 # The provider lock file is kept on purpose so every member resolves the same
