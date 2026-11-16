@@ -1,6 +1,7 @@
 # ADR-032: The model pipeline on real steps: runner-side data pull, a pinned training image, reload check on every ref
 
 - Status: accepted; decision 1 amended by [ADR-035](ADR-035-registry-step-credentials.md)
+- Note (2026-11-14): #123: in decision 8, "the push is skipped" means the registry push and every step after Gates (reload check, set champion). The training image is pushed right after the build on every main run, pass or fail (decision 6), so a failed gate leaves an image in brt-images with no model registered against it.
 - Note (2026-11-15): decision 2 and the consequence on unpinned transitive packages, as built (#111). `Model-Development/requirements.lock` holds every package of the training image, transitive ones included: `pip freeze` inside the image that registry version 1 records (`brt-train@sha256:952241f0...`, commit `b42316c`; 95 packages, `pip check` clean). The Dockerfile installs `requirements.txt` with `-c requirements.lock`, so a new release of a dependency no longer reaches the image and every re-score of the champion loads it with the libraries it was trained with. `test_steps_requirements.py` fails when a pin in `requirements.txt` differs from the lock or a direct package is missing from it. The model workflow diffs every built image's `pip freeze` against the lock and fails on a difference, and the base image is pinned by digest, the base of version 1's image. `pip check` stays as the build's guard.
 - Date: 2026-11-11
 - Owner: PritKalariya
