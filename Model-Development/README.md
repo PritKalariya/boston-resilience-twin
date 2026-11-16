@@ -3,10 +3,10 @@
 The models for Boston Resilience Twin, and the tools they train and log with. Each component has a section here; the operating steps are in [docs/runbook.md](../docs/runbook.md).
 
 1. [MLflow tracking server (M1)](#mlflow-tracking-server-m1)
-2. [Model CI/CD pipeline and training image (M9)](#model-cicd-pipeline-and-training-image)
-3. [Project 2 infrastructure: registry, image repository, CI identities (M2)](#project-2-infrastructure-registry-image-repository-ci-identities-m2)
-4. [Hyperparameter tuning with Optuna (M6)](#hyperparameter-tuning-with-optuna-m6)
-5. [Model bias check (M7)](#model-bias-check-m7)
+2. [Project 2 infrastructure: registry, image repository, CI identities (M2)](#project-2-infrastructure-registry-image-repository-ci-identities-m2)
+3. [Hyperparameter tuning with Optuna (M6)](#hyperparameter-tuning-with-optuna-m6)
+4. [Model bias check (M7)](#model-bias-check-m7)
+5. [Model CI/CD pipeline and training image (M9)](#model-cicd-pipeline-and-training-image)
 6. [Sensitivity analysis: SHAP and hyperparameter importance (M10)](#sensitivity-analysis-shap-and-hyperparameter-importance-m10)
 
 ## MLflow tracking server (M1)
@@ -49,95 +49,6 @@ The smoke check prints `mlflow smoke OK` and the run's link in the UI. Container
 - `tests/test_tracking.py` and `tests/test_mlflow_service.py` (the second keeps the image tag equal to the client pin).
 
 The operating steps, the port, memory and stopping are in the runbook's "MLflow tracking server (#104)".
-
-## Model CI/CD pipeline and training image
-
-Every change to the model code or its data inputs trains the baseline and the candidates in a pinned Docker image, picks the winner after the bias check, applies the promotion gates and checks that the saved model reloads (#112, #123). The workflow is [`.github/workflows/model.yml`](../.github/workflows/model.yml); the image is built from [`Model-Development/Dockerfile`](Dockerfile). One check, `model-ci`, must pass before a pull request merges. The commands below were run on main (`2afe4bc`) on 2026-11-13 (Linux, Docker 29.9.3), in a fresh clone.
-
-| When | What runs | How it ends |
-|---|---|---|
-| Pull request that changes `Model-Development/`, `model.yml`, `.github/scripts/in_image.sh`, `Data-Pipeline/dvc.lock` or `Data-Pipeline/config/feature_catalog.csv` | Pull the data as `ci-reader`, build the image, train, evaluate, gates, reload check, upload the artifacts | A failed gate only warns and Slack says "gate failed"; `model-ci` still passes. An error fails it. Nothing is pushed |
-| Push to main with such a change (or a manual dispatch, which always runs) | The same, as `ci-writer`, plus: the image is pushed right after the build and the champion re-score (a stub) runs before the gates; after the gates come the registry push and the champion step (stubs) | A failed gate fails the run, so the reload check, the registry push and the champion step do not run; the image is already pushed and the re-score has run. Slack says "training complete" or why not |
-| Any change outside those paths | `changes` only; `pipeline` is skipped | `model-ci` passes |
-
-**Prerequisites.** Python 3.12 (ADR-013) with `uv`, Docker, DVC 3.67.1 with dvc-gs 3.1.0 (`requirements-pull.txt`, the versions `model.yml` installs) and `jq`. Reading CI also needs `gh` (2.46.0 here) logged in, and listing images needs `gcloud` with read access to project 2.
-
-**Access.** The training data is in a private bucket (`gs://boston-resilience-twin-data/dvc`); the repo holds pointers only. `dvc pull` needs Google application default credentials of an account the bucket admits (the `gcloud auth application-default login` line below; the [Data-Pipeline README](../Data-Pipeline/README.md#dvc-and-reproducibility) has more on DVC access). With no usable credentials it prints `ERROR: failed to connect to gs ... Anonymous caller does not have storage.objects.get access ... 401` and exits 1. A reader without access can still build the image, validate the gates in it, and run the tests (572 passed on a fresh clone with no data); they cannot run the chain, which reads the labels and features. Rebuilding the data from public sources is in the Data-Pipeline README.
-
-**How to run it locally** (from the repo root; the chain takes about 75 s after the build):
-
-```bash
-uv venv --python 3.12 --seed .venv && source .venv/bin/activate
-pip install -r Model-Development/requirements-pull.txt
-gcloud auth application-default login   # opens a browser, once per machine
-dvc pull Data-Pipeline/data/processed/labels.parquet Data-Pipeline/data/processed/features.parquet
-docker build -f Model-Development/Dockerfile -t brt-train:local .
-(   # a subshell: a failed step stops the block and names itself, and your shell stays open
-  set -eu
-  export IMAGE=${IMAGE:-brt-train:local} ARTIFACTS_DIR=$(mktemp -d)
-  echo "artifacts in $ARTIFACTS_DIR"
-  run() { bash .github/scripts/in_image.sh python "$@" || { echo "FAILED: $1 (exit $?)" >&2; exit 1; }; }
-  for s in pull_data train evaluate rescore_champion; do
-    run Model-Development/scripts/steps/step_$s.py --artifacts artifacts
-  done
-  run Model-Development/scripts/gates.py --metrics artifacts/metrics.json --out artifacts/gate_report.json
-  echo "gates exit 0"
-  for s in reload_check registry_push set_champion; do
-    run Model-Development/scripts/steps/step_$s.py --artifacts artifacts
-  done
-  jq '.decision, .f1_gate.reason, .fairness_gate.reason' "$ARTIFACTS_DIR/gate_report.json"
-)
-```
-
-Only the two parquet files are pulled (a bare `dvc pull` is about 2.26 GB). `in_image.sh` mounts them, the feature catalog, `dvc.lock` and `Model-Development/config` read-only, and `$ARTIFACTS_DIR` as `artifacts`. A step that exits non-zero prints `FAILED: <the script> (exit <code>)` and stops the block, so the gates never run after a failed step; a gate that fails (exit 1) stops it the same way, as it does on main. Good output ends with `gates exit 0` and `"promote"`, margin `0.221623` and gap `0.043454` on data version `a719afeb`, the numbers of CI run 43489397101. `registry_push` warns that `GITHUB_SHA` and `image_digest.txt` are missing: only CI sets them. The tests:
-
-```bash
-pip install -r Data-Pipeline/requirements.txt
-python -m pytest Model-Development/tests            # 572 passed in about 107 s
-docker compose run --rm --build test                # the full suite with coverage: 1618 passed, 2 skipped, 8 min 3 s
-docker build -f Model-Development/Dockerfile -t brt-train:local . && docker run --rm brt-train:local python Model-Development/scripts/gates.py --validate-config
-```
-
-The `docker compose` line is the full suite, in the Airflow image with Python 3.12 and the DAG tests, and the same command the `Lint and test (Python 3.12)` check runs (`ci.yml`, run 43539609847); it was run locally on 2026-11-14 with exit 0. The `pytest` line runs the Model-Development tests alone.
-
-**What it produces** (in `$ARTIFACTS_DIR`; CI uploads the same folder):
-
-| File | Written by | Meaning |
-|---|---|---|
-| `data_version.txt` | `step_pull_data` | sha256 of `Data-Pipeline/dvc.lock`, the data version every later step checks |
-| `runs/ci-<model>/` | `step_train` | Per model (`seasonal`, `logreg`, `xgboost`, `lightgbm`): `predictions.parquet`, `metrics.json`, `validation_counts.json`, `run.json`, and `model.joblib` for the three candidates |
-| `mlruns/` | `step_train`, `step_evaluate` | MLflow's local store (`MLFLOW_TRACKING_URI` stays empty); the compose server is not used |
-| `metrics.json`, `evaluation.json` | `step_evaluate` | The gates' input (validation counts, per-group counts); the winner, the ranking and why it was chosen |
-| `bias/` | `step_evaluate` | The winner's validation bias report: `bias_report.md`, `bias.json`, `bias_slices.csv`, `bias_recall.png` (ADR-033) |
-| `gate_report.json` | `gates.py` | The decision (`promote`, `keep_champion`, `blocked`, `error`), both gates with their numbers, and the sha256 of the gate files |
-| `reload_check.json` | `step_reload_check` | Rows compared and the largest probability difference after reloading the winner |
-| `champion_rescore.json`, `registry.json`, `champion.json` | the three stubs | What the real steps will do; `registry.json` says `pushed: false` |
-| `image_digest.txt` | the workflow | The registry digest on main; the local image ID on a pull request |
-
-`reports/` in the folder stays empty: `selection.py` is not run here.
-
-**Where results live:**
-
-| Output | Location | How to find it | Kept |
-|---|---|---|---|
-| Artifacts above | GitHub artifact `model-artifacts` of the run | `gh run list --workflow model.yml --branch main --limit 5`, then `D=$(mktemp -d); gh run download <run id> -D "$D"` | 90 days (run 43539609767 expires 2027-02-12) |
-| Image | `us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images/brt-train:<git sha>` | `gcloud artifacts docker images list us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images/brt-train --include-tags`. A run's image is the digest in its `image_digest.txt`: the tag points to the newest push of that commit, so a dispatch or rerun on the same commit moves it and leaves the earlier image untagged | Until deleted; no cleanup policy yet |
-| Run log, job summary | The run's page on GitHub | `gh run view <run id>` | 90 days |
-| Slack message | The channel behind the `SLACK_ALERT_WEBHOOK` secret | Failures and main runs only | Slack's |
-
-**Exit codes.** Steps exit 0 (ok) or 2 (pipeline failed); only `gates.py` exits 1 (a gate failed, decision `blocked`) and also 2 (it cannot evaluate, decision `error`).
-
-| Code | On a pull request | On main |
-|---|---|---|
-| 0 | Reload check; `model-ci` passes | Reload check, then the registry push and champion stubs |
-| 1 | Warning in the log and job summary, Slack "gate failed", run stays green | The run fails, nothing after the gates runs, Slack "gate failed". The image was already pushed |
-| 2 | The run and `model-ci` fail, Slack "pipeline failed" with the step | The same |
-
-Fixing a failed gate never means editing `gates.csv`: ADR-026 froze it.
-
-**Stubs** (#111 replaces each; PR #142 is open): `step_rescore_champion.py` (no champion, so the candidate is judged against the baseline alone), `step_registry_push.py` (writes `registry.json`, pushes nothing to Vertex AI Model Registry) and `step_set_champion.py` (prints "would set champion").
-
-**Links.** [ADR-026](../docs/decisions/ADR-026-promotion-gates.md) (gates), [ADR-028](../docs/decisions/ADR-028-model-pipeline-workflow.md) (workflow shape), [ADR-032](../docs/decisions/ADR-032-model-pipeline-real-steps.md) (real steps, image, identities), [ADR-033](../docs/decisions/ADR-033-model-bias-check.md) (bias check); the operating steps are in the runbook's [Model CI/CD pipeline (#123)](../docs/runbook.md#model-cicd-pipeline-123).
 
 ## Project 2 infrastructure: registry, image repository, CI identities (M2)
 
@@ -421,6 +332,102 @@ On this data version every candidate passes: LightGBM 0.043, XGBoost 0.046, logi
 - `scripts/gates.py`: `gates.evaluate()` and `gates.poverty_groups()`, the one reader of `poverty_groups.csv`.
 - `config/slice_groups.csv`: the reported groups, written by `Data-Pipeline/scripts/model_groups.py` from #32's code, since the image has neither geopandas nor the static layers.
 - `tests/test_bias.py` and `tests/test_steps.py`. In Data-Pipeline, `tests/test_bias_slicing.py` has the drift test for `slice_groups.csv`, which skips without the static layers, as in CI.
+
+## Model CI/CD pipeline and training image
+
+Every change to the model code or its data inputs trains the baseline and the candidates in a pinned Docker image, picks the winner after the bias check, applies the promotion gates and checks that the saved model reloads (#112, #123). On main it also registers the winner in Vertex AI Model Registry and keeps or changes the champion (#111). The workflow is [`.github/workflows/model.yml`](../.github/workflows/model.yml); the image is built from [`Model-Development/Dockerfile`](Dockerfile), whose base `python:3.12.13-slim` is pinned by digest and whose packages are installed with `-c requirements.lock` (#155; the runbook's "Training image package lock (#111)"). One check, `model-ci`, must pass before a pull request merges. The local commands below were run on branch `123-m9-docs` at `32470df` (main at `d700173` merged in) on 2026-11-15 (Linux, Docker 29.9.3), in a fresh clone. The CI facts are from main's run 43781040573 (`d700173`, success, 5 minutes 26 seconds, gates: `keep_champion`).
+
+| When | What runs | How it ends |
+|---|---|---|
+| Pull request that changes `Model-Development/`, `model.yml`, `.github/scripts/in_image.sh`, `Data-Pipeline/dvc.lock` or `Data-Pipeline/config/feature_catalog.csv` | Pull the data as `ci-reader`, build the image and check it against the package lock, train, evaluate, gates, reload check, upload the artifacts | A failed gate only warns and Slack says "gate failed"; `model-ci` still passes. An error fails it. Nothing is pushed and no registry step runs |
+| Push to main with such a change (or a manual dispatch, which always runs) | The same, as `ci-writer`, plus: the image is pushed right after the build and its lock check; the champion re-score runs before the gates; after the gates and the reload check come the registry push and the champion step | A failed gate fails the run, so the reload check, the registry push and the champion step do not run; the image is already pushed and the re-score has run. A registry call that project 2 refuses fails the run. Slack says "training complete" or why not |
+| Any change outside those paths | `changes` only; `pipeline` is skipped | `model-ci` passes |
+
+**Prerequisites.** Python 3.12 (ADR-013) with `uv`, Docker, DVC 3.67.1 with dvc-gs 3.1.0 (`requirements-pull.txt`, the versions `model.yml` installs) and `jq`. Reading CI also needs `gh` (2.46.0 here) logged in, and listing images needs `gcloud` with read access to project 2.
+
+**Access.** The training data is in a private bucket (`gs://boston-resilience-twin-data/dvc`); the repo holds pointers only. `dvc pull` needs Google application default credentials of an account the bucket admits (the `gcloud auth application-default login` line below; the [Data-Pipeline README](../Data-Pipeline/README.md#dvc-and-reproducibility) has more on DVC access). With no usable credentials it prints `ERROR: failed to connect to gs ... Anonymous caller does not have storage.objects.get access ... 401` and exits 1. A reader without access can still build the image, validate the gates in it, and run the tests (698 passed in 134 s on a fresh clone with no data); they cannot run the chain, which reads the labels and features. Rebuilding the data from public sources is in the Data-Pipeline README.
+
+**How to run it locally** (from the repo root; the block runs what a pull request runs, in about 90 s after the build):
+
+```bash
+uv venv --python 3.12 --seed .venv && source .venv/bin/activate
+pip install -r Model-Development/requirements-pull.txt
+gcloud auth application-default login   # opens a browser, once per machine
+dvc pull Data-Pipeline/data/processed/labels.parquet Data-Pipeline/data/processed/features.parquet
+docker build -f Model-Development/Dockerfile -t brt-train:local .
+(   # a subshell: a failed step stops the block and names itself, and your shell stays open
+  set -eu
+  export IMAGE=${IMAGE:-brt-train:local} ARTIFACTS_DIR=$(mktemp -d)
+  echo "artifacts in $ARTIFACTS_DIR"
+  run() { bash .github/scripts/in_image.sh python "$@" || { echo "FAILED: $1 (exit $?)" >&2; exit 1; }; }
+  for s in pull_data train evaluate; do
+    run Model-Development/scripts/steps/step_$s.py --artifacts artifacts
+  done
+  run Model-Development/scripts/gates.py --metrics artifacts/metrics.json --out artifacts/gate_report.json
+  echo "gates exit 0"
+  run Model-Development/scripts/steps/step_reload_check.py --artifacts artifacts
+  jq '.decision, .f1_gate.reason, .fairness_gate.reason' "$ARTIFACTS_DIR/gate_report.json"
+)
+```
+
+Only the two parquet files are pulled (a bare `dvc pull` is about 2.26 GB). `in_image.sh` mounts them, the feature catalog, `dvc.lock` and `Model-Development/config` read-only, and `$ARTIFACTS_DIR` as `artifacts`. A step that exits non-zero prints `FAILED: <the script> (exit <code>)` and stops the block, so the gates never run after a failed step; a gate that fails (exit 1) stops it the same way, as it does on main. Good output ends with `gates exit 0`, `reload check ok: lightgbm, 8304 validation rows, largest probability difference 0 (tolerance 1e-09)` and `"promote"`, margin `0.221623` and gap `0.043454` on data version `a719afeb`; the margin and gap are the numbers CI printed on main (run 43781040573). The decision is `promote` here because nothing is re-scored locally, so the candidate is judged against the baseline alone; on main the re-score found the champion, version 1, and the decision was `keep_champion`.
+
+The block leaves out the three main-only steps, `step_rescore_champion`, `step_registry_push` and `step_set_champion`. They run only in CI on main (run 43781040573), with `ci-writer`'s credentials. In the image on a laptop they have none: `in_image.sh` mounts a credentials file only when `MOUNT_GCP_CREDENTIALS=1`, and without it a Google credentials lookup in the image finds nothing, so those steps would skip or stop. Do not set the flag to try them; the runbook's [Model registry (#111, ADR-006)](../docs/runbook.md#model-registry-111-adr-006) says when it is right and why it must not be set for any other step. The tests:
+
+```bash
+pip install -r Data-Pipeline/requirements.txt
+python -m pytest Model-Development/tests            # 698 passed in about 130 s
+docker compose run --rm --build test                # the full suite with coverage: 1756 passed, 2 skipped, 5 min 6 s in CI
+docker build -f Model-Development/Dockerfile -t brt-train:local . && docker run --rm brt-train:local python Model-Development/scripts/gates.py --validate-config
+```
+
+The `docker compose` line is the full suite, in the Airflow image with Python 3.12 and the DAG tests, and the same command the `Lint and test (Python 3.12)` check runs (`ci.yml`, run 43781040867 on `d700173`, success, with the numbers above). The `pytest` line runs the Model-Development tests alone.
+
+**What it produces** (in `$ARTIFACTS_DIR`; CI uploads the same folder):
+
+| File | Written by | Meaning |
+|---|---|---|
+| `data_version.txt` | `step_pull_data` | sha256 of `Data-Pipeline/dvc.lock`, the data version every later step checks |
+| `runs/ci-<model>/` | `step_train` | Per model (`seasonal`, `logreg`, `xgboost`, `lightgbm`): `predictions.parquet`, `metrics.json`, `validation_counts.json`, `run.json`, and `model.joblib` for the three candidates |
+| `mlruns/` | `step_train`, `step_evaluate` | MLflow's local store (`MLFLOW_TRACKING_URI` stays empty); the compose server is not used |
+| `metrics.json`, `evaluation.json` | `step_evaluate` | The gates' input (validation counts, per-group counts); the winner, the ranking and why it was chosen. On main `step_rescore_champion` rewrites `metrics.json` with the `champion` block |
+| `bias/` | `step_evaluate` | The winner's validation bias report: `bias_report.md`, `bias.json`, `bias_slices.csv`, `bias_recall.png` (ADR-033) |
+| `gate_report.json` | `gates.py` | The decision (`promote`, `keep_champion`, `blocked`, `error`), both gates with their numbers, and the sha256 of the gate files |
+| `reload_check.json` | `step_reload_check` | Rows compared and the largest probability difference after reloading the winner |
+| `champion_rescore.json` | `step_rescore_champion` (main only) | What `registry.py rescore` did: the `champion` block (tp, fp, fn, data version, model version; null with no champion), the model name, the bucket folder of the champion's files, the data version it was trained on, the threshold and the number of rows scored |
+| `push.json` | `step_registry_push` (main only) | The push record `registry.py push --out` writes: `model_name`, `version_id`, `version`, `alias` (`candidate`), `files_uri` and each file's `gs://` URI, `metadata` (the stamps stored with the model) and `mlflow_tagged`; `{"skipped": ...}` when the push skipped |
+| `registry.json` | `step_registry_push` (main only) | The version stamps in one file: `model_version`, `pushed`, `model` (name, path, sha256), `data_version`, `git_commit`, `mlflow_run_id`, `image_digest`, `gates_sha256`, `fairness_group_sha256`, `windows`, `decision`, `files_uri` |
+| `promotion.json` | `step_set_champion` (main only) | The record `registry.py promote --out` writes: `challenger`, `champion_before`, `previous_before`, `decision` (`promote` or `keep_champion`), `champion` after the step, `decided_utc`, and `previous` when the champion changed; `{"skipped": ...}` when the push skipped |
+| `champion.json` | `step_set_champion` (main, decision `promote` only) | `action` ("set champion"), `model_name`, `model_version` and `previous`. Absent on `keep_champion` |
+| `image_digest.txt` | the workflow | The registry digest on main; the local image ID on a pull request |
+
+The four main-only files are not written by the local block. Run 43781040573 wrote `champion_rescore.json` (champion version 1, tp 146, fp 325, fn 233, 8304 rows, threshold 0.0959946834206164, the same data version `a719afeb`), `push.json` (version 4 of `projects/570429679915/locations/us-east1/models/586684011418484736`, alias `candidate`, files under `gs://boston-resilience-twin-p2-models/surge-forecast/ci-lightgbm/5458ee71773846bd9864982128a880d9/`, `mlflow_tagged: true`), `registry.json` (`pushed: true`, `model_version` ending `@4`, `git_commit` `d7001731c28802e4b33feaec0b77acb32a63375b`, `image_digest` `...brt-train@sha256:b2eb79f21a21936fde9e6e191e63bc9d819f191dc0f628c8864e4d402365fa82`, `decision` `keep_champion`) and `promotion.json` (`challenger` 4, `champion_before` 1, `champion` 1, `decision` `keep_champion`, `previous_before` null). It wrote no `champion.json`, so that file's fields come from `step_set_champion.py`, not from a run.
+
+`reports/` in the folder stays empty: `selection.py` is not run here.
+
+**Where results live:**
+
+| Output | Location | How to find it | Kept |
+|---|---|---|---|
+| Artifacts above | GitHub artifact `model-artifacts` of the run | `gh run list --workflow model.yml --branch main --limit 5`, then `D=$(mktemp -d); gh run download <run id> -D "$D"` | 90 days (run 43781040573 expires 2027-02-14) |
+| Image | `us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images/brt-train:<git sha>` | `gcloud artifacts docker images list us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images/brt-train --include-tags`. A run's image is the digest in its `image_digest.txt`: the tag points to the newest push of that commit, so a dispatch or rerun on the same commit moves it and leaves the earlier image untagged | Until deleted; no cleanup policy yet |
+| Registered version (main only) | Vertex AI Model Registry, project 2, model `surge-forecast`; files in `gs://boston-resilience-twin-p2-models/surge-forecast/<run id>/<MLflow run id>/` | `gcloud ai models list-version 586684011418484736 --region=us-east1 --project=boston-resilience-twin-p2`; the runbook's "Find the image a run pushed" and "Model registry (#111, ADR-006)" | Until deleted; run 43781040573 registered version 4 |
+| Run log, job summary | The run's page on GitHub | `gh run view <run id>` | 90 days |
+| Slack message | The channel behind the `SLACK_ALERT_WEBHOOK` secret | Failures and main runs only | Slack's |
+
+**Exit codes.** Steps exit 0 (ok) or 2 (pipeline failed); only `gates.py` exits 1 (a gate failed, decision `blocked`) and also 2 (it cannot evaluate, decision `error`).
+
+| Code | On a pull request | On main |
+|---|---|---|
+| 0 | Reload check; `model-ci` passes | Reload check, then the registry push and the champion step |
+| 1 | Warning in the log and job summary, Slack "gate failed", run stays green | The run fails, nothing after the gates runs (no reload check, registry push or champion step), Slack "gate failed". The image was already pushed and the champion re-score has run |
+| 2 | The run and `model-ci` fail, Slack "pipeline failed" with the step | The same; also a registry step that project 2 refuses (below) |
+
+Fixing a failed gate never means editing `gates.csv`: ADR-026 froze it.
+
+**Registry steps (main only).** Three steps call `Model-Development/scripts/registry.py` (#111, ADR-006) with `ci-writer`'s credentials file, the only steps that get one (ADR-035). `step_rescore_champion.py` scores the version holding the `production` alias on this data version before the gates and writes it into `metrics.json` as `champion` (null with none). After the gates and the reload check, `step_registry_push.py` registers the winner as a new version of `surge-forecast` with the alias `candidate`, and `step_set_champion.py` moves `production` to it only on the decision `promote`. On main they run with `--require-access`: a refused project 2 call, a missing `GITHUB_SHA` or a missing registry digest of the image fails the run with exit 2, where off main the push skips with a log line. Run 43781040573 shows the whole path: the re-score found version 1, the gates decided `keep_champion` (the candidate's F1 0.343529 equals the champion's, so it did not beat it), version 4 was registered as `candidate`, and the champion stayed version 1. The procedures, aliases, rollback and failures of the registry are in the runbook's [Model registry (#111, ADR-006)](../docs/runbook.md#model-registry-111-adr-006) and are not repeated here.
+
+**Links.** [ADR-026](../docs/decisions/ADR-026-promotion-gates.md) (gates), [ADR-028](../docs/decisions/ADR-028-model-pipeline-workflow.md) (workflow shape), [ADR-032](../docs/decisions/ADR-032-model-pipeline-real-steps.md) (real steps, image, identities), [ADR-033](../docs/decisions/ADR-033-model-bias-check.md) (bias check), [ADR-006](../docs/decisions/ADR-006-model-registry.md) (registry), [ADR-035](../docs/decisions/ADR-035-registry-step-credentials.md) (credentials of the registry steps); the operating steps are in the runbook's [Model CI/CD pipeline (#123)](../docs/runbook.md#model-cicd-pipeline-123).
 
 ## Sensitivity analysis: SHAP and hyperparameter importance (M10)
 

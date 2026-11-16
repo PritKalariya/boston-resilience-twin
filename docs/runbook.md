@@ -1061,13 +1061,13 @@ It names each stale dependency and prints the `dvc repro --single-item <stage>` 
 
 ## Model CI/CD pipeline (#123)
 
-`.github/workflows/model.yml` (ADR-028, ADR-032) trains the baseline and the candidates in the training image, picks the winner after the bias check, applies the promotion gates and checks that the saved model reloads. What it is and how to run its steps on a laptop is in `Model-Development/README.md`, "Model CI/CD pipeline and training image". Commands below were run on 2026-11-13 and 2026-11-14; those that read CI use main's run 43539609767 (commit `2afe4bc`, 3 minutes 45 seconds, gates: promote) and the dispatch run 43560763834 on the same commit. The registry push, the champion re-score and the champion step are stubs until #111, so no model reaches Vertex AI Model Registry yet.
+`.github/workflows/model.yml` (ADR-028, ADR-032) trains the baseline and the candidates in the training image, picks the winner after the bias check, applies the promotion gates and checks that the saved model reloads. What it is and how to run its steps on a laptop is in `Model-Development/README.md`, "Model CI/CD pipeline and training image". On main it also re-scores the champion, registers the winner in Vertex AI Model Registry and keeps or changes the champion (#111, ADR-006, ADR-035); the registry itself is in "Model registry (#111, ADR-006)" above. Commands below were run on 2026-11-15 (the CI ones against the files and logs GitHub still holds); those that read CI use main's run 43781040573 (commit `d700173`, 5 minutes 26 seconds, gates: `keep_champion`, version 4 registered as `candidate`) and, where the text is about it, the dispatch run 43560763834.
 
 ### Start a run
 
 - **A pull request** starts it with no action: the workflow runs on every pull request. A newer push to the same branch cancels the older run.
-- **A push to main** (a merge) runs it as `ci-writer`, pushes the image and, with passing gates, runs the three stubs.
-- **A manual dispatch** is enabled (`workflow_dispatch`) and always runs the pipeline, whatever changed. On main it is a main run: it pushes an image to Artifact Registry and posts to Slack, so use it deliberately. Run 43560763834 (a dispatch on main, success) did both.
+- **A push to main** (a merge) runs it as `ci-writer` and pushes the image. The champion re-score runs before the gates; with passing gates, the registry push and the champion step run after the reload check and write to project 2 (a new version of `surge-forecast`, and the `production` alias on `promote`).
+- **A manual dispatch** is enabled (`workflow_dispatch`) and always runs the pipeline, whatever changed. On main it is a main run: it pushes an image to Artifact Registry, registers a model version in project 2 and posts to Slack, so use it deliberately. Run 43560763834 (a dispatch on main, success) pushed an image and posted to Slack; it ran before the registry steps were real.
 
 ```bash
 gh workflow run model.yml --ref main
@@ -1078,7 +1078,7 @@ gh run list --workflow model.yml --branch main --limit 5       # newest first: s
 gh run list --workflow model.yml --event pull_request --limit 3
 ```
 
-A run takes 3 to 4 minutes and is stopped after 30. The pipeline starts only when a changed file is under `Model-Development/`, or is `model.yml`, `.github/scripts/in_image.sh`, `Data-Pipeline/dvc.lock` or `Data-Pipeline/config/feature_catalog.csv`. A pull request that only edits `Model-Development/README.md` still runs it.
+A pull request run takes about 3 minutes (2 m 53 s on run 43782266734) and a main run about 5 (5 m 26 s on run 43781040573); a run is stopped after 30 minutes. The pipeline starts only when a changed file is under `Model-Development/`, or is `model.yml`, `.github/scripts/in_image.sh`, `Data-Pipeline/dvc.lock` or `Data-Pipeline/config/feature_catalog.csv`. A pull request that only edits `Model-Development/README.md` still runs it.
 
 ### The `model-ci` required check
 
@@ -1101,14 +1101,14 @@ jq '.decision, .f1_gate.reason, .fairness_gate.reason' "$D/model-artifacts/gate_
 jq -r '.winner, .selected' "$D/model-artifacts/evaluation.json"
 ```
 
-On run 43539609767 the second command prints the digest line, `"decision": "promote"` and `Slack message sent: training complete`; the last two print `"promote"`, `margin 0.221623 >= threshold 0.05`, `gap 0.043454 <= threshold 0.15`, then `lightgbm` and `lightgbm: best validation F1 and its fairness gate passes`. (`gh run view <run id> --log` printed nothing with gh 2.46.0, so the log comes from the API.) The Notify Slack step names the first failed step, and the artifacts are uploaded even when a step failed, so the folder holds what ran before it. `bias/bias_report.md` is the winner's validation bias report and `evaluation.json` lists ADR-026's reopen conditions.
+On run 43781040573 the first command prints the three jobs, each with a check mark: `Detect model changes` in 10s, `Train, evaluate, gate` in 5m6s and `model-ci` in 3s. The second prints (each line behind a timestamp) the `pushed ...brt-train@sha256:b2eb79f2...` line, three `"decision": "keep_champion"` lines (the gate report, the push record's `metadata.gate` and the promotion record) and `Slack message sent: training complete`. The last two print `"keep_champion"`, `margin 0.221623 >= threshold 0.05`, `gap 0.043454 <= threshold 0.15`, then `lightgbm` and `lightgbm: best validation F1 and its fairness gate passes`. The decision is `keep_champion` and not `promote` because the champion was re-scored on this data version and the candidate's validation F1 (0.343529) equals its. (`gh run view <run id> --log` printed nothing with gh 2.46.0, so the log comes from the API.) The Notify Slack step names the first failed step, and the artifacts are uploaded even when a step failed, so the folder holds what ran before it. `bias/bias_report.md` is the winner's validation bias report and `evaluation.json` lists ADR-026's reopen conditions. The files of the registry steps (`champion_rescore.json`, `push.json`, `registry.json`, `promotion.json`, and `champion.json` after a `promote`) are listed in the README's "What it produces".
 
 ### Gate failed (exit 1)
 
 `gates.py` exits 1 when a candidate does not beat the seasonal baseline by 0.05 F1, or the worst-group recall gap is above 0.15; `gate_report.json` has decision `blocked` and says which gate in `f1_gate.reason` and `fairness_gate.reason` (print them with the `jq` line above). Slack says "gate failed" and "Model not pushed".
 
 - **On a pull request** the run stays green and `model-ci` passes: the log and the job summary show a warning, "Gates failed (not a merge blocker)". Merging code does not promote a model. Read the numbers and decide whether the code change caused it (compare with main's newest `gate_report.json`).
-- **On main** the run fails and nothing after the gates runs, so no reload check, registry push or champion step. The image was already pushed right after the build (every main run pushes one), so a failed run still has an image.
+- **On main** the run fails and nothing after the gates runs, so no reload check, registry push or champion step. The image was already pushed right after the build (every main run pushes one), so a failed run still has an image, and the champion re-score has run (it only reads the registry).
 - **The fix is never in `gates.csv`.** ADR-026 froze its thresholds and the poverty groups before any model trained, and the build fails if `poverty_groups.csv` no longer matches its sha256. Improve the model or the data in a new pull request; a change to a threshold is a new ADR by its owner.
 
 ### Pipeline failed (exit 2)
@@ -1117,7 +1117,7 @@ Slack says "pipeline failed" and names the step. Look at that step's log first. 
 
 - **Authenticate to Google Cloud** (`ci-reader` on pull requests and branches, `ci-writer` on main only): a fork pull request has no token and fails here by design. Otherwise the Workload Identity provider or the identity's grant in project 2 (#131, ADR-030) changed; do not work around it in the workflow.
 - **Pull the training data (DVC)**: an error such as `Anonymous caller does not have storage.objects.get access ... 401` means the identity cannot read the bucket in project 1; `::error::<file> is missing or empty` means the pull wrote nothing. On a laptop, `dvc status -c Data-Pipeline/data/processed/labels.parquet Data-Pipeline/data/processed/features.parquet` prints `Cache and remote 'gcs' are in sync.` when the commit's data is on the remote; if not, the data was never pushed (`dvc_push.py`, "Versioned data (DVC)" below).
-- **Build the training image**: `pip check` found an inconsistent package set, or `gates.py --validate-config` failed because `gates.csv` or `poverty_groups.csv` changed without its sha256. Reproduce on a laptop:
+- **Build the training image**: the Dockerfile installs `requirements.txt` with `-c requirements.lock` (#155), so a pin in `requirements.txt` that conflicts with the lock fails `pip install`; `pip check` found an inconsistent package set; or `gates.py --validate-config` failed because `gates.csv` or `poverty_groups.csv` changed without its sha256. Reproduce on a laptop:
 
   ```bash
   docker build -f Model-Development/Dockerfile -t brt-train:local .
@@ -1125,7 +1125,9 @@ Slack says "pipeline failed" and names the step. Look at that step's log first. 
   ```
 
   The second prints `18 gate settings loaded` and both sha256 values, and exits 0.
-- **A step** (`Check the data`, `Train`, `Evaluate`, `Re-score`, `Reload check`, `Registry push`, `Set champion`) printed `error: ...` and exited 2. Run the chain from the README on the same data version: `pull_data` stops on a file that is missing or not parquet, `train` on a model that failed or an input whose missing share moved ("Training interface (#106)" above), `evaluate` on a run trained on another data version, `reload_check` when the reloaded model scores differently from training.
+- **Check the image against the lock** (the step right after the build): the built image's `pip freeze` differs from `Model-Development/requirements.lock`, so the step prints the `diff` (`<` is the lock, `>` the image) and `::error::the image's pip freeze differs from Model-Development/requirements.lock`, and fails. A package in the image that the lock lacks, a lock line the image lacks, and a version pip installed differently all fail it; on a passing run it prints `image matches the lock: 95 packages` (run 43781040573). Reproduce and fix it with "Training image package lock (#111)": [check an image against the lock](#training-image-package-lock-111), and change a package only there, in the same PR as the `requirements.txt` change.
+- **A step** (`Check the data`, `Train`, `Evaluate`, `Reload check`) printed `error: ...` and exited 2. Run the chain from the README on the same data version: `pull_data` stops on a file that is missing or not parquet, `train` on a model that failed or an input whose missing share moved ("Training interface (#106)" above), `evaluate` on a run trained on another data version, `reload_check` when the reloaded model scores differently from training.
+- **A registry step** (`Re-score the champion`, `Registry push`, `Set champion`; main only) printed `error: ...` and exited 2. On main these run with `--require-access`, so project 2 refusing the first call (no access) fails the step, where on a laptop the same call skips; a 401 or 403 after the first call answered fails it on every ref. The push also fails on main without `GITHUB_SHA` or without the registry digest of the image. The causes and fixes (a missing role, the Vertex AI service agent's grant, a push that failed after uploading, a promotion that failed partway, a champion that no longer loads) are in "Model registry (#111, ADR-006)" above. These steps run only on main: reproduce them from a laptop with the command in that section, never by adding the credentials flag to the chain in the README.
 
 ### Find the image a run pushed
 
@@ -1135,9 +1137,12 @@ Main runs only; a pull request builds the image but does not push it, and its `i
 D=$(mktemp -d); gh run download <run id> -D "$D"; cat "$D/model-artifacts/image_digest.txt"
 gcloud artifacts docker images list us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images/brt-train --include-tags
 gcloud artifacts docker images describe <digest>        # <digest> is the whole line the first command prints
+gcloud ai models list-version 586684011418484736 --region=us-east1 --project=boston-resilience-twin-p2   # the registry versions; 586684011418484736 is the id of `surge-forecast` in `gcloud ai models list`
 ```
 
-The first prints the digest of that run's image. Run 43539609767 printed `...brt-train@sha256:2fb821823532a63267dcf6009cea0a4ea83378f81939e3c316817b8c8409bc71`, and the dispatch run 43560763834 on the same commit printed `...brt-train@sha256:694b6bb02004a08d6ce1c53ee9d98e44581e38a23d81828aaa417b157b876741`. The list has one row per image, 7 on 2026-11-14. Now the tag `2afe4bc70a100144209f41a440718ab4b9a1cdf8` is on `sha256:694b6bb02004...` (298,966,556 bytes, created 2026-11-14T00:19:05), and `sha256:2fb821823532...` (created 2026-11-13T20:19:13) has no tag. `describe` on either digest prints `fully_qualified_digest` equal to the reference it was given, so the first run's image is still reachable by its digest. There is no cleanup policy yet, so every main run adds an image. `gcloud` needs a login with read access to project 2.
+The first prints the digest of that run's image. Run 43781040573 printed `...brt-train@sha256:b2eb79f21a21936fde9e6e191e63bc9d819f191dc0f628c8864e4d402365fa82`. The list has one row per image (`gcloud artifacts docker images list ... --format='value(version)' | wc -l` prints the count). The tag `d7001731c28802e4b33feaec0b77acb32a63375b` is on `sha256:b2eb79f21a21...`. `describe` on that digest prints `fully_qualified_digest` equal to the reference it was given. The fourth command prints one row per version of `surge-forecast`; version 4 is the one run 43781040573 registered. `gcloud ai models describe 586684011418484736@4 --region=us-east1 --project=boston-resilience-twin-p2` prints its `containerSpec.imageUri` ending in the same `@sha256:b2eb79f2...` and the labels `git_commit` `d7001731...` and `gate_decision` `keep_champion`. It had the alias `candidate` until the next push took it; `production` stays on version 1, which the gates kept (`@1` prints `default` and `production`). Aliases, rollback and `registry.py status` are in "Model registry (#111, ADR-006)" above.
+
+The tag points to the newest push of that commit, so a dispatch or rerun moves it and leaves the earlier image untagged but reachable by its digest: of the two images built from `2afe4bc`, the tag is on the dispatch run 43560763834's `sha256:694b6bb02004...` and the first push, `sha256:2fb821823532...`, is untagged and still in the list. There is no cleanup policy yet, so every main run adds an image. `gcloud` needs a login with read access to project 2.
 
 ### A Slack alert did not arrive
 
@@ -1153,11 +1158,11 @@ gh api repos/PritKalariya/boston-resilience-twin/actions/jobs/$(gh run view <run
 The first prints `SLACK_ALERT_WEBHOOK`. In the second, `Slack message sent: <kind>` means Slack took it (check the channel and the webhook's app). `::warning::SLACK_ALERT_WEBHOOK is empty (not set, or a fork PR)` means the secret is missing or the run is a fork's; the message it would have sent follows in the log. `is not an https URL` means the value is wrong, and `Slack post failed (<ExceptionType>)` is a Slack or network error; neither fails the run. To see the message for a finished run without sending it:
 
 ```bash
-D=$(mktemp -d); gh run download 43539609767 -D "$D"
-env -u SLACK_ALERT_WEBHOOK python3 Model-Development/scripts/steps/step_notify.py --artifacts "$D/model-artifacts" --repo PritKalariya/boston-resilience-twin --ref main --run-url https://github.com/PritKalariya/boston-resilience-twin/actions/runs/43539609767 --job-status success --main
+D=$(mktemp -d); gh run download 43781040573 -D "$D"
+env -u SLACK_ALERT_WEBHOOK python3 Model-Development/scripts/steps/step_notify.py --artifacts "$D/model-artifacts" --repo PritKalariya/boston-resilience-twin --ref main --run-url https://github.com/PritKalariya/boston-resilience-twin/actions/runs/43781040573 --job-status success --main
 ```
 
-It prints the warning and `Model pipeline: training complete` with the data version, decision, `F1 margin: 0.2216` and `Worst-group recall gap: 0.0435`. The same webhook serves the Airflow alerts ("Pipeline alerts (Slack)" above).
+It prints the warning and `Model pipeline: training complete` with the data version, `Decision: keep_champion`, `F1 margin: 0.2216` and `Worst-group recall gap: 0.0435` (run 43781040573). The same webhook serves the Airflow alerts ("Pipeline alerts (Slack)" above).
 
 ## Versioned data (DVC)
 
