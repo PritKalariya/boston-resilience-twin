@@ -7,8 +7,9 @@ The models for Boston Resilience Twin, and the tools they train and log with. Ea
 3. [Training core: candidate models, tracking, selection, hold-out results (M4)](#training-core-candidate-models-tracking-selection-hold-out-results-m4)
 4. [Hyperparameter tuning with Optuna (M6)](#hyperparameter-tuning-with-optuna-m6)
 5. [Model bias check (M7)](#model-bias-check-m7)
-6. [Model CI/CD pipeline and training image (M9)](#model-cicd-pipeline-and-training-image)
-7. [Sensitivity analysis: SHAP and hyperparameter importance (M10)](#sensitivity-analysis-shap-and-hyperparameter-importance-m10)
+6. [Model registry: push, champion and rollback (M8)](#model-registry-push-champion-and-rollback-m8)
+7. [Model CI/CD pipeline and training image (M9)](#model-cicd-pipeline-and-training-image)
+8. [Sensitivity analysis: SHAP and hyperparameter importance (M10)](#sensitivity-analysis-shap-and-hyperparameter-importance-m10)
 
 ## MLflow tracking server (M1)
 
@@ -81,9 +82,9 @@ terraform output                                 # the six values below
 | Resource | Name | Notes |
 |---|---|---|
 | APIs | Vertex AI, Artifact Registry, Billing Budgets, IAM, IAM Credentials, STS, Storage, Resource Manager, Service Usage | Cloud Run and Gemini are enabled with their services in Deployment |
-| Docker repository | `us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images` | The training image `brt-train`, tagged with the commit; every main run pushes one (#112). 16 images, 3,604 MB on 2026-11-15; no cleanup policy yet, so it grows with every main run |
-| Model bucket | `gs://boston-resilience-twin-p2-models` | us-east1, versioned, uniform access, public access prevention enforced, `force_destroy` off; one folder per training run, `surge-forecast/<run id>/<MLflow run id>/` (#111). On 2026-11-15: the folders of versions 1 and 2 and one with no version, left by the push that failed before #153 |
-| Model registry | Vertex AI Model Registry, us-east1 | Nothing to create: the model `surge-forecast`, its versions and aliases are data that #111 writes through the API. No endpoint (endpoints bill by the hour). On 2026-11-15: version 1 `production`, version 2 `candidate` |
+| Docker repository | `us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images` | The training image `brt-train`, tagged with the commit; every main run pushes one (#112). 18 images, 4,622 MB as of main run 43792327977 (the #148 merge, 2026-11-16); no cleanup policy yet, so it grows with every main run |
+| Model bucket | `gs://boston-resilience-twin-p2-models` | us-east1, versioned, uniform access, public access prevention enforced, `force_destroy` off; one folder per training run, `surge-forecast/<run id>/<MLflow run id>/` (#111). As of main run 43792327977 (2026-11-16): seven folders, one per version 1 to 6 and one with no version, left by the push that failed before #153 |
+| Model registry | Vertex AI Model Registry, us-east1 | Nothing to create: the model `surge-forecast`, its versions and aliases are data that #111 writes through the API. No endpoint (endpoints bill by the hour). As of main run 43792327977 (2026-11-16): versions 1 to 6, version 1 `production`, version 6 `candidate`. Every main run that retrains adds a version, so `registry.py status` has the current list |
 | Workload Identity | pool `github`, provider `github-oidc` | `ACTIVE`, condition `assertion.repository_id == '1404951557' && assertion.repository_owner_id == '71484962'` |
 | Service accounts | `ci-reader`, `ci-writer` | Bound on `attribute.repository_id/1404951557` and `attribute.ref/refs/heads/main` |
 | Custom role | `modelRegistrar` | The five permissions above |
@@ -460,6 +461,112 @@ On this data version every candidate passes: LightGBM 0.043, XGBoost 0.046, logi
 - `scripts/gates.py`: `gates.evaluate()` and `gates.poverty_groups()`, the one reader of `poverty_groups.csv`.
 - `config/slice_groups.csv`: the reported groups, written by `Data-Pipeline/scripts/model_groups.py` from #32's code, since the image has neither geopandas nor the static layers.
 - `tests/test_bias.py` and `tests/test_steps.py`. In Data-Pipeline, `tests/test_bias_slicing.py` has the drift test for `slice_groups.csv`, which skips without the static layers, as in CI.
+
+## Model registry: push, champion and rollback (M8)
+
+The last steps of the model workflow on main (#111, ADR-006). They register each winning model as a version in project 2's Vertex AI Model Registry, compare it with the current champion, and promote it only when ADR-026's gates say so. A person can roll the champion back with one command. Vertex AI is the only registry; MLflow tracks runs only. Every command here was run on main at `c87bffb` on 2026-11-15 (macOS arm64, Docker Desktop), on data `a719afeb`, against the live registry, except `rollback`, which moves the live champion.
+
+**What it does**
+
+- **One model, many versions.** Every push is a new version of `surge-forecast`. Three aliases say what each version is: `candidate` (the newest push), `production` (the champion) and `previous` (what a rollback restores). Vertex's own `default` alias is never used.
+- **Re-scores the champion first.** `rescore` downloads the `production` version's files, checks `model.joblib` against the sha256 in its `metadata.json`, and scores it on this data version's validation rows with the shared threshold rule. The result is the `champion` block of the gates input, so `gates.py` compares both models on the same rows.
+- **Pushes the winner.** `push` uploads the winner's files and a `metadata.json` (metrics, data version, git commit, MLflow run id, training image digest, the train, validation and test windows, the `gates.csv` sha256 and every file's sha256) to a new folder in the model bucket, registers the version with the alias `candidate`, and tags the MLflow run with the version. It pushes only on the gate decisions `promote` and `keep_champion`, and refuses a run trained on a tree with uncommitted changes.
+- **Promotes by the rollback rule.** `promote` moves `production` to the pushed version, and `previous` to the old champion, only on `promote`. If moving `production` fails, it puts `previous` back.
+- **Never overwrites.** The bucket folder is `<run id>/<MLflow run id>/`, new for every training run, and `ci-writer` can create objects but not delete them, so every version's files stay in place for a rollback.
+- **Fails loudly on main, skips elsewhere.** Without project 2 access the steps log `skipped` and exit 0, so a pull request or a laptop run stays green. On main they pass `--require-access`: no access, or a 401 or 403 after the first call, exits 2 and Slack names the step.
+
+**How to run it**
+
+In the workflow, on every push to main (`.github/workflows/model.yml`): `step_rescore_champion.py`, then `gates.py`, `step_reload_check.py`, `step_registry_push.py` and `step_set_champion.py`. Only these three registry steps get `ci-writer`'s credentials (ADR-035).
+
+Before them, the workflow builds the training image and checks it against `Model-Development/requirements.lock` (#155): every package of the image that version 1 was trained in, transitive ones included, which the Dockerfile installs with `-c`. The step "Check the image against the lock" diffs the built image's `pip freeze` against the lock, so the champion is re-scored with the libraries it was trained with until the lock changes; a lock change is where re-scoring an old model can fail (runbook, "The champion loads with today's libraries"). On main the image is then pushed to `brt-images` (main only), and the push writes the registry digest to `artifacts/image_digest.txt`, which `step_registry_push.py` records as the version's container image. The runbook's "Training image package lock (#111)" has the check and how to change a package.
+
+On a laptop, the local chain in CLAUDE.md runs the same steps in the training image. Without `MOUNT_GCP_CREDENTIALS=1` it has no credentials, so the registry steps skip and nothing is written to project 2. Run this way, LightGBM won with validation F1 0.3435 (seasonal baseline 0.1219), the reload check passed (8,304 validation rows, largest probability difference 0), and each registry step logged `skipped: no project 2 access`. Before its skip line the push step also prints `::warning::artifacts/image_digest.txt holds no registry digest of us-east1-docker.pkg.dev/boston-resilience-twin-p2/brt-images/brt-train: None; the version names the image without a digest`: the local chain builds no registry image, so there is no digest (on main a missing digest is an error instead). With no champion block, `gates.py` gives `promote`.
+
+From the repo root, after `gcloud auth application-default login` (the runbook's "Model registry (#111, ADR-006)" has every option and failure case). Two things to know when running them on the local chain's output (`$A` is its `ARTIFACTS_DIR`):
+
+- `push` reads the winner's run folder from `training.csv`'s `runs_dir`, `Model-Development/runs/`, but the chain writes its runs to `$A/runs/`. Copy them first, `cp -R "$A/runs/." Model-Development/runs/` (gitignored), or the dry run stops with `cannot read the run record .../Model-Development/runs/ci-lightgbm/run.json` and exit 2. With the copy and `GITHUB_SHA` set, `push --gate-report "$A/gate_report.json" --evaluation "$A/evaluation.json" --dry-run` printed the plan and exited 0 (2026-11-16).
+- `rescore` writes the champion into its `--metrics` file in place. Run it on a copy of `$A/metrics.json` if the chain's own gates input should stay as the chain left it.
+
+```bash
+python Model-Development/scripts/registry.py status                           # every version and its aliases
+python Model-Development/scripts/registry.py rescore --metrics <gates input>  # the champion on this data version
+python Model-Development/scripts/registry.py push --gate-report <gate report> --evaluation <evaluation.json> --dry-run   # the plan, no calls
+python Model-Development/scripts/registry.py rollback [--to <version>]        # a person only
+python Model-Development/scripts/lock_check.py                                # the code each dvc.lock recorded
+```
+
+Before the first push, `status` printed `no registry model named 'surge-forecast' yet` and `rescore` wrote `"champion": null` with the reason `no version holds production`; both exit 0. The dry run prints the version it would register (labels `model: lightgbm`, `gate_decision: promote`, `data_version: a719afeb...`, the git commit, and the folder `gs://boston-resilience-twin-p2-models/surge-forecast/ci-lightgbm/<MLflow run id>/`) and exits 0. `lock_check.py` prints `159 tracked dependencies match`.
+
+The first two runs on main:
+
+| Run | Champion before | Gates | Registry |
+|---|---|---|---|
+| 43749795990, attempt 2 (`b42316c`) | none | `promote`: F1 0.3435 against the seasonal baseline's 0.1219 (margin 0.22, at least 0.05), recall gap between the poverty groups 0.043 (at most 0.15) | version 1, then `production` |
+| 43758289814 (`c87bffb`) | version 1, re-scored: tp 146, fp 325, fn 233 at threshold 0.0960 | `keep_champion`: both gates pass, but F1 0.3435 does not beat the champion's 0.3435 | version 2 `candidate`; version 1 stays `production` |
+
+`status` with a laptop login, a snapshot after the second run (`c87bffb`, 2026-11-15):
+
+```text
+$ python Model-Development/scripts/registry.py status
+version    2  candidate                    lightgbm  data a719afeb9695 commit c87bffbbf58c gates keep_champion 2026-11-15T20:31:49.826747Z
+version    1  default,production           lightgbm  data a719afeb9695 commit b42316cc985a gates promote       2026-11-15T20:18:10.470870Z
+```
+
+Every later merge that touches `Model-Development/` retrains and pushes again, so `status` grows by a version each time: the merges of #151, #155, #150 and #148 added versions 3 to 6, each `keep_champion` against version 1 with the same re-scored numbers (main run 43792327977 registered version 6).
+
+**Rollback, exercised live** (2026-11-16, a laptop login, on versions 1 to 5). Versions 1 and 2 hold the same `model.joblib` and nothing serves from the registry yet, so only aliases moved, and the second command put `production` back on version 1:
+
+```text
+$ python Model-Development/scripts/registry.py status
+version    5  candidate                    lightgbm  data a719afeb9695 commit 19802e00d942 gates keep_champion 2026-11-16T01:10:11.182272Z
+version    4  -                            lightgbm  data a719afeb9695 commit d7001731c288 gates keep_champion 2026-11-16T00:36:33.476433Z
+version    3  -                            lightgbm  data a719afeb9695 commit 23ce40934d80 gates keep_champion 2026-11-16T00:22:49.226929Z
+version    2  -                            lightgbm  data a719afeb9695 commit c87bffbbf58c gates keep_champion 2026-11-15T20:31:49.826747Z
+version    1  default,production           lightgbm  data a719afeb9695 commit b42316cc985a gates promote       2026-11-15T20:18:10.470870Z
+$ python Model-Development/scripts/registry.py rollback --to 2
+rolled back: production moved from version 1 to 2
+$ python Model-Development/scripts/registry.py status
+version    5  candidate                    lightgbm  data a719afeb9695 commit 19802e00d942 gates keep_champion 2026-11-16T01:10:11.182272Z
+version    4  -                            lightgbm  data a719afeb9695 commit d7001731c288 gates keep_champion 2026-11-16T00:36:33.476433Z
+version    3  -                            lightgbm  data a719afeb9695 commit 23ce40934d80 gates keep_champion 2026-11-16T00:22:49.226929Z
+version    2  production                   lightgbm  data a719afeb9695 commit c87bffbbf58c gates keep_champion 2026-11-15T20:31:49.826747Z
+version    1  default                      lightgbm  data a719afeb9695 commit b42316cc985a gates promote       2026-11-15T20:18:10.470870Z
+$ python Model-Development/scripts/registry.py rollback --to 1
+rolled back: production moved from version 2 to 1
+$ python Model-Development/scripts/registry.py status
+version    5  candidate                    lightgbm  data a719afeb9695 commit 19802e00d942 gates keep_champion 2026-11-16T01:10:11.182272Z
+version    4  -                            lightgbm  data a719afeb9695 commit d7001731c288 gates keep_champion 2026-11-16T00:36:33.476433Z
+version    3  -                            lightgbm  data a719afeb9695 commit 23ce40934d80 gates keep_champion 2026-11-16T00:22:49.226929Z
+version    2  -                            lightgbm  data a719afeb9695 commit c87bffbbf58c gates keep_champion 2026-11-15T20:31:49.826747Z
+version    1  default,production           lightgbm  data a719afeb9695 commit b42316cc985a gates promote       2026-11-15T20:18:10.470870Z
+```
+
+Both rollbacks exited 0. `rollback --to` moves only `production`: no version held `previous` before, and none did after.
+
+`rescore` on the laptop chain's gates input gives the same champion numbers as the main run (`champion version 1 on sha256:a719afeb9695: tp 146 fp 325 fn 233 (threshold 0.0960)`), and `gates.py` then gives `keep_champion`. Vertex puts `default` on the first version by itself; nothing reads it.
+
+**What it produces**
+
+- **In the registry:** a version of `surge-forecast` whose container image is the training image by digest, with labels for the model, git commit, MLflow run id, gate decision and the first 32 hex characters of the data version, `gates.csv` and gate report sha256 values. The description has the validation F1 and where the files are.
+- **In the model bucket:** `gs://boston-resilience-twin-p2-models/surge-forecast/<run id>/<MLflow run id>/` with `model.joblib`, `metrics.json`, `run.json`, `validation_counts.json`, `evaluation.json`, the gate report and `metadata.json`.
+- **In the workflow artifacts:** `champion_rescore.json`, `gate_report.json`, `push.json` (the push record `promote` reads, or `{"skipped": ...}` without access), `registry.json` (the version as `<model resource>@<version id>`, null when skipped, with the image digest and stamps) and `promotion.json`.
+- **In MLflow:** the tags `registry_model` and `registry_version` on the winner's run, when MLflow answers.
+
+**Where results live**
+
+- **What serves now:** `registry.py status`, or the Vertex AI Model Registry in the console for project 2 (`boston-resilience-twin-p2`, us-east1).
+- **A version's files and full record:** the bucket folder its description names, `metadata.json` first.
+- **Each workflow run:** the `model-artifacts` upload of the model workflow run.
+
+**Code**
+
+- `scripts/registry.py`: `push`, `promote`, `rollback`, `status` and `rescore`.
+- `scripts/vertex_client.py`: the Vertex AI and Cloud Storage REST calls through google-auth, with the quota project for a user login only.
+- `scripts/lock_check.py`: the git-tracked dependencies of both `dvc.lock` files against the tree (CI runs it after lint).
+- `scripts/steps/step_rescore_champion.py`, `step_registry_push.py` and `step_set_champion.py`: the workflow's calls.
+- `registry/registry.csv`: project, region, model name, bucket, serving image and aliases. It is outside `config/` so a registry setting does not retrain the model.
+- `tests/test_registry.py`, `tests/test_vertex_client.py`, `tests/test_lock_check.py` and `tests/test_steps.py`.
 
 ## Model CI/CD pipeline and training image
 
