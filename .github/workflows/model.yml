@@ -22,8 +22,8 @@
 # Every ref runs up to the gates and then the reload check. A gate failure (gates exit 1)
 # fails the job on main and only warns on a pull request: merging code does not promote a
 # model, and weak data must not freeze all model code. Exit 2 fails the job on every ref. A
-# push to main also pushes the image to Artifact Registry right after the build, and runs
-# the champion re-score, the registry push and the champion step.
+# push to main also pushes the image to Artifact Registry right after the build and its lock
+# check, and runs the champion re-score, the registry push and the champion step.
 #
 # A fork PR gets no OIDC token and no secret: the Google auth step fails, so the run is
 # "pipeline failed" with no Slack message. Maintainers rerun it from a branch of this repo.
@@ -160,9 +160,12 @@ jobs:
           # next step replaces it with the registry digest.
           docker image inspect --format '{{.Id}}' "$IMAGE" > artifacts/image_digest.txt
 
-      # Every package of the built image against Model-Development/requirements.lock (#111): a
-      # version edited by hand in the lock, or anything pip resolved differently, fails here,
-      # before the push. The lock's lines are what pip freeze prints, after its comment header.
+      # The built image's pip freeze against Model-Development/requirements.lock (#111), before
+      # the push. It fails on a package in the image but not the lock, a lock line not in the
+      # image, or a version pip installed differently. It cannot catch a version edited by hand
+      # that pip can install: -c installs the edited version, so the freeze matches. A hand edit
+      # is caught in review, where the lock's diff shows in the PR. The lock's lines are what
+      # pip freeze prints, after its comment header.
       - name: Check the image against the lock
         id: lock
         run: |
