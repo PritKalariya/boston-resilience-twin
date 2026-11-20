@@ -134,6 +134,12 @@
     "window": {
       "type": "object",
       "properties": {
+        "start": {
+          "$ref": "#/$defs/date"
+        },
+        "end": {
+          "$ref": "#/$defs/date"
+        },
         "positives": {
           "type": "integer",
           "minimum": 0
@@ -161,6 +167,8 @@
         }
       },
       "required": [
+        "start",
+        "end",
         "positives",
         "tp",
         "fp",

@@ -31,7 +31,7 @@ Name exactly which versioned data one evening's forecast was built from. The sha
 | `files.<name>.md5` | string | 32 lowercase hex | no | DVC's md5 of the file |
 | `files.<name>.size_bytes` | integer | bytes | no | |
 | `files.<name>.content_path` | string | `gs://<bucket>/<prefix>/files/md5/<first 2 hex>/<other 30 hex>` | no | the full URI of the object in the bucket: the DVC remote's URL plus DVC 3's cache layout |
-| `feature_catalog_sha256` | string | 64 lowercase hex | no | sha256 of `Data-Pipeline/config/feature_catalog.csv` |
+| `feature_catalog_sha256` | string | 64 lowercase hex | no | sha256 of `Data-Pipeline/config/feature_catalog.csv` as committed in git, LF line endings (see Rules) |
 | `last_final_label_date` | string | `YYYY-MM-DD`, Boston | no | the newest day whose labels are final (48 hours after the day) |
 
 ## Rules
@@ -41,6 +41,7 @@ Name exactly which versioned data one evening's forecast was built from. The sha
 - `latest.json` is byte-identical to `<as_of>.json` of the newest `as_of`.
 - The manifest never contains its own hash. A reader that needs `data_version` computes it from the bytes.
 - `content_path` is the full URI, computed from `md5` and the remote URL in `.dvc/config` (`gs://boston-resilience-twin-data/dvc`): `gs://boston-resilience-twin-data/dvc/files/md5/ab/cdef...`. It is the same form for all three entries, and a test checks each against the config.
+- `feature_catalog_sha256` is the sha256 of the file's bytes as committed in git, with LF line endings. A Windows checkout that converts the file to CRLF hashes differently, so compute it on the VM, or from `git show <commit>:Data-Pipeline/config/feature_catalog.csv`, never from a Windows working copy.
 - `last_final_label_date` is at least two days before `as_of`.
 - `forecast_rows` is required. A forecast made from rows that no manifest names cannot be traced, so #162 does not write a manifest without it.
 - This `data_version` is **not** the training data version (the sha256 of `Data-Pipeline/dvc.lock` in the registry's `metadata.json`); see the README.
@@ -70,4 +71,5 @@ sha256sum docs/contracts/fixtures/manifests/latest.json
 - **A rerun for the same `as_of`.** The manifest file is replaced, the version changes, and forecasts already written with the old version refer to a manifest that is gone. Rerun the whole run, so the forecast is rewritten with the new version.
 - **`latest.json` and the dated file differ.** Write the dated file first and copy exactly its bytes, never re-serialize.
 - **The DVC cache moves.** If the remote layout or the `dvc` pin changes (DVC 3.67.1 uses `files/md5/`), `content_path` stops pointing at an object. The test reads the remote URL but not the layout, so a change of DVC major version needs a new contract version.
+- **A CRLF checkout.** Hashing `feature_catalog.csv` from a Windows working copy that converted LF to CRLF gives a different `feature_catalog_sha256` for the same commit. Compute it on the VM or from `git show <commit>:Data-Pipeline/config/feature_catalog.csv`.
 - **Hash of the wrong file.** Hashing `dvc.lock` instead of this manifest gives the training version, which still looks valid.

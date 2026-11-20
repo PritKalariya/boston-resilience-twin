@@ -390,7 +390,7 @@ docker compose run --rm test -x -k dvc --no-cov                               # 
 
 CI also runs the deployment contract tests (#159) in their own step after the
 full suite: `docker compose run --rm test docs/contracts/tests --no-cov`. They check the contract schemas, fixtures and
-cross-field rules and that the fixtures are in line with `tools/build_fixtures.py`
+cross-field rules and that the fixtures are in line with `docs/contracts/tools/build_fixtures.py`
 (see [docs/contracts/README.md](contracts/README.md)).
 
 - **`ADR-013 pins Python 3.12, but this is 3.x`.** The script ran outside the

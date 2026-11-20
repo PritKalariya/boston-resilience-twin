@@ -28,8 +28,8 @@ The schemas enforce the first five. The tests in [tests/test_contracts.py](tests
 
   | reason | meaning |
   |---|---|
-  | `insufficient data` | fewer than 5 positives (surge days, after final labels) in the window or the poverty group |
-  | `no data` | nothing to compute from at all: no graded forecasts, or no earlier rows to compare drift against |
+  | `insufficient data` | fewer than 5 positives (surge days, after final labels) in the window or the poverty group, zero included, even when nothing is graded yet |
+  | `no data` | only two cases: drift with no earlier rows to compare against, and the brief's `model_health` before the first monitoring file exists. Never a performance or fairness metric in a monitoring file |
   | `undefined` | enough data, but the formula has a zero denominator, for example precision when nothing was flagged |
 
 - **Where files live.** Everything except `/predict` is in the data bucket `gs://boston-resilience-twin-data` in project 1. `/predict` is the model service on Cloud Run in project 2.

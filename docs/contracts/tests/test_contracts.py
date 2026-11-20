@@ -482,7 +482,9 @@ def test_forecast_rules():
     records = load_fixture(RECORDS)
     units = [r["unit"] for r in records]
     assert units == sorted(units) and len(set(units)) == 24
-    assert len({r["forecast_date"] for r in records}) == 1
+    for key in ("forecast_date", "as_of", "threshold", "model_version", "model_run_id", "data_version",
+                "issued_at_utc"):
+        assert len({r[key] for r in records}) == 1, f"rows must share one {key}"
     for r in records:
         assert date.fromisoformat(r["forecast_date"]) == date.fromisoformat(r["as_of"]) + timedelta(days=1)
         assert r["prediction"] == int(r["probability"] >= r["threshold"])  # at or above, as threshold.py
@@ -614,6 +616,67 @@ def test_monitoring_arithmetic_and_rules(rel):
         assert (group["recall"]["value"] is None) == (group["positives"] < MIN_POSITIVES)
 
 
+def window_problems(doc: dict) -> list[str]:
+    """The monitoring-output.md window rules a schema cannot say; empty when the file keeps them."""
+    problems = []
+    seven, thirty = doc["windows"]["7d"], doc["windows"]["30d"]
+    if seven["end"] != thirty["end"]:
+        problems.append("the two windows must share one end")
+    end = date.fromisoformat(thirty["end"])
+    if end > date.fromisoformat(doc["date"]) - timedelta(days=2):
+        problems.append("end must be at most date - 2 days, so its labels are final")
+    for name, days in (("7d", 7), ("30d", 30)):
+        window = doc["windows"][name]
+        if date.fromisoformat(window["end"]) - date.fromisoformat(window["start"]) != timedelta(days=days - 1):
+            problems.append(f"{name} must hold {days} forecast dates, start = end - {days - 1} days")
+    return problems
+
+
+@pytest.mark.parametrize("rel", ["monitoring/2026-11-27.json", "monitoring/2026-12-03.json"])
+def test_monitoring_windows_follow_the_rules(rel):
+    doc = load_fixture(rel)
+    assert window_problems(doc) == []
+    assert doc["windows"]["7d"]["end"] == (date.fromisoformat(doc["date"]) - timedelta(days=2)).isoformat()
+
+
+@pytest.mark.parametrize("rel", ["monitoring/2026-11-27.json", "monitoring/2026-12-03.json"])
+def test_a_bad_monitoring_window_fails(rel):
+    seven_days_of_eight = load_fixture(rel)
+    start = date.fromisoformat(seven_days_of_eight["windows"]["7d"]["start"])
+    seven_days_of_eight["windows"]["7d"]["start"] = (start - timedelta(days=1)).isoformat()
+    assert errors("monitoring-output", seven_days_of_eight) == [], "the schema cannot see the length"
+    assert window_problems(seven_days_of_eight), "a 7d window of 8 days passed"
+
+    thirty_of_31 = load_fixture(rel)
+    start = date.fromisoformat(thirty_of_31["windows"]["30d"]["start"])
+    thirty_of_31["windows"]["30d"]["start"] = (start - timedelta(days=1)).isoformat()
+    assert window_problems(thirty_of_31)
+
+    apart = load_fixture(rel)
+    apart["windows"]["30d"]["end"] = (date.fromisoformat(apart["windows"]["30d"]["end"]) - timedelta(days=1)).isoformat()
+    assert window_problems(apart), "windows with different ends passed"
+
+    too_new = load_fixture(rel)
+    day_before = (date.fromisoformat(too_new["date"]) - timedelta(days=1)).isoformat()
+    for window in too_new["windows"].values():
+        window["end"] = day_before
+    assert window_problems(too_new), "an end whose labels are not final passed"
+
+    for key in ("start", "end"):
+        missing = load_fixture(rel)
+        del missing["windows"]["7d"][key]
+        assert errors("monitoring-output", missing), f"a window without {key} passed"
+
+
+@pytest.mark.parametrize("rel", ["monitoring/2026-11-27.json", "monitoring/2026-12-03.json"])
+def test_no_performance_or_fairness_metric_says_no_data(rel):
+    doc = load_fixture(rel)
+    for part in ("windows", "fairness"):
+        for metric in metric_objects(doc[part]):
+            assert metric["reason"] != "no data", (rel, part, metric)
+    assert doc["drift"]["share"]["reason"] in (None, "no data")
+
+
 @pytest.mark.parametrize("rel", ["monitoring/2026-11-27.json", "monitoring/2026-12-03.json"])
 def test_drifted_features_are_catalog_inputs(rel):
     drift = load_fixture(rel)["drift"]
@@ -634,6 +697,17 @@ def test_decision_cross_field_rules():
             assert doc["source"] == "manual" and "manual" in doc["reasons"], rel
     assert load_fixture("monitoring/decisions/2026-11-27.json")["retrain"] is False
     assert load_fixture("monitoring/decisions/2026-12-03.json")["retrain"] is True
+
+
+def test_the_decisions_folder_holds_only_live_or_manual_decisions():
+    folder = FIXTURES / "monitoring" / "decisions"
+    files = sorted(folder.glob("*.json"))
+    assert files
+    for path in files:
+        assert json.loads(path.read_text(encoding="utf-8"))["source"] in ("live", "manual"), path.name
+    replay = load_fixture("monitoring/decisions/2026-11-27.json")
+    replay["source"] = "replay"
+    assert errors("retrain-decision", replay) == [], "a replay decision is valid, only not written to this folder"
 
 
 def test_decisions_dates_and_latest():

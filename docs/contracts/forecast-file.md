@@ -40,7 +40,7 @@ Columns and Arrow types, in this order. `contract=forecast/v1` is parquet file k
 ## Rules
 
 - 24 rows, sorted by `unit` (plain string order), each unit once.
-- All rows share one `forecast_date`, one `as_of`, one `model_version`, one `data_version` and one `issued_at_utc`; `forecast_date = as_of + 1 day`.
+- All rows share one `forecast_date`, one `as_of`, one `threshold`, one `model_version`, one `model_run_id`, one `data_version` and one `issued_at_utc`; `forecast_date = as_of + 1 day`.
 - `prediction = 1` exactly when `probability >= threshold` (at or above, as `threshold.py`).
 - `data_version` equals the sha256 of `manifests/<as_of>.json` in the same bucket.
 - The parquet fixture equals its `records.json` source row for row. A test reads both and compares; `tools/build_fixtures.py` rebuilds the parquet from the records.

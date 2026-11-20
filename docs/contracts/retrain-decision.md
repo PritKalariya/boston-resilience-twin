@@ -37,6 +37,7 @@ The drift-threshold rule's answer for one day: retrain or not, and why. It is wh
 - `forced` implies `source` is `manual` and `reasons` contains `manual`.
 - `reasons` has no repeats.
 - `latest.json` is byte-identical to the dated file with the newest `date`.
+- Only decisions with `source` `live` or `manual` are written under `monitoring/decisions/`. A `replay` decision is valid under the schema (it is #170's calibration output) but is never written there, so `latest.json` is always a decision #163 may act on.
 - At most one triggered retrain a day (project spec), so a day has one decision file. How long the cooldown lasts is #170's.
 
 ## Example
@@ -56,7 +57,7 @@ The drift-threshold rule's answer for one day: retrain or not, and why. It is wh
 ## Where it breaks
 
 - **`latest.json` behind the dated file.** If the dated file is written and the copy fails, the workflow reads yesterday's decision. Write the dated file, then copy its bytes, and fail the run if the copy fails.
-- **A replay decision in the live folder.** `source: replay` decisions are for calibration. #163 acts only on `source` `live` or `manual`.
+- **A replay decision in the live folder.** Only decisions with `source` `live` or `manual` are written under `monitoring/decisions/`, so `latest.json` is always one #163 may act on. Replay decisions are #170's calibration output and never go in that folder; where they go is #170's to say.
 - **A decision made on a sparse monitoring output.** Null metrics must not produce a reason. `retrain` false with an empty `reasons` is the right answer.
 - **A rerun for the same date.** The file is replaced. If a retrain was already dispatched on the first run, the second run must see `cooldown_until` and not dispatch again.
 - **The thresholds file changes without a new hash.** The hash is then wrong for the decision. #170 computes it from the bytes at decision time.
