@@ -69,15 +69,21 @@ resource "google_storage_bucket_iam_member" "ci_writer_models_read" {
   member = "serviceAccount:${google_service_account.ci_writer.email}"
 }
 
-# --- Teammates who review plans and debug CI --------------------------------
+# --- Teammates who plan, apply and debug CI ---------------------------------
 
 # roles/owner cannot be granted through the API to an account outside the
 # project's organization (it needs a console invitation, which is click-ops),
-# so Terraform grants the nearest pair: everything Editor allows, plus IAM.
+# so Terraform grants what this work needs instead: everything Editor allows,
+# project IAM, and IAM on the two resource types Deployment grants on, which
+# Editor cannot set: Cloud Run services (run.admin, for run.invoker) and
+# service accounts (serviceAccountAdmin, for actAs on the runtime account).
+# ADR-036 records the widening and what it allows.
 locals {
   admin_roles = [
     "roles/editor",
     "roles/resourcemanager.projectIamAdmin",
+    "roles/run.admin",
+    "roles/iam.serviceAccountAdmin",
   ]
   admin_grants = {
     for pair in setproduct(var.project_admins, local.admin_roles) :
