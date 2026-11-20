@@ -49,11 +49,10 @@ variable "project_admins" {
   description = <<-EOT
     IAM member strings for teammates who plan, apply and debug CI in
     project 2, for example ["user:name@northeastern.edu"]. They get
-    roles/editor, roles/resourcemanager.projectIamAdmin,
-    roles/iam.securityAdmin and roles/iam.roleAdmin on the project and
-    roles/billing.viewer on the billing account (ADR-030 explains why not
-    roles/owner). No default: supplied through a tfvars file that is never
-    committed.
+    roles/editor, roles/resourcemanager.projectIamAdmin, roles/run.admin and
+    roles/iam.serviceAccountAdmin (ADR-030 explains why not roles/owner,
+    ADR-036 the last two). No default: supplied through a tfvars file that is
+    never committed.
   EOT
   type        = list(string)
 }

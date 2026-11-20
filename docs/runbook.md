@@ -1724,15 +1724,12 @@ run's OIDC token through the provider above.
 The budget emails at 25, 50 and 80 percent of $50 spent before credits, and when the month's
 forecast crosses 80 percent. It has no notification channel, so the recipients are Google's
 default: the Billing Account Administrators and Billing Account Users of the billing account, which
-is the project 2 owner. Teammates in `project_admins` hold `roles/billing.viewer`, which reads
-the budget but gets no alert; to alert someone else, add a monitoring notification channel to
-`budget.tf` in a reviewed PR.
+is the project 2 owner. Teammates in `project_admins` hold project roles only and get no alert; to
+alert someone else, add a monitoring notification channel to `budget.tf` in a reviewed PR.
 
 The budget lives on the billing account, not in the project. Reading it needs a billing account
-role, `roles/billing.viewer` or above: the owner has it, and `iam.tf` grants it to each member of
-`project_admins` (ADR-030, note of 2026-11-20). A project role such as `roles/editor` is refused,
-so a teammate's `terraform plan` fails on `google_billing_budget` until that grant is applied. To
-check it is there, without printing the billing account id:
+role, `roles/billing.viewer` or above (the owner has it); a project role such as `roles/editor`
+is refused. To check it is there, without printing the billing account id:
 
 ```bash
 cd Deployment/terraform-project2
