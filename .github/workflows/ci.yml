@@ -57,3 +57,8 @@ jobs:
       # and fails below the coverage bar in .coveragerc.
       - name: Test (Airflow image, Python 3.12, coverage)
         run: docker compose run --rm --build test
+
+      # The deployment contracts (#159): schemas, fixtures, cross-field rules and the fixture
+      # tool's --check, in the image the step above built, without coverage.
+      - name: Contract tests (#159)
+        run: docker compose run --rm test docs/contracts/tests --no-cov

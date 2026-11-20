@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "data manifest",
+  "description": "manifests/<as_of>.json and manifests/latest.json (manifest/v1), stored in canonical form; its sha256 is the data_version.",
+  "type": "object",
+  "properties": {
+    "contract": {
+      "const": "manifest/v1"
+    },
+    "as_of": {
+      "$ref": "#/$defs/date"
+    },
+    "created_at_utc": {
+      "$ref": "#/$defs/ts"
+    },
+    "vm_git_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "dag_run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "files": {
+      "type": "object",
+      "properties": {
+        "labels": {
+          "$ref": "#/$defs/file"
+        },
+        "features": {
+          "$ref": "#/$defs/file"
+        },
+        "forecast_rows": {
+          "$ref": "#/$defs/file"
+        }
+      },
+      "required": [
+        "labels",
+        "features",
+        "forecast_rows"
+      ],
+      "additionalProperties": false
+    },
+    "feature_catalog_sha256": {
+      "$ref": "#/$defs/sha256_hex"
+    },
+    "last_final_label_date": {
+      "$ref": "#/$defs/date"
+    }
+  },
+  "required": [
+    "contract",
+    "as_of",
+    "created_at_utc",
+    "vm_git_commit",
+    "dag_run_id",
+    "files",
+    "feature_catalog_sha256",
+    "last_final_label_date"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "date": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "file": {
+      "type": "object",
+      "properties": {
+        "md5": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "content_path": {
+          "type": "string",
+          "pattern": "^gs://[a-z0-9][a-z0-9._-]*/dvc/files/md5/[0-9a-f]{2}/[0-9a-f]{30}$"
+        }
+      },
+      "required": [
+        "md5",
+        "size_bytes",
+        "content_path"
+      ],
+      "additionalProperties": false
+    },
+    "sha256_hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

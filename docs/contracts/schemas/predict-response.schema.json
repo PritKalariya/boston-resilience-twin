@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "predict response",
+  "description": "POST /predict 200 response body (predict/v1): one prediction per request row.",
+  "type": "object",
+  "properties": {
+    "contract": {
+      "const": "predict/v1"
+    },
+    "predictions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 24,
+      "items": {
+        "$ref": "#/$defs/prediction"
+      }
+    }
+  },
+  "required": [
+    "contract",
+    "predictions"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "unit": {
+      "enum": [
+        "Allston",
+        "Back Bay",
+        "Beacon Hill",
+        "Brighton",
+        "Charlestown",
+        "Chinatown",
+        "Dorchester",
+        "Downtown",
+        "East Boston",
+        "Fenway",
+        "Harbor Islands",
+        "Hyde Park",
+        "Jamaica Plain",
+        "Longwood",
+        "Mattapan",
+        "Mission Hill",
+        "North End",
+        "Roslindale",
+        "Roxbury",
+        "South Boston",
+        "South Boston Waterfront",
+        "South End",
+        "West End",
+        "West Roxbury"
+      ]
+    },
+    "date": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "model_version": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "prediction": {
+      "type": "object",
+      "properties": {
+        "unit": {
+          "$ref": "#/$defs/unit"
+        },
+        "date": {
+          "$ref": "#/$defs/date"
+        },
+        "probability": {
+          "$ref": "#/$defs/probability"
+        },
+        "prediction": {
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "threshold": {
+          "$ref": "#/$defs/probability"
+        },
+        "model_version": {
+          "$ref": "#/$defs/model_version"
+        },
+        "model_run_id": {
+          "$ref": "#/$defs/run_id"
+        },
+        "data_version": {
+          "$ref": "#/$defs/sha"
+        }
+      },
+      "required": [
+        "unit",
+        "date",
+        "probability",
+        "prediction",
+        "threshold",
+        "model_version",
+        "model_run_id",
+        "data_version"
+      ],
+      "additionalProperties": false
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    }
+  }
+}

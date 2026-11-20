@@ -1,0 +1,363 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "predict request",
+  "description": "POST /predict request body (predict/v1): one row per neighborhood, the model inputs of the day.",
+  "type": "object",
+  "properties": {
+    "contract": {
+      "const": "predict/v1"
+    },
+    "data_version": {
+      "$ref": "#/$defs/sha"
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 24,
+      "items": {
+        "$ref": "#/$defs/row"
+      }
+    }
+  },
+  "required": [
+    "contract",
+    "data_version",
+    "rows"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "unit": {
+      "enum": [
+        "Allston",
+        "Back Bay",
+        "Beacon Hill",
+        "Brighton",
+        "Charlestown",
+        "Chinatown",
+        "Dorchester",
+        "Downtown",
+        "East Boston",
+        "Fenway",
+        "Harbor Islands",
+        "Hyde Park",
+        "Jamaica Plain",
+        "Longwood",
+        "Mattapan",
+        "Mission Hill",
+        "North End",
+        "Roslindale",
+        "Roxbury",
+        "South Boston",
+        "South Boston Waterfront",
+        "South End",
+        "West End",
+        "West Roxbury"
+      ]
+    },
+    "date": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "row": {
+      "type": "object",
+      "propertyNames": {
+        "anyOf": [
+          {
+            "enum": [
+              "unit",
+              "forecast_date",
+              "as_of"
+            ]
+          },
+          {
+            "$ref": "#/$defs/feature"
+          }
+        ]
+      },
+      "properties": {
+        "unit": {
+          "$ref": "#/$defs/unit"
+        },
+        "forecast_date": {
+          "$ref": "#/$defs/date"
+        },
+        "as_of": {
+          "$ref": "#/$defs/date"
+        },
+        "day_of_week": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+        },
+        "month": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12
+        },
+        "day_of_year": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 366
+        },
+        "snow_ice_rel_last": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "snow_ice_rel3": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "snow_ice_rel7": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "snow_ice_rel28": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "tree_rel_last": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "tree_rel3": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "tree_rel7": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "tree_rel28": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "alert_snow_ice_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "alert_snow_ice_warning": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "alert_tree_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "alert_tree_warning": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "alert_flooding_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "alert_flooding_warning": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "static_population": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "static_land_sqmi": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "static_density": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "static_poverty_share": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "static_older_adult_share": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "static_no_vehicle_share": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "static_flood_10pct_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "static_flood_1pct_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "wx_precip_mm": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "wx_snowfall_mm": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "wx_tmax_c": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -60,
+          "maximum": 60
+        },
+        "wx_tmin_c": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -60,
+          "maximum": 60
+        },
+        "wx_gust_max_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "tide_pred_max_m": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "unit",
+        "forecast_date",
+        "as_of",
+        "day_of_week",
+        "month",
+        "day_of_year",
+        "snow_ice_rel_last",
+        "snow_ice_rel3",
+        "snow_ice_rel7",
+        "snow_ice_rel28",
+        "tree_rel_last",
+        "tree_rel3",
+        "tree_rel7",
+        "tree_rel28",
+        "alert_snow_ice_count",
+        "alert_snow_ice_warning",
+        "alert_tree_count",
+        "alert_tree_warning",
+        "alert_flooding_count",
+        "alert_flooding_warning",
+        "static_population",
+        "static_land_sqmi",
+        "static_density",
+        "static_poverty_share",
+        "static_older_adult_share",
+        "static_no_vehicle_share",
+        "static_flood_10pct_share",
+        "static_flood_1pct_share",
+        "wx_precip_mm",
+        "wx_snowfall_mm",
+        "wx_tmax_c",
+        "wx_tmin_c",
+        "wx_gust_max_ms",
+        "tide_pred_max_m"
+      ],
+      "additionalProperties": false
+    },
+    "feature": {
+      "enum": [
+        "day_of_week",
+        "month",
+        "day_of_year",
+        "snow_ice_rel_last",
+        "snow_ice_rel3",
+        "snow_ice_rel7",
+        "snow_ice_rel28",
+        "tree_rel_last",
+        "tree_rel3",
+        "tree_rel7",
+        "tree_rel28",
+        "alert_snow_ice_count",
+        "alert_snow_ice_warning",
+        "alert_tree_count",
+        "alert_tree_warning",
+        "alert_flooding_count",
+        "alert_flooding_warning",
+        "static_population",
+        "static_land_sqmi",
+        "static_density",
+        "static_poverty_share",
+        "static_older_adult_share",
+        "static_no_vehicle_share",
+        "static_flood_10pct_share",
+        "static_flood_1pct_share",
+        "wx_precip_mm",
+        "wx_snowfall_mm",
+        "wx_tmax_c",
+        "wx_tmin_c",
+        "wx_gust_max_ms",
+        "tide_pred_max_m"
+      ]
+    }
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "forecast row",
+  "description": "One row of forecasts/<forecast_date>.parquet as JSON (forecast/v1). The repo's records.json fixture, the reviewable source of the parquet fixture, is an array of 24 of them.",
+  "type": "object",
+  "properties": {
+    "unit": {
+      "$ref": "#/$defs/unit"
+    },
+    "forecast_date": {
+      "$ref": "#/$defs/date"
+    },
+    "as_of": {
+      "$ref": "#/$defs/date"
+    },
+    "probability": {
+      "$ref": "#/$defs/probability"
+    },
+    "prediction": {
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "threshold": {
+      "$ref": "#/$defs/probability"
+    },
+    "model_version": {
+      "$ref": "#/$defs/model_version"
+    },
+    "model_run_id": {
+      "$ref": "#/$defs/run_id"
+    },
+    "data_version": {
+      "$ref": "#/$defs/sha"
+    },
+    "issued_at_utc": {
+      "$ref": "#/$defs/ts"
+    }
+  },
+  "required": [
+    "unit",
+    "forecast_date",
+    "as_of",
+    "probability",
+    "prediction",
+    "threshold",
+    "model_version",
+    "model_run_id",
+    "data_version",
+    "issued_at_utc"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "unit": {
+      "enum": [
+        "Allston",
+        "Back Bay",
+        "Beacon Hill",
+        "Brighton",
+        "Charlestown",
+        "Chinatown",
+        "Dorchester",
+        "Downtown",
+        "East Boston",
+        "Fenway",
+        "Harbor Islands",
+        "Hyde Park",
+        "Jamaica Plain",
+        "Longwood",
+        "Mattapan",
+        "Mission Hill",
+        "North End",
+        "Roslindale",
+        "Roxbury",
+        "South Boston",
+        "South Boston Waterfront",
+        "South End",
+        "West End",
+        "West Roxbury"
+      ]
+    },
+    "date": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "model_version": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

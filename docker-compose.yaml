@@ -313,6 +313,7 @@ services:
       - ./Model-Development:/opt/airflow/repo/Model-Development:ro
       - ./.github:/opt/airflow/repo/.github:ro  # model.yml and in_image.sh, for test_steps_workflow.py (#112)
       - ./docs/data:/opt/airflow/repo/docs/data:ro
+      - ./docs/contracts:/opt/airflow/repo/docs/contracts:ro  # the deployment contracts and their tests (#159)
       - ./.coveragerc:/opt/airflow/repo/.coveragerc:ro
       - ./.env.example:/opt/airflow/repo/.env.example:ro
       - ./.dvc/config:/opt/airflow/repo/.dvc/config:ro  # the remote URL only, not DVC's cache
