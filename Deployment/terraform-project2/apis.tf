@@ -5,6 +5,7 @@ locals {
     "aiplatform.googleapis.com",       # Vertex AI Model Registry
     "artifactregistry.googleapis.com", # Docker images
     "billingbudgets.googleapis.com",   # the budget alert
+    "cloudbilling.googleapis.com",     # billing account IAM for project_admins
     "cloudresourcemanager.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com", # short-lived tokens for the CI service accounts

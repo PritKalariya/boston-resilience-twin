@@ -69,15 +69,20 @@ resource "google_storage_bucket_iam_member" "ci_writer_models_read" {
   member = "serviceAccount:${google_service_account.ci_writer.email}"
 }
 
-# --- Teammates who review plans and debug CI --------------------------------
+# --- Teammates who plan, apply and debug CI ---------------------------------
 
 # roles/owner cannot be granted through the API to an account outside the
 # project's organization (it needs a console invitation, which is click-ops),
-# so Terraform grants the nearest pair: everything Editor allows, plus IAM.
+# so Terraform grants what Owner would give for this work: everything Editor
+# allows, project IAM, IAM on single resources (Cloud Run services, buckets,
+# service accounts, repositories; securityAdmin) and custom roles (roleAdmin,
+# for modelRegistrar). Editor alone has none of the last two (#161).
 locals {
   admin_roles = [
     "roles/editor",
     "roles/resourcemanager.projectIamAdmin",
+    "roles/iam.securityAdmin",
+    "roles/iam.roleAdmin",
   ]
   admin_grants = {
     for pair in setproduct(var.project_admins, local.admin_roles) :
@@ -94,6 +99,22 @@ resource "google_project_iam_member" "admins" {
   project = var.project_id
   role    = each.value.role
   member  = each.value.member
+
+  depends_on = [google_project_service.project_2]
+}
+
+# The budget lives on the billing account, so no project role can read it and
+# `terraform plan` fails on google_billing_budget without this. Viewer only:
+# it reads spend and budgets, and cannot link projects or change payment.
+# The billing provider supplies the quota project the Cloud Billing API needs
+# with user credentials.
+resource "google_billing_account_iam_member" "admins_billing_viewer" {
+  provider = google.billing
+  for_each = toset(var.project_admins)
+
+  billing_account_id = var.billing_account
+  role               = "roles/billing.viewer"
+  member             = each.value
 
   depends_on = [google_project_service.project_2]
 }
