@@ -1,6 +1,6 @@
 # ADR-036: Project 2 admins get Cloud Run and service account IAM for Deployment
 
-- Status: proposed
+- Status: accepted 2026-11-20
 - Date: 2026-11-20
 - Owner: Kirtan10
 - Phase: deploy
@@ -15,7 +15,7 @@ ADR-030 gave the members of `project_admins` (Prit) `roles/editor` and `roles/re
 - `run.services.setIamPolicy`: `run.invoker` for `airflow-vm-sa` on the serving service (`/predict` is not public), later on the agent service;
 - `iam.serviceAccounts.setIamPolicy`: `iam.serviceAccountUser` (actAs) for `ci-writer` on the runtime service account only, so it can deploy revisions that run as it.
 
-Deployment changes no custom role (`ci-writer` deploys with `roles/run.developer`, so `modelRegistrar` keeps its no-deploy meaning) and grants nothing on secrets, buckets or `brt-images` in project 2. Editor already reads the budget for `terraform plan` (checked by Prit on 2026-11-20: `Plan: 4 to add` with no error on `google_billing_budget`), so no billing account role is needed.
+Deployment changes no custom role (`ci-writer` deploys with `roles/run.developer`, so `modelRegistrar` keeps its no-deploy meaning) and grants nothing on secrets, buckets or `brt-images` in project 2. Editor already reads the budget for `terraform plan`: on 2026-11-20 Prit's refresh plan on Editor plus projectIamAdmin read the budget with no error on `google_billing_budget`, so no billing account role is needed.
 
 ## Decision
 
@@ -34,8 +34,8 @@ Still not `roles/owner`. Billing, project deletion and the bootstrap (ADR-030) s
 
 ## Consequences
 
-- `roles/resourcemanager.projectIamAdmin` plus `roles/iam.serviceAccountAdmin` lets the holder grant itself actAs on any project 2 service account, `ci-writer` included, and so act as it. That is effectively owner without billing. It is contained by everything being in Terraform: a grant made outside it shows up as drift in the next `terraform plan`, and every change to `iam.tf` is a reviewed PR.
-- `run.admin` also deletes Cloud Run services and changes their traffic; a mistake there is undone by the deploy script (#161), which redeploys the production version.
+- A member of `project_admins` can act as any project 2 service account, `ci-writer` included. That is effectively owner without billing, and it predates this ADR: under ADR-030, Editor already holds `iam.serviceAccounts.actAs` on every service account (attach `ci-writer` to a resource you create), and projectIamAdmin can grant project-wide `roles/iam.serviceAccountTokenCreator`. This ADR adds resource-level IAM on Cloud Run services and service accounts. Terraform does not contain the risk: every IAM resource in the stack is an `_iam_member`, which is non-authoritative, so `terraform plan` ignores bindings it did not create. What contains it is reviewed `iam.tf` PRs, Cloud Audit Logs (every `SetIamPolicy` call is logged), and `gcloud projects get-iam-policy boston-resilience-twin-p2` to see every project binding.
+- The new rights over Editor are `run.services.setIamPolicy` and `iam.serviceAccounts.setIamPolicy`; everything else in the pair Editor already had, deleting Cloud Run services and service accounts included. A deleted serving service is recreated by #161's deploy script (PR 3 of 3).
 - The project 2 owner still applies changes to `project_admins` itself, since the new roles exist only after the first apply.
 - Cost: none; IAM grants are free. Teardown: `git revert <merge sha>`, then `terraform apply -var-file=terraform.tfvars` in `Deployment/terraform-project2`.
 
