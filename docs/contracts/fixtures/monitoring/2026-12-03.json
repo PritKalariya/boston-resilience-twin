@@ -1,0 +1,83 @@
+{
+  "contract": "monitoring/v1",
+  "date": "2026-12-03",
+  "model_version": "1",
+  "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4",
+  "windows": {
+    "7d": {
+      "positives": 7,
+      "tp": 5,
+      "fp": 9,
+      "fn": 2,
+      "f1": {
+        "value": 0.4762,
+        "reason": null
+      },
+      "precision": {
+        "value": 0.3571,
+        "reason": null
+      },
+      "recall": {
+        "value": 0.7143,
+        "reason": null
+      }
+    },
+    "30d": {
+      "positives": 20,
+      "tp": 14,
+      "fp": 31,
+      "fn": 6,
+      "f1": {
+        "value": 0.4308,
+        "reason": null
+      },
+      "precision": {
+        "value": 0.3111,
+        "reason": null
+      },
+      "recall": {
+        "value": 0.7,
+        "reason": null
+      }
+    }
+  },
+  "fairness": {
+    "groups": {
+      "higher": {
+        "positives": 13,
+        "recall": {
+          "value": 0.6154,
+          "reason": null
+        }
+      },
+      "lower": {
+        "positives": 7,
+        "recall": {
+          "value": 0.8571,
+          "reason": null
+        }
+      }
+    },
+    "gap": {
+      "value": 0.2418,
+      "reason": null
+    }
+  },
+  "drift": {
+    "share": {
+      "value": 0.129,
+      "reason": null
+    },
+    "drifted_features": [
+      "snow_ice_rel7",
+      "wx_tmax_c",
+      "wx_tmin_c",
+      "tide_pred_max_m"
+    ],
+    "prediction_drift": {
+      "detected": true,
+      "score": 0.21,
+      "method": "wasserstein"
+    }
+  }
+}

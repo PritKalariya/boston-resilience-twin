@@ -1,0 +1,78 @@
+{
+  "contract": "monitoring/v1",
+  "date": "2026-11-27",
+  "model_version": "1",
+  "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4",
+  "windows": {
+    "7d": {
+      "positives": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "f1": {
+        "value": null,
+        "reason": "insufficient data"
+      },
+      "precision": {
+        "value": null,
+        "reason": "insufficient data"
+      },
+      "recall": {
+        "value": null,
+        "reason": "insufficient data"
+      }
+    },
+    "30d": {
+      "positives": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "f1": {
+        "value": null,
+        "reason": "insufficient data"
+      },
+      "precision": {
+        "value": null,
+        "reason": "insufficient data"
+      },
+      "recall": {
+        "value": null,
+        "reason": "insufficient data"
+      }
+    }
+  },
+  "fairness": {
+    "groups": {
+      "higher": {
+        "positives": 0,
+        "recall": {
+          "value": null,
+          "reason": "insufficient data"
+        }
+      },
+      "lower": {
+        "positives": 0,
+        "recall": {
+          "value": null,
+          "reason": "insufficient data"
+        }
+      }
+    },
+    "gap": {
+      "value": null,
+      "reason": "insufficient data"
+    }
+  },
+  "drift": {
+    "share": {
+      "value": null,
+      "reason": "no data"
+    },
+    "drifted_features": [],
+    "prediction_drift": {
+      "detected": false,
+      "score": null,
+      "method": "wasserstein"
+    }
+  }
+}

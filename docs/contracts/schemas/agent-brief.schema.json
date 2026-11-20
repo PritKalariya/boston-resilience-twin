@@ -1,0 +1,330 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "agent brief",
+  "description": "forecasts/<forecast_date>.brief.json (brief/v1): the daily brief with its sourced claims.",
+  "type": "object",
+  "properties": {
+    "contract": {
+      "const": "brief/v1"
+    },
+    "forecast_date": {
+      "$ref": "#/$defs/date"
+    },
+    "model_version": {
+      "$ref": "#/$defs/model_version"
+    },
+    "data_version": {
+      "$ref": "#/$defs/sha"
+    },
+    "flagged": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "unit": {
+            "$ref": "#/$defs/unit"
+          },
+          "probability": {
+            "$ref": "#/$defs/probability"
+          },
+          "associations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "feature": {
+                  "$ref": "#/$defs/feature"
+                },
+                "value": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "feature",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "unit",
+          "probability",
+          "associations"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "model_health": {
+      "type": "object",
+      "properties": {
+        "f1": {
+          "$ref": "#/$defs/ratio_metric"
+        },
+        "recall": {
+          "$ref": "#/$defs/ratio_metric"
+        },
+        "fairness_gap": {
+          "$ref": "#/$defs/ratio_metric"
+        }
+      },
+      "required": [
+        "f1",
+        "recall",
+        "fairness_gap"
+      ],
+      "additionalProperties": false
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^c[0-9]+$"
+          },
+          "value": {
+            "type": "number"
+          },
+          "display": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+          },
+          "source": {
+            "$ref": "#/$defs/source"
+          }
+        },
+        "required": [
+          "id",
+          "value",
+          "display",
+          "source"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "contract",
+    "forecast_date",
+    "model_version",
+    "data_version",
+    "flagged",
+    "model_health",
+    "text",
+    "claims"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "unit": {
+      "enum": [
+        "Allston",
+        "Back Bay",
+        "Beacon Hill",
+        "Brighton",
+        "Charlestown",
+        "Chinatown",
+        "Dorchester",
+        "Downtown",
+        "East Boston",
+        "Fenway",
+        "Harbor Islands",
+        "Hyde Park",
+        "Jamaica Plain",
+        "Longwood",
+        "Mattapan",
+        "Mission Hill",
+        "North End",
+        "Roslindale",
+        "Roxbury",
+        "South Boston",
+        "South Boston Waterfront",
+        "South End",
+        "West End",
+        "West Roxbury"
+      ]
+    },
+    "date": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "model_version": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "feature": {
+      "enum": [
+        "day_of_week",
+        "month",
+        "day_of_year",
+        "snow_ice_rel_last",
+        "snow_ice_rel3",
+        "snow_ice_rel7",
+        "snow_ice_rel28",
+        "tree_rel_last",
+        "tree_rel3",
+        "tree_rel7",
+        "tree_rel28",
+        "alert_snow_ice_count",
+        "alert_snow_ice_warning",
+        "alert_tree_count",
+        "alert_tree_warning",
+        "alert_flooding_count",
+        "alert_flooding_warning",
+        "static_population",
+        "static_land_sqmi",
+        "static_density",
+        "static_poverty_share",
+        "static_older_adult_share",
+        "static_no_vehicle_share",
+        "static_flood_10pct_share",
+        "static_flood_1pct_share",
+        "wx_precip_mm",
+        "wx_snowfall_mm",
+        "wx_tmax_c",
+        "wx_tmin_c",
+        "wx_gust_max_ms",
+        "tide_pred_max_m"
+      ]
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "pattern": "^gs://boston-resilience-twin-data/(forecasts/\\d{4}-\\d{2}-\\d{2}\\.parquet|monitoring/\\d{4}-\\d{2}-\\d{2}\\.json|dvc/files/md5/[0-9a-f]{2}/[0-9a-f]{30})$"
+        },
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "row": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "unit": {
+                  "$ref": "#/$defs/unit"
+                },
+                "date": {
+                  "$ref": "#/$defs/date"
+                }
+              },
+              "required": [
+                "unit",
+                "date"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "file",
+        "field",
+        "row"
+      ],
+      "additionalProperties": false
+    },
+    "metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "number"
+            },
+            "reason": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "null"
+            },
+            "reason": {
+              "enum": [
+                "insufficient data",
+                "no data",
+                "undefined"
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ratio_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "reason": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "null"
+            },
+            "reason": {
+              "enum": [
+                "insufficient data",
+                "no data",
+                "undefined"
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

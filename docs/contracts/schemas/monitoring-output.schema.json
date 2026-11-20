@@ -1,0 +1,309 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "monitoring output",
+  "description": "monitoring/<date>.json (monitoring/v1): graded windows, fairness over 30 days, drift.",
+  "type": "object",
+  "properties": {
+    "contract": {
+      "const": "monitoring/v1"
+    },
+    "date": {
+      "$ref": "#/$defs/date"
+    },
+    "model_version": {
+      "$ref": "#/$defs/model_version"
+    },
+    "data_version": {
+      "$ref": "#/$defs/sha"
+    },
+    "windows": {
+      "type": "object",
+      "properties": {
+        "7d": {
+          "$ref": "#/$defs/window"
+        },
+        "30d": {
+          "$ref": "#/$defs/window"
+        }
+      },
+      "required": [
+        "7d",
+        "30d"
+      ],
+      "additionalProperties": false
+    },
+    "fairness": {
+      "type": "object",
+      "properties": {
+        "groups": {
+          "type": "object",
+          "properties": {
+            "higher": {
+              "$ref": "#/$defs/group"
+            },
+            "lower": {
+              "$ref": "#/$defs/group"
+            }
+          },
+          "required": [
+            "higher",
+            "lower"
+          ],
+          "additionalProperties": false
+        },
+        "gap": {
+          "$ref": "#/$defs/ratio_metric"
+        }
+      },
+      "required": [
+        "groups",
+        "gap"
+      ],
+      "additionalProperties": false
+    },
+    "drift": {
+      "type": "object",
+      "properties": {
+        "share": {
+          "$ref": "#/$defs/ratio_metric"
+        },
+        "drifted_features": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/feature"
+          }
+        },
+        "prediction_drift": {
+          "type": "object",
+          "properties": {
+            "detected": {
+              "type": "boolean"
+            },
+            "score": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "method": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "detected",
+            "score",
+            "method"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "share",
+        "drifted_features",
+        "prediction_drift"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "contract",
+    "date",
+    "model_version",
+    "data_version",
+    "windows",
+    "fairness",
+    "drift"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "date": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "model_version": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "window": {
+      "type": "object",
+      "properties": {
+        "positives": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tp": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fp": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "f1": {
+          "$ref": "#/$defs/ratio_metric"
+        },
+        "precision": {
+          "$ref": "#/$defs/ratio_metric"
+        },
+        "recall": {
+          "$ref": "#/$defs/ratio_metric"
+        }
+      },
+      "required": [
+        "positives",
+        "tp",
+        "fp",
+        "fn",
+        "f1",
+        "precision",
+        "recall"
+      ],
+      "additionalProperties": false
+    },
+    "group": {
+      "type": "object",
+      "properties": {
+        "positives": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recall": {
+          "$ref": "#/$defs/ratio_metric"
+        }
+      },
+      "required": [
+        "positives",
+        "recall"
+      ],
+      "additionalProperties": false
+    },
+    "feature": {
+      "enum": [
+        "day_of_week",
+        "month",
+        "day_of_year",
+        "snow_ice_rel_last",
+        "snow_ice_rel3",
+        "snow_ice_rel7",
+        "snow_ice_rel28",
+        "tree_rel_last",
+        "tree_rel3",
+        "tree_rel7",
+        "tree_rel28",
+        "alert_snow_ice_count",
+        "alert_snow_ice_warning",
+        "alert_tree_count",
+        "alert_tree_warning",
+        "alert_flooding_count",
+        "alert_flooding_warning",
+        "static_population",
+        "static_land_sqmi",
+        "static_density",
+        "static_poverty_share",
+        "static_older_adult_share",
+        "static_no_vehicle_share",
+        "static_flood_10pct_share",
+        "static_flood_1pct_share",
+        "wx_precip_mm",
+        "wx_snowfall_mm",
+        "wx_tmax_c",
+        "wx_tmin_c",
+        "wx_gust_max_ms",
+        "tide_pred_max_m"
+      ]
+    },
+    "metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "number"
+            },
+            "reason": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "null"
+            },
+            "reason": {
+              "enum": [
+                "insufficient data",
+                "no data",
+                "undefined"
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ratio_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "reason": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "null"
+            },
+            "reason": {
+              "enum": [
+                "insufficient data",
+                "no data",
+                "undefined"
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}
