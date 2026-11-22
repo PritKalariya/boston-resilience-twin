@@ -45,6 +45,9 @@ pyogrio==0.13.0
 pyproj==3.8.0
 pytest==9.1.1
 pytest-cov==7.1.0
+# Runs the tests on every CPU (#165); it brings execnet.
+pytest-xdist==3.8.0
+execnet==2.1.2
 # SHAP values of the selected model (#113). It brings slicer, and cloudpickle and
 # tqdm, which the constraints file pins.
 shap==0.54.1

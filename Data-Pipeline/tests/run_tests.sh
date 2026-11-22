@@ -29,11 +29,30 @@ if [ "$#" -gt 0 ]; then
 fi
 
 # No arguments: the full suite, then a 70 percent bar for each scripts folder on its own (#112).
+# BRT_TEST_SUITES names the component folders to test (default both); CI sets it from
+# .github/scripts/test_scope.py on a pull request (#165), and an empty value tests nothing.
+# Each folder's bar is checked only when its tests ran. The tests run in parallel
+# (pytest-xdist, #165); pytest-cov merges the workers' coverage before the bars read it.
+# BRT_TEST_WORKERS sets the worker count (default auto, one per CPU; 0 runs in one process).
+suites="${BRT_TEST_SUITES-Data-Pipeline Model-Development}"
+if [ -z "$suites" ]; then
+  echo "No test input changed (BRT_TEST_SUITES is empty): no tests to run."
+  exit 0
+fi
+tests=()
+cov=()
+for suite in $suites; do
+  case "$suite" in
+    Data-Pipeline|Model-Development) tests+=("$suite/tests"); cov+=("--cov=$suite/scripts") ;;
+    *) echo "Unknown suite in BRT_TEST_SUITES: $suite" >&2; exit 2 ;;
+  esac
+done
+echo "Testing: $suites"
 status=0
-python -m pytest -p no:cacheprovider --cov --cov-fail-under=0 --cov-report=term-missing \
-  Data-Pipeline/tests Model-Development/tests || status=$?
-for folder in Data-Pipeline/scripts Model-Development/scripts; do
-  echo "Coverage bar (70 percent) for $folder"
-  python -m coverage report --include="$folder/*" --fail-under=70 --skip-covered || status=1
+python -m pytest -p no:cacheprovider -n "${BRT_TEST_WORKERS:-auto}" \
+  "${cov[@]}" --cov-fail-under=0 --cov-report=term-missing "${tests[@]}" || status=$?
+for suite in $suites; do
+  echo "Coverage bar (70 percent) for $suite/scripts"
+  python -m coverage report --include="$suite/scripts/*" --fail-under=70 --skip-covered || status=1
 done
 exit "$status"
