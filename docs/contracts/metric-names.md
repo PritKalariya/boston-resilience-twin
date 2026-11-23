@@ -10,7 +10,7 @@ Cloud Monitoring in project 1. Every metric type is the prefix `custom.googleapi
 
 ## Producer
 
-#169 (the monitoring workflow, in #163's scheduled workflow) writes every metric, `forecast_freshness_hours` included.
+#169 (the monitoring workflow, in #163's scheduled workflow) writes every metric, `forecast_freshness_hours` included. The metrics are written as `ci-writer`, which needs `roles/monitoring.metricWriter` on project 1, granted under #169.
 
 ## Consumers
 
