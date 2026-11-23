@@ -431,7 +431,8 @@ fails with `NetworkBlocked`. The job is cancelled after 15 minutes.
 
 What keeps it fast (#165):
 
-- **Parallel tests.** `run_tests.sh` runs pytest with one worker per CPU, and the
+- **Parallel tests.** `run_tests.sh` runs pytest with one worker per logical CPU
+  (`--dist worksteal`, so an idle worker takes tests queued for a busy one), and the
   test service gives each worker one OpenMP and BLAS thread (`OMP_NUM_THREADS=1`
   and the like in `docker-compose.yaml`), so model fits in different workers do not
   fight over the CPUs. Coverage uses Python 3.12's `sys.monitoring`
@@ -452,8 +453,10 @@ What keeps it fast (#165):
   `test_ci_scope.py` fails when one folder starts reading a file of the other
   that `READS_FROM_OTHER` does not list: add the path there.
 
-The image is built from scratch on every run (about 51 s: the base image pull,
-apt and pip), not from a layer cache. On PR #194 (run 45070449553) a GitHub
+The image is built from scratch on every run (about 50 to 80 s: the base image
+pull, apt and pip), in the background from the start of the job while lint and
+the `dvc.lock` check run, and the test step waits for it. It is not built from a
+layer cache. On PR #194 (run 45070449553) a GitHub
 Actions layer cache made the build slower: 173 s with an empty cache and 69 s
 with a warm one, because loading the 2 GB image into Docker took 45 s on its
 own. Revisit if the image gets much smaller or the pip step much longer.
