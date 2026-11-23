@@ -381,8 +381,8 @@ BRT_TEST_WORKERS=0 docker compose run --rm --build test                  # one p
 ```
 
 `BRT_TEST_SUITES` takes `Data-Pipeline`, `Model-Development` or both (the default); empty
-runs no tests. `BRT_TEST_WORKERS` takes a number of pytest workers or `auto` (the default,
-one per CPU).
+runs no tests. `BRT_TEST_WORKERS` takes a number of pytest workers, `logical` (the default,
+one per logical CPU) or `auto` (one per physical core: 2 on CI's 4-vCPU runner).
 
 The `test` service in `docker-compose.yaml` starts nothing else and is not part
 of `docker compose up`. It gets no `.env`, no keys, no database and no network,
@@ -431,12 +431,6 @@ fails with `NetworkBlocked`. The job is cancelled after 15 minutes.
 
 What keeps it fast (#165):
 
-- **Cached image layers.** The image is built with `docker/build-push-action`,
-  which saves its layers to the GitHub Actions cache (scope `brt-airflow`) and
-  reads them back on the next run, so the apt and pip layers are rebuilt only
-  when `airflow.Dockerfile` or `Data-Pipeline/requirements.txt` changes. The
-  test step then runs `docker compose run --rm test` on that image, without
-  `--build`.
 - **Parallel tests.** `run_tests.sh` runs pytest with one worker per CPU, and the
   test service gives each worker one OpenMP and BLAS thread (`OMP_NUM_THREADS=1`
   and the like in `docker-compose.yaml`), so model fits in different workers do not
@@ -458,6 +452,12 @@ What keeps it fast (#165):
   `test_ci_scope.py` fails when one folder starts reading a file of the other
   that `READS_FROM_OTHER` does not list: add the path there.
 
+The image is built from scratch on every run (about 51 s: the base image pull,
+apt and pip), not from a layer cache. On PR #194 (run 45070449553) a GitHub
+Actions layer cache made the build slower: 173 s with an empty cache and 69 s
+with a warm one, because loading the 2 GB image into Docker took 45 s on its
+own. Revisit if the image gets much smaller or the pip step much longer.
+
 The `Terraform fmt and validate` jobs, one per root (`Deployment/terraform`,
 `Deployment/terraform-project2`), run `terraform fmt -check -diff`, then
 `terraform init -backend=false` and `terraform validate` with Terraform 1.16.4.
@@ -467,11 +467,6 @@ no time to it.
 
 - **`terraform fmt -check` fails.** Run `terraform fmt` in that root and commit
   the result.
-- **A cache miss on every run.** The build step's log shows `importing cache
-  manifest` with an error, or no `CACHED` layers. The cache is per branch, and a
-  pull request also reads main's; after a change to `Data-Pipeline/requirements.txt`
-  the first run rebuilds the pip layer and saves it. GitHub evicts caches unused for
-  7 days or past the repository's 10 GB, so the first run after that rebuilds too.
 
 Run the same checks locally before pushing:
 

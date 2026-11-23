@@ -6,10 +6,9 @@
 # tests/conftest.py blocks network access so tests use fixture files only. The
 # job name is the required status check on main (runbook, "CI").
 #
-# Speed (#165): the image build reuses its layers from the GitHub Actions cache,
-# the tests run in parallel (run_tests.sh), and a pull request tests only the
-# component folders its changes reach (.github/scripts/test_scope.py). Main, and a
-# change to any shared file, still runs every test with both coverage bars. The
+# Speed (#165): the tests run in parallel (run_tests.sh), and a pull request tests
+# only the component folders its changes reach (.github/scripts/test_scope.py). Main,
+# and a change to any shared file, still runs every test with both coverage bars. The
 # Terraform job checks both roots' format and syntax with no cloud calls.
 
 name: CI
@@ -30,7 +29,6 @@ jobs:
   lint-and-test:
     name: Lint and test (Python 3.12)
     runs-on: ubuntu-24.04
-    # A cold image cache adds about a minute to the build.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,31 +77,17 @@ jobs:
         if: steps.scope.outputs.suites == ''
         run: echo "No file the tests can see changed, so no tests run (.github/scripts/test_scope.py)."
 
-      # The same image as `docker compose build test` (brt-airflow:local from airflow.Dockerfile),
-      # built with its layers saved to and read from the GitHub Actions cache, so an unchanged
-      # Data-Pipeline/requirements.txt reuses the apt and pip layers instead of rebuilding them.
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-        if: steps.scope.outputs.suites != ''
-
-      - name: Build the Airflow image (cached layers)
-        if: steps.scope.outputs.suites != ''
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: airflow.Dockerfile
-          tags: brt-airflow:local
-          load: true
-          cache-from: type=gha,scope=brt-airflow
-          cache-to: type=gha,mode=max,scope=brt-airflow
-
-      # The README and runbook command, on the image built above: prints the Python version
-      # and stops unless it is 3.12, then runs the chosen folders' tests in parallel and fails
-      # below the coverage bar in .coveragerc for each folder that ran.
+      # The README and runbook command: builds the Airflow image (airflow.Dockerfile), prints
+      # the Python version and stops unless it is 3.12, then runs the chosen folders' tests in
+      # parallel and fails below the coverage bar in .coveragerc for each folder that ran.
+      # The build is not cached across runs: on PR #194 a GitHub Actions layer cache made it
+      # slower (69 s warm against 51 s from scratch), since loading the 2 GB image into Docker
+      # cost 45 s (runbook, "CI").
       - name: Test (Airflow image, Python 3.12, coverage)
         if: steps.scope.outputs.suites != ''
         env:
           BRT_TEST_SUITES: ${{ steps.scope.outputs.suites }}
-        run: docker compose run --rm test
+        run: docker compose run --rm --build test
 
   # terraform fmt and validate for both roots (#165): init skips the backend, so no state
   # is read and no Google credential is needed; it downloads the providers only.
