@@ -122,3 +122,5 @@ def test_every_cross_folder_read_is_listed(component, other):
         f"{component} reads {missing} from {other}; add them to READS_FROM_OTHER['{component}'] "
         "in .github/scripts/test_scope.py so a change there runs its tests"
     )
+
+# Timing run for PR #194 (#165): a one-folder change. Do not merge.
