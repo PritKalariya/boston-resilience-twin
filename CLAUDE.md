@@ -69,8 +69,8 @@ Deployment Dec 6. Expo requirements Dec 7, 11:59am. Expo Dec 8.
 
 ## Commands
 Commands live in the READMEs and the runbook, not here. Use only commands documented there; do not guess. Add a new command to its component README or runbook section, in the PR that introduces it. Rules that hold for every command:
-- Tests and lint are what CI runs: `docker compose run --rm --build test` (Python 3.12, the DAG tests included) and `ruff check .` with ruff 0.17.2.
-- Coverage: 70 percent line coverage per component folder, each on its own (`.coveragerc`, `run_tests.sh`). A new component gets its own bar and its own CI job, per #159's pattern.
+- Tests and lint are what CI runs: `docker compose run --rm --build test` (Python 3.12, the DAG tests included), the contract tests `docker compose run --rm test docs/contracts/tests --no-cov`, and `ruff check .` with ruff 0.17.2. The required check is the `ci` job, which passes only when every other job in `ci.yml` passed.
+- Coverage: 70 percent line coverage per component folder, each on its own (`.coveragerc`, `run_tests.sh`). A new component copies `.github/component-template/`, adds a caller job of `.github/workflows/component-ci.yml` to `ci.yml` and adds that job to the `ci` job's `needs`; the bar is fixed at 70 in `component-ci.yml`. See the runbook's CI section.
 - A new package in `Data-Pipeline/requirements.txt` takes the Airflow 3.3.2 constraints file's version; with none there, pin the version the tests passed on. A package in both `Data-Pipeline/requirements.txt` and `Model-Development/requirements.txt` keeps the same pin (`test_steps_requirements.py` checks).
 - Never a bare `dvc pull` for model work (about 2.26 GB): pull only the two data files the model workflow reads. In DAGs and scripts use `python Data-Pipeline/scripts/dvc_push.py`, never bare `dvc push`.
 - `Data-Pipeline/dvc.yaml` is generated: after changing a step run `python Data-Pipeline/scripts/dvc_stages.py`.
