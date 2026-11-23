@@ -269,7 +269,7 @@ terraform output                                 # the six values below
 | Custom role | `modelRegistrar` | The five permissions above |
 | Budget | `boston-resilience-twin-p2 credit`, $50 | Four alert rules (above) |
 | Vertex AI service agent grant | `artifactregistry.reader` on `brt-images` for `service-570429679915@gcp-sa-aiplatform.iam.gserviceaccount.com` | The image check at upload (#153) |
-| Teammate access | `roles/editor` and `roles/resourcemanager.projectIamAdmin` | For the members in `project_admins` (Prit), in place of `roles/owner`, which cannot be granted through the API to an account outside the project's organization |
+| Teammate access | `roles/editor`, `roles/resourcemanager.projectIamAdmin`, `roles/run.admin` and `roles/iam.serviceAccountAdmin` | For the members in `project_admins` (Prit), in place of `roles/owner`, which cannot be granted through the API to an account outside the project's organization; the last two set IAM on Cloud Run services and service accounts for Deployment (ADR-036) |
 
 Who can do what in project 2:
 
@@ -278,6 +278,7 @@ Who can do what in project 2:
 | `ci-reader@boston-resilience-twin-p2.iam.gserviceaccount.com` | Any run of the repository (`model.yml` on pull requests and branches) | None in project 2; `storage.objectViewer` on project 1's `boston-resilience-twin-data` |
 | `ci-writer@boston-resilience-twin-p2.iam.gserviceaccount.com` | Runs on main only (`model.yml` on main) | `modelRegistrar`; `artifactregistry.writer` on `brt-images` only; `storage.objectCreator` and `storage.objectViewer` on the model bucket; the same project 1 read |
 | `service-570429679915@gcp-sa-aiplatform.iam.gserviceaccount.com` (Vertex AI service agent, created by Google) | Vertex AI itself, at `models:upload` | Its default role; `artifactregistry.reader` on `brt-images` only |
+| Members of `project_admins` (Prit) | People who plan, apply and debug CI in project 2 | `roles/editor`, `roles/resourcemanager.projectIamAdmin`, `roles/run.admin`, `roles/iam.serviceAccountAdmin` (ADR-030, ADR-036); no billing account role |
 
 **Where results live.** `terraform output` on main printed:
 

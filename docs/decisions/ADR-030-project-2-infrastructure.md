@@ -1,6 +1,6 @@
 # ADR-030: Project 2 infrastructure provisioned by Terraform, with two keyless CI identities
 
-- Status: accepted
+- Status: accepted; Teammate access amended by [ADR-036](ADR-036-project-2-deployment-admin-roles.md)
 - Date: 2026-11-06
 - Owner: Kirtan10
 - Phase: model
