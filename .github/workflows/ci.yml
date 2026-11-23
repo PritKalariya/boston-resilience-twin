@@ -37,6 +37,36 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # Which component folders to test: on a pull request, the ones its changes reach
+      # (empty when no test input changed); on main, all of them. First, so the image build
+      # can start before lint. The runner's own python3 is enough: the script needs git only.
+      - name: Which tests to run
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            python3 .github/scripts/test_scope.py --base "$BASE" --head "$HEAD" --github-output
+          else
+            python3 .github/scripts/test_scope.py --all --github-output
+          fi
+
+      - name: No test input changed
+        if: steps.scope.outputs.suites == ''
+        run: echo "No file the tests can see changed, so no tests run (.github/scripts/test_scope.py)."
+
+      # The image build (airflow.Dockerfile, as `docker compose build test`) runs in the
+      # background while Python, lint and the lock check run, and the test step waits for it.
+      # The build is not cached across runs: on PR #194 a GitHub Actions layer cache made it
+      # slower (69 s warm against 51 s from scratch), since loading the 2 GB image into Docker
+      # cost 45 s (runbook, "CI").
+      - name: Start the image build
+        if: steps.scope.outputs.suites != ''
+        run: |
+          nohup sh -c 'docker compose build test > "$RUNNER_TEMP/build.log" 2>&1; echo $? > "$RUNNER_TEMP/build.rc"' > /dev/null 2>&1 &
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: .python-version
@@ -58,36 +88,21 @@ jobs:
           pip install PyYAML==6.0.3
           python Model-Development/scripts/lock_check.py
 
-      # Which component folders to test: on a pull request, the ones its changes reach
-      # (empty when no test input changed); on main, all of them.
-      - name: Which tests to run
-        id: scope
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
+      - name: Wait for the image build
+        if: steps.scope.outputs.suites != ''
         run: |
-          if [ "$EVENT" = "pull_request" ]; then
-            python .github/scripts/test_scope.py --base "$BASE" --head "$HEAD" --github-output
-          else
-            python .github/scripts/test_scope.py --all --github-output
-          fi
+          while [ ! -f "$RUNNER_TEMP/build.rc" ]; do sleep 1; done
+          cat "$RUNNER_TEMP/build.log"
+          exit "$(cat "$RUNNER_TEMP/build.rc")"
 
-      - name: No test input changed
-        if: steps.scope.outputs.suites == ''
-        run: echo "No file the tests can see changed, so no tests run (.github/scripts/test_scope.py)."
-
-      # The README and runbook command: builds the Airflow image (airflow.Dockerfile), prints
-      # the Python version and stops unless it is 3.12, then runs the chosen folders' tests in
+      # The README and runbook command on the image just built (so no --build): prints the
+      # Python version and stops unless it is 3.12, then runs the chosen folders' tests in
       # parallel and fails below the coverage bar in .coveragerc for each folder that ran.
-      # The build is not cached across runs: on PR #194 a GitHub Actions layer cache made it
-      # slower (69 s warm against 51 s from scratch), since loading the 2 GB image into Docker
-      # cost 45 s (runbook, "CI").
       - name: Test (Airflow image, Python 3.12, coverage)
         if: steps.scope.outputs.suites != ''
         env:
           BRT_TEST_SUITES: ${{ steps.scope.outputs.suites }}
-        run: docker compose run --rm --build test
+        run: docker compose run --rm test
 
   # terraform fmt and validate for both roots (#165): init skips the backend, so no state
   # is read and no Google credential is needed; it downloads the providers only.

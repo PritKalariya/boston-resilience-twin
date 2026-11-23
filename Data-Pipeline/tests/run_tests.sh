@@ -35,6 +35,8 @@ fi
 # (pytest-xdist, #165); pytest-cov merges the workers' coverage before the bars read it.
 # BRT_TEST_WORKERS sets the worker count (default logical, one per logical CPU; 0 runs in one
 # process). Not auto: with psutil installed it counts physical cores, 2 on CI's 4-vCPU runner.
+# --dist worksteal lets an idle worker take tests queued for a busy one, so one slow file does
+# not hold up the end of the run.
 suites="${BRT_TEST_SUITES-Data-Pipeline Model-Development}"
 if [ -z "$suites" ]; then
   echo "No test input changed (BRT_TEST_SUITES is empty): no tests to run."
@@ -50,7 +52,7 @@ for suite in $suites; do
 done
 echo "Testing: $suites"
 status=0
-python -m pytest -p no:cacheprovider -n "${BRT_TEST_WORKERS:-logical}" \
+python -m pytest -p no:cacheprovider -n "${BRT_TEST_WORKERS:-logical}" --dist worksteal \
   "${cov[@]}" --cov-fail-under=0 --cov-report=term-missing "${tests[@]}" || status=$?
 for suite in $suites; do
   echo "Coverage bar (70 percent) for $suite/scripts"
