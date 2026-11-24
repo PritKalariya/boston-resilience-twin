@@ -40,6 +40,16 @@ Speed (#37): the DAG parses the legacy years side by side, one parse_legacy_311
 task per year and at most LEGACY_PARALLEL at once, then merge_legacy_311 joins
 them with legacy_311.read_years' rule, so the joined table is the same as one
 parse of all the years.
+
+The as-of date (#160): every step of a run reads one date, DateRange.as_of, the
+Boston date the run forecasts from (tomorrow is as_of + 1). The DAG fixes it
+from the run's run_after, the moment the run was triggered or scheduled, so a
+run that starts at 18:05 and finishes after UTC midnight keeps one date; conf
+can pass another. The downloads, the feature readers and the processed checks
+take it as --as-of instead of reading the clock. A run is an evening run when
+it was triggered at or after that date's forecast cutoff (18:00 Boston,
+labels_features.csv): only then does ingest_alert_history check the pull
+against the NWS snapshot (ADR-014) and forecast_rows write tomorrow's rows.
 """
 
 from __future__ import annotations
@@ -53,13 +63,15 @@ import sys
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time as clock_time, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 REPO = Path(__file__).resolve().parents[2]  # /opt/airflow/repo in the Airflow containers
 FIRST_DAY = date(2015, 1, 1)  # first day of the training years (train 2015 to 2023)
 LEGACY_YEARS = range(2015, 2027)  # yearly legacy 311 files, as in legacy_311.py
-PARAMS = ("start", "end")
+PARAMS = ("start", "end", "as_of")
+BOSTON = ZoneInfo("America/New_York")
 
 log = logging.getLogger(__name__)
 
@@ -85,6 +97,7 @@ SCRIPTS = {
     "ingest_open_meteo": "open_meteo",
     "ingest_legacy_311": "ingest_311",
     "ingest_new_311": "ingest_311",
+    "forecast_rows": "forecast_rows",
 }
 # Task id -> the issue that builds it; a placeholder in the DAG until then.
 PLANNED: dict[str, str] = {}
@@ -146,27 +159,55 @@ def parse_day(value, name: str) -> date | None:
         raise ValueError(f"{name} must be a date like 2025-01-31, got {value!r}") from None
 
 
+def boston_date(moment: datetime) -> date:
+    """The Boston date of a moment, which must carry its time zone."""
+    if moment.tzinfo is None:
+        raise ValueError(f"{moment} has no time zone")
+    return moment.astimezone(BOSTON).date()
+
+
+def forecast_cutoff(as_of: date, root: Path = REPO) -> datetime:
+    """The forecast cutoff on the evening of as_of: forecast_cutoff_local in labels_features.csv, Boston time."""
+    settings = root / "Data-Pipeline" / "config" / "labels_features.csv"
+    with settings.open(newline="", encoding="utf-8-sig") as f:
+        value = next((row["value"].strip() for row in csv.DictReader(f) if row["setting"].strip() == "forecast_cutoff_local"), None)
+    if value is None:
+        raise ValueError(f"{settings} has no forecast_cutoff_local row")
+    return datetime.combine(as_of, clock_time.fromisoformat(value), BOSTON)
+
+
+def is_evening(run_after: datetime, as_of: date, root: Path = REPO) -> bool:
+    """Whether a run triggered at run_after is the evening run of as_of: triggered at or after its cutoff."""
+    return run_after >= forecast_cutoff(as_of, root)
+
+
 @dataclass(frozen=True)
 class DateRange:
-    """The days a run covers, both ends inclusive. end None: through the latest data."""
+    """The days a run covers, both ends inclusive (end None: through the latest data), the as-of date
+    every step reads, and whether the run is an evening run (module docstring)."""
 
     start: date = FIRST_DAY
     end: date | None = None
+    as_of: date | None = None
+    evening: bool = False
 
     @classmethod
-    def from_params(cls, params: Mapping) -> DateRange:
+    def from_params(cls, params: Mapping, run_after: datetime | None = None) -> DateRange:
         """A range from the DAG params, checked: no unknown key, start on or after FIRST_DAY, end not before
-        start, and at least one legacy year."""
+        start, and at least one legacy year. as_of is the param when set, else the Boston date of run_after."""
         unknown = set(params) - set(PARAMS)
         if unknown:
-            raise ValueError(f"unknown params {sorted(unknown)}; the DAG takes {' and '.join(PARAMS)}")
+            raise ValueError(f"unknown params {sorted(unknown)}; the DAG takes {', '.join(PARAMS)}")
         start = parse_day(params.get("start"), "start") or FIRST_DAY
         end = parse_day(params.get("end"), "end")
+        as_of = parse_day(params.get("as_of"), "as_of") or (boston_date(run_after) if run_after else None)
         if start < FIRST_DAY:
             raise ValueError(f"start {start} is before {FIRST_DAY}, the first training day")
         if end is not None and end < start:
             raise ValueError(f"end {end} is before start {start}")
-        days = cls(start, end)
+        if as_of is not None and as_of < FIRST_DAY:
+            raise ValueError(f"as_of {as_of} is before {FIRST_DAY}, the first training day")
+        days = cls(start, end, as_of)
         if not days.legacy_years:
             raise ValueError(
                 f"no legacy 311 file in {days.label}; the files cover {LEGACY_YEARS[0]} to {LEGACY_YEARS[-1]}"
@@ -233,6 +274,7 @@ class StepPlan:
     files: StepFiles
     hint: str
     refetch: Path | None = None
+    skip: str = ""  # why this run does not run the step; it logs the reason and succeeds
     env: tuple[str, ...] = ()  # credentials the script needs (#4), checked before it runs
     keep_outputs: bool = False
     # For the dvc.yaml stages (#18): folders the step adds to and keeps between runs
@@ -269,6 +311,7 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
     paths = run_paths(days, root)
     raw, interim = paths.raw, paths.interim
     config = root / "Data-Pipeline" / "config"
+    as_of = ["--as-of", days.as_of] if days.as_of else []
     if step in ("ingest_legacy_311", "ingest_new_311"):
         # The downloads and their schedule state are the same for every range;
         # only the new-system parquet goes to the run's folder.
@@ -345,24 +388,28 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
     if step == "daily_counts":
         located, out = interim / "311_located.parquet", paths.processed / "daily_counts.parquet"
         hoods, processing = interim / "static" / "neighborhoods_by_tract20.parquet", config / "processing.csv"
+        switches = interim / "change-points.csv"  # combine_311's switch dates set where the counts end
         end = ["--end", days.end] if days.end else []
         return StepPlan(
             args=["--located", located, "--neighborhoods", hoods, "--config", processing,
-                  "--start", days.start, *end, "--out", out],
-            files=StepFiles(data_in=[located], config_in=[hoods, processing], data_out=[out]),
+                  "--change-points", switches, "--start", days.start, *end, "--out", out],
+            files=StepFiles(data_in=[located], config_in=[hoods, processing, switches], data_out=[out]),
             hint="Run spatial_join for the same range first.",
         )
     if step == "ingest_alert_history":
         # #16, ADR-014: one IEM bulk pull per year for office BOX into the shared raw folder; the
         # prepared alerts cover every year whatever the range, since the features need the history.
         # When each year was pulled goes to data/state/, like the #7 and #8 manifests.
+        # An evening run (#160) also checks the pull against ingest_nws_alerts' snapshot, taken after the
+        # cutoff, and fails before writing when a message the NWS sent before the cutoff is missing.
         raw_dir, alert_map = raw / "nws_alerts", root / "docs" / "data" / "alert-map.csv"
-        out = interim / "nws_alerts.parquet"
+        out, settings = interim / "nws_alerts.parquet", config / "labels_features.csv"
+        fresh = ["--check-nws", raw / "weather" / "nws_alerts", "--settings", settings] if days.evening else []
         return StepPlan(
             args=["--raw-dir", raw_dir, "--state-dir", raw.parent / "state" / "nws_alerts",
-                  "--map", alert_map, "--out", out, "--download"],
-            files=StepFiles(config_in=[alert_map], data_out=[out]),
-            hint="Restore docs/data/alert-map.csv from git.",
+                  "--map", alert_map, "--out", out, "--download", *as_of, *fresh],
+            files=StepFiles(config_in=[alert_map, *([settings] if days.evening else [])], data_out=[out]),
+            hint="Restore docs/data/alert-map.csv from git" + (" and run ingest_nws_alerts first." if days.evening else "."),
             refetch=raw_dir,
             keeps=(raw_dir,),
         )
@@ -387,7 +434,7 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
         return StepPlan(
             args=["--counts", counts, "--alerts", alerts, "--static-dir", static, "--settings", settings,
                   "--noaa-dir", noaa, "--forecast-dir", forecasts, "--tides-dir", tides,
-                  "--start", days.start, *end, "--out", out],
+                  "--start", days.start, *end, *as_of, "--out", out],
             files=StepFiles(data_in=[counts, alerts], config_in=[static, settings, noaa, forecasts, tides], data_out=[out]),
             hint="Run daily_counts for the full build, ingest_alert_history, ingest_static_layers, "
                  "ingest_noaa_logan, ingest_tides and ingest_open_meteo first.",
@@ -412,10 +459,11 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
         folder = {"ingest_noaa_logan": weather / "noaa_logan", "ingest_nws_forecasts": weather / "nws_forecasts",
                   "ingest_nws_alerts": weather / "nws_alerts", "ingest_tides": raw / "tides"}[step]
         args, env = {
-            "ingest_noaa_logan": (["--raw-dir", folder, "--state-dir", state / "weather" / "noaa_logan"], ("NOAA_CDO_TOKEN",)),
+            "ingest_noaa_logan": (["--raw-dir", folder, "--state-dir", state / "weather" / "noaa_logan", *as_of],
+                                  ("NOAA_CDO_TOKEN",)),
             "ingest_nws_forecasts": (["forecasts", "--raw-dir", folder], ("NWS_USER_AGENT",)),
             "ingest_nws_alerts": (["alerts", "--raw-dir", folder], ("NWS_USER_AGENT",)),
-            "ingest_tides": (["--raw-dir", folder, "--state-dir", state / "tides"], ()),
+            "ingest_tides": (["--raw-dir", folder, "--state-dir", state / "tides", *as_of], ()),
         }[step]
         return StepPlan(args=args, files=StepFiles(), hint='Team members: fill .env with the runbook command ("API keys in .env").',
                         env=env, keeps=(folder,))
@@ -427,7 +475,7 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
         sets, state = config / "open_meteo.csv", raw.parent / "state" / "open_meteo"
         return StepPlan(
             args=["--config", sets, "--raw-dir", raw / "open_meteo", "--state-dir", state,
-                  "--attribution", state / "open-meteo.csv"],
+                  "--attribution", state / "open-meteo.csv", *as_of, *(["--evening"] if days.evening else [])],
             files=StepFiles(config_in=[sets]),
             hint="Restore Data-Pipeline/config/open_meteo.csv from git.",
             keeps=(raw / "open_meteo",),
@@ -452,11 +500,32 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
         report = interim / "validation" / "processed.json"
         return StepPlan(
             args=["--stage", "processed", "--config", bounds, "--combined", combined, "--located", located,
-                  "--neighborhoods", hoods, *(["--latest", days.end.isoformat()] if days.end else []),
+                  "--neighborhoods", hoods, *(["--latest", (days.end or days.as_of).isoformat()] if days.end or days.as_of else []),
                   "--out", report],
             files=StepFiles(data_in=[combined, located], config_in=[bounds, hoods]),
             hint="Run spatial_join and ingest_static_layers for the same range first.",
             writes_too=(report,),
+        )
+    if step == "forecast_rows":
+        # #160: tomorrow's rows, from the full build's counts and the evening's downloads, to
+        # data/forecast/<as_of>/ for the scoring step (D8). Only an evening run of the full build writes them.
+        full = run_paths(DateRange(), root)
+        counts, alerts, static = full.processed / "daily_counts.parquet", full.interim / "nws_alerts.parquet", full.interim / "static"
+        settings, gfs = config / "labels_features.csv", raw / "open_meteo" / "day_before_ncep_gfs_global"
+        noaa, tides = raw / "weather" / "noaa_logan", raw / "tides" / "predicted"
+        gfs_state = raw.parent / "state" / "open_meteo" / "day_before_ncep_gfs_global"
+        out = forecast_path(days.as_of, root) if days.as_of else root / "Data-Pipeline" / "data" / "forecast"
+        skip = ("" if days.evening and days.is_full else
+                f"{days.label} is not an evening run of the full build, so tomorrow's rows are not written")
+        return StepPlan(
+            args=["--counts", counts, "--alerts", alerts, "--static-dir", static, "--settings", settings,
+                  "--noaa-dir", noaa, "--forecast-dir", gfs, "--forecast-state", gfs_state, "--tides-dir", tides,
+                  *as_of, "--out", out],
+            files=StepFiles(data_in=[counts, alerts], config_in=[static, settings, noaa, gfs, gfs_state, tides],
+                            data_out=[out]),
+            hint="Run the full build's daily_counts, ingest_alert_history, ingest_open_meteo and ingest_tides "
+                 "for the same as-of date first.",
+            skip=skip,
         )
     # spatial_join (#14)
     combined, out = interim / "311_combined.parquet", interim / "311_located.parquet"
@@ -468,6 +537,11 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
         files=StepFiles(data_in=[combined], config_in=[tracts, hoods, placeholders], data_out=[out]),
         hint="Run combine_311 and ingest_static_layers for the same range first.",
     )
+
+
+def forecast_path(as_of: date, root: Path = REPO) -> Path:
+    """Where forecast_rows writes the rows for the day after as_of."""
+    return root / "Data-Pipeline" / "data" / "forecast" / as_of.isoformat() / "features.parquet"
 
 
 def script_args(step: str, days: DateRange, root: Path = REPO, year: int | None = None) -> list[str]:
@@ -619,7 +693,7 @@ LOCAL = {"merge_legacy_311": merge_legacy_years}
 
 def run_step(
     step: str, days: DateRange, root: Path = REPO, run_id: str = "manual", year: int | None = None
-) -> tuple[int | None, int]:
+) -> tuple[int | None, int | None]:
     """Run one real step and log its run id, rows in and rows out. Returns (rows in, rows out).
 
     With a year, parse_legacy_311 parses only that year (the DAG maps it over the
@@ -627,6 +701,10 @@ def run_step(
     """
     task = step if year is None else f"{step}[{year}]"
     plan = step_plan(step, days, root, year)
+    if plan.skip:
+        log.info("run %s task %s: skipped: %s", run_id, task, plan.skip)
+        log_task(run_id, task, None, None)
+        return None, None
     check_inputs(step, plan)
     started = time.monotonic()
     try:
@@ -659,12 +737,16 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run one daily_pipeline step for the full build (the dvc.yaml stages).")
     parser.add_argument("step", choices=sorted([*SCRIPTS, *LOCAL]))
     parser.add_argument("--year", type=int, help="parse_legacy_311 only: parse this legacy year into its own file")
+    parser.add_argument("--as-of", type=date.fromisoformat,
+                        help="the as-of date, YYYY-MM-DD in Boston; default: the Boston date when the stage starts")
     args = parser.parse_args(argv)
     if args.year is not None and (args.step != "parse_legacy_311" or args.year not in LEGACY_YEARS):
         parser.error(f"--year is for parse_legacy_311 only, one of {LEGACY_YEARS[0]} to {LEGACY_YEARS[-1]}")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     try:
-        run_step(args.step, DateRange(), year=args.year, run_id="dvc")
+        # BRT_AS_OF holds one date across the stages of a dvc repro, which each start their own process.
+        as_of = args.as_of or parse_day(os.environ.get("BRT_AS_OF"), "BRT_AS_OF") or boston_date(datetime.now(BOSTON))
+        run_step(args.step, DateRange(as_of=as_of), year=args.year, run_id="dvc")
     except InputError as e:
         sys.exit(str(e))
 

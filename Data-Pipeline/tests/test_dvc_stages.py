@@ -1,3 +1,4 @@
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -138,12 +139,17 @@ def test_paths_are_relative_to_data_pipeline():
 def test_the_command_line_runs_the_full_build_step(monkeypatch):
     calls = []
     monkeypatch.setattr(steps, "run_step", lambda step, days, **kw: calls.append((step, days, kw)))
-    steps.main(["parse_legacy_311", "--year", "2016"])
+    monkeypatch.delenv("BRT_AS_OF", raising=False)
+    steps.main(["parse_legacy_311", "--year", "2016", "--as-of", "2026-11-24"])
+    monkeypatch.setenv("BRT_AS_OF", "2026-11-23")  # one date for every stage of a dvc repro
     steps.main(["surge_labels"])
     assert calls == [
-        ("parse_legacy_311", steps.DateRange(), {"year": 2016, "run_id": "dvc"}),
-        ("surge_labels", steps.DateRange(), {"year": None, "run_id": "dvc"}),
+        ("parse_legacy_311", steps.DateRange(as_of=date(2026, 11, 24)), {"year": 2016, "run_id": "dvc"}),
+        ("surge_labels", steps.DateRange(as_of=date(2026, 11, 23)), {"year": None, "run_id": "dvc"}),
     ]
+    monkeypatch.delenv("BRT_AS_OF")
+    steps.main(["surge_labels"])  # neither: the Boston date when the stage starts
+    assert calls[-1][1].as_of == datetime.now(steps.BOSTON).date() and not calls[-1][1].evening
 
 
 @pytest.mark.parametrize("argv", [["surge_labels", "--year", "2016"], ["parse_legacy_311", "--year", "2014"], ["no_such_step"]])

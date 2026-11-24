@@ -149,11 +149,12 @@ def test_main_reports_what_it_stored_and_a_rerun_finds_the_closed_halves_final(t
     assert "  predicted/2015-H2.json: downloaded (2 hours)" in out
     assert {headers["User-Agent"] for headers in sent} == {tides.APPLICATION}
     tides.main(argv)
-    # Same day: both H1 files are final (observed was fetched 77 days after June 30), and so is
-    # the current predicted half, which already runs to today. Only observed H2 is fetched again.
+    # Same day: both H1 files are final (observed was fetched 77 days after June 30). Both H2 files
+    # are fetched again: observed is not settled, and predicted runs to as-of + 2, after its download.
     assert capsys.readouterr().out == (
-        "tides 8443970: 0 half-year files downloaded or updated, 3 final, 1 unchanged\n"
-        "  observed/2015-H2.json: unchanged (2 hours)\n")
+        "tides 8443970: 0 half-year files downloaded or updated, 2 final, 2 unchanged\n"
+        "  observed/2015-H2.json: unchanged (2 hours)\n"
+        "  predicted/2015-H2.json: unchanged (2 hours)\n")
 
 
 def test_an_answer_that_is_not_a_json_object_fails_and_stores_nothing(tmp_path):
@@ -177,3 +178,25 @@ def test_half_years_meet_at_midnight_gmt():
         tides.check_answer(predictions("2015-01-01 00:00", "2015-07-01 00:00"), "predictions", h1)
     with pytest.raises(rf.FetchError, match="outside"):
         tides.check_answer(predictions("2015-06-30 23:00", "2015-12-31 23:00"), "predictions", h2)
+
+
+def test_predictions_run_two_days_past_the_as_of_date_and_observations_stop_at_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(tides, "FIRST_DAY", date(2016, 6, 1))
+    fake = FakeCoops()
+    as_of = date(2016, 6, 29)  # tomorrow's Boston day ends at 04:00 UTC on 1 July, in the next half-year
+    tides.refresh(tmp_path / "raw", tmp_path / "state", fake, as_of, datetime(2016, 6, 29, 22, 30, tzinfo=timezone.utc))
+    ends = {(q["product"], q["begin_date"]): q["end_date"] for q in fake.calls}
+    assert ends == {("hourly_height", "20160601"): "20160629", ("predictions", "20160601"): "20160630",
+                    ("predictions", "20160701"): "20160701"}
+
+
+def test_the_command_line_takes_the_as_of_date(tmp_path, monkeypatch):
+    fake = FakeCoops()
+    monkeypatch.setattr(tides, "FIRST_DAY", date(2016, 6, 1))
+    monkeypatch.setattr(tides.rf, "get", lambda url, headers: fake(url))
+    monkeypatch.setattr(tides.rf, "utc_now", lambda: datetime(2016, 6, 11, 1, 0, tzinfo=timezone.utc))  # 21:00 EDT, 10 June
+    tides.main(["--raw-dir", str(tmp_path / "raw"), "--state-dir", str(tmp_path / "state")])
+    assert {q["end_date"] for q in fake.calls if q["product"] == "hourly_height"} == {"20160610"}  # Boston, not UTC
+    fake.calls.clear()
+    tides.main(["--raw-dir", str(tmp_path / "r2"), "--state-dir", str(tmp_path / "s2"), "--as-of", "2016-06-05"])
+    assert {q["end_date"] for q in fake.calls} == {"20160605", "20160607"}

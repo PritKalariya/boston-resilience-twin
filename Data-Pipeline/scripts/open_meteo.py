@@ -7,11 +7,23 @@ folder under data/raw/open_meteo/ with one JSON file per calendar year, byte
 for byte as the API returned it, and nothing else, so DVC sees a change only
 when a year file changes.
 
-A set ends where its `end` rule says. `yesterday` stops at 23:00 UTC of the day
-before the run, so no hour after the download is stored. `latest_values` stops
-at the last full day the model has values for (ERA5 runs about 5 days behind),
-found with one small request. A year already stored through its end is skipped
-without a request. A `yesterday` year whose last day came back with gaps in a
+A set ends where its `end` rule says, counted from the run's as-of date
+(--as-of, a Boston date; default: today in Boston), never from the clock (#160).
+`yesterday` stops at 23:00 UTC of the day before it. `latest_values` stops at
+the last full day the model has values for (ERA5 runs about 5 days behind),
+found with one small request. `tomorrow` stops at 23:00 UTC of as-of + 2, the
+UTC day in which tomorrow's Boston station day ends (05:00 UTC), so the evening
+run has every hour of tomorrow. Its newest hours are forecasts when they are
+stored: the Previous Runs API fills an hour whose day-before run has not started
+yet with the newest run, so a `tomorrow` file whose last day is as-of - 1 or
+later is downloaded again on every run, and once the day is over the stored
+hours are the archived values. The availability rule that picks which of them
+day D may use (open_meteo_forecast.py) is unchanged. With --evening (an evening
+run, after the cutoff) a `tomorrow` set also stores the answer for as-of to
+as-of + 2, byte for byte, in its state folder under evening/<as_of>.json, with a
+line in evening/_captures.jsonl, so forecast_parity.py can compare what the
+evening run saw with the archive once the day is over. A year already stored
+through its end is skipped without a request. A `yesterday` year whose last day came back with gaps in a
 value that has data stays marked incomplete and is fetched again: on every run
 for FINAL_DAY_RETRY_DAYS after that day, then every FINAL_DAY_RECHECK_DAYS until
 the gaps are filled. So a 31 December stored before Open-Meteo had all of it is
@@ -53,6 +65,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 log = logging.getLogger("open_meteo")
 
@@ -61,7 +74,9 @@ CONFIG_COLUMNS = [
     "name", "url", "model", "start", "end", "hourly", "place", "latitude", "longitude",
     "validation_test", "label", "credit", "credit_url",
 ]
-END_RULES = {"latest_values", "yesterday"}
+END_RULES = {"latest_values", "yesterday", "tomorrow"}
+EVENING = "evening"  # a tomorrow set's evening answers, in its state folder
+CAPTURES = "_captures.jsonl"
 SET_NAME = re.compile(r"[a-z0-9][a-z0-9_]*")
 API_NAME = re.compile(r"[a-z0-9_]+")
 TIMEZONE = "GMT"  # stored in UTC; #16 turns hours into Boston-local days
@@ -147,7 +162,7 @@ def read_config(path: Path | str, today: date | None = None) -> list[WeatherSet]
     if not rows:
         raise ValueError(f"{path.name} lists no sets")
 
-    today = today or datetime.now(timezone.utc).date()
+    today = today or boston_today()
     sets = []
     for line, row in enumerate(rows, start=2):
         # DictReader keeps fields beyond the header under the key None.
@@ -389,11 +404,19 @@ def latest_full_day(ws: WeatherSet, client, until: date) -> date | None:
     return None
 
 
-def set_end(ws: WeatherSet, client, now: datetime) -> date:
-    """Last day to store: yesterday in UTC, or the last full day the model has values for."""
-    yesterday = now.astimezone(timezone.utc).date() - timedelta(days=1)
+def boston_today(now: datetime | None = None) -> date:
+    """The Boston date of now (default: the clock), the as-of date when --as-of is not given."""
+    return (now or datetime.now(timezone.utc)).astimezone(ZoneInfo("America/New_York")).date()
+
+
+def set_end(ws: WeatherSet, client, as_of: date) -> date:
+    """Last day to store, from the as-of date: the day before it, as-of + 2 for `tomorrow`, or the last full
+    day the model has values for."""
+    yesterday = as_of - timedelta(days=1)
     if ws.end == "yesterday":
         return yesterday
+    if ws.end == "tomorrow":
+        return as_of + timedelta(days=2)
     end = latest_full_day(ws, client, yesterday)
     if end is None:
         raise ValueError(f"no full day with values in the {PROBE_DAYS} days up to {yesterday}")
@@ -560,8 +583,9 @@ def years_before_start(ws: WeatherSet, manifest: dict, force: bool) -> list[str]
     return sorted(name for name in manifest["files"] if int(name[:4]) < ws.start.year)
 
 
-def refresh_file(ws, folder, manifest, client, start, stop, now, force=False, dry_run=False) -> dict:
-    """Download one calendar year of a set, unless it is already stored through `stop`."""
+def refresh_file(ws, folder, manifest, client, start, stop, now, force=False, dry_run=False, as_of=None) -> dict:
+    """Download one calendar year of a set, unless it is already stored through `stop` (a `tomorrow`
+    year that reaches as_of - 1 never is: its last hours were forecasts when stored)."""
     name = f"{start.year}.json"
     target = folder / name
     state = manifest["files"].get(name, {})
@@ -574,6 +598,7 @@ def refresh_file(ws, folder, manifest, client, start, stop, now, force=False, dr
         and state.get("first_hour") == first
         and (state.get("last_hour") or "") >= last
         and not final_day_due(ws, state, now)
+        and not (ws.end == "tomorrow" and as_of is not None and stop >= as_of - timedelta(days=1))
         and state.get("sha256") == file_sha256(target)
     )
     if stored and not force:
@@ -597,11 +622,12 @@ def refresh_file(ws, folder, manifest, client, start, stop, now, force=False, dr
     same_bytes = existed and file_sha256(target) == digest
     if same_bytes and state.get("sha256") == digest and state.get("settings") == ws.settings() and state.get("url") == url:
         # Same bytes from the same request: the file stays as it is, and so does its
-        # entry, apart from the date an incomplete last day was last checked.
+        # entry, apart from when it was last fetched and when an incomplete last day was checked.
         result["action"] = "unchanged"
+        state["fetched_at"] = now.isoformat(timespec="seconds")
+        result["checked"] = True
         if not summary["final_day_complete"]:
             state["final_day_checked"] = today
-            result["checked"] = True
         return result
     if not same_bytes:
         write_atomic(target, body)
@@ -610,6 +636,7 @@ def refresh_file(ws, folder, manifest, client, start, stop, now, force=False, dr
         "settings": ws.settings(),
         "url": url,
         "downloaded_at": now.isoformat(timespec="seconds"),
+        "fetched_at": now.isoformat(timespec="seconds"),
         "bytes": len(body),
         "sha256": digest,
     }
@@ -619,8 +646,28 @@ def refresh_file(ws, folder, manifest, client, start, stop, now, force=False, dr
     return result
 
 
-def refresh_set(ws: WeatherSet, raw_root: Path, state_root: Path, client, now: datetime, force=False, dry_run=False) -> dict:
-    """Bring one set up to its end. Returns its record for _runs.jsonl."""
+def save_evening(ws: WeatherSet, state: Path, client, as_of: date, now: datetime) -> dict:
+    """Store a `tomorrow` set's answer for as_of to as_of + 2, as the evening run sees it, for forecast_parity.py.
+    A later run of the same evening replaces it; _captures.jsonl keeps a line per answer."""
+    stop = as_of + timedelta(days=2)
+    url = request_url(ws, as_of, stop)
+    body = client.get(url)
+    check_answer(body, ws, as_of, stop)
+    folder = state / EVENING
+    folder.mkdir(parents=True, exist_ok=True)
+    write_atomic(folder / f"{as_of.isoformat()}.json", body)
+    line = {"as_of": as_of.isoformat(), "fetched_at": now.isoformat(timespec="seconds"), "url": url,
+            "sha256": hashlib.sha256(body).hexdigest(), "by": "open_meteo.py"}
+    with open(folder / CAPTURES, "a", encoding="utf-8") as f:
+        f.write(json.dumps(line) + "\n")
+    return line
+
+
+def refresh_set(ws: WeatherSet, raw_root: Path, state_root: Path, client, now: datetime, force=False, dry_run=False,
+                as_of: date | None = None, evening: bool = False) -> dict:
+    """Bring one set up to its end from the as-of date (default: today in Boston). Returns its record for
+    _runs.jsonl."""
+    as_of = as_of or boston_today(now)
     folder, state = Path(raw_root) / ws.name, Path(state_root) / ws.name
     manifest = load_manifest(state, folder)
     stored = manifest.get("settings")
@@ -630,7 +677,7 @@ def refresh_set(ws: WeatherSet, raw_root: Path, state_root: Path, client, now: d
             "in the config, or rerun with --force to replace them"
         )
     dropped = years_before_start(ws, manifest, force)
-    end = set_end(ws, client, now)
+    end = set_end(ws, client, as_of)
     if not dry_run:
         folder.mkdir(parents=True, exist_ok=True)
         for stale in folder.glob(".*.part"):
@@ -647,7 +694,7 @@ def refresh_set(ws: WeatherSet, raw_root: Path, state_root: Path, client, now: d
     chunks = year_chunks(ws.start, end)
     for i, (start, stop) in enumerate(chunks):
         try:
-            result = refresh_file(ws, folder, manifest, client, start, stop, now, force, dry_run)
+            result = refresh_file(ws, folder, manifest, client, start, stop, now, force, dry_run, as_of)
         except RateLimited as exc:
             log.error("%s %s: %s; the run stops here", ws.name, start.year, exc)
             results.append({"file": f"{start.year}.json", "action": "failed", "reason": f"{type(exc).__name__}: {exc}"})
@@ -669,7 +716,16 @@ def refresh_set(ws: WeatherSet, raw_root: Path, state_root: Path, client, now: d
         elif result.get("checked"):
             save_manifest(state, manifest)  # only the date an incomplete last day was checked changed
     failed = [f"{ws.name}/{r['file']}" for r in results if r["action"] == "failed"]
-    record = {"set": ws.name, "end": end.isoformat(), "files": results, "failed": failed}
+    record = {"set": ws.name, "as_of": as_of.isoformat(), "end": end.isoformat(), "files": results, "failed": failed}
+    if evening and ws.end == "tomorrow" and not dry_run and not stopped:
+        try:
+            record["evening"] = save_evening(ws, state, client, as_of, now)["as_of"]
+        except RateLimited as exc:
+            record["stopped"], stopped = str(exc), str(exc)
+            failed.append(f"{ws.name}/{EVENING}")
+        except Exception as exc:
+            log.error("%s evening answer for %s failed: %s", ws.name, as_of, exc)
+            failed.append(f"{ws.name}/{EVENING}")
     if dropped:
         record["dropped"] = dropped
     if stopped:
@@ -677,10 +733,12 @@ def refresh_set(ws: WeatherSet, raw_root: Path, state_root: Path, client, now: d
     return record
 
 
-def run_download(sets, raw_root, client, *, state_root, now=None, only=None, force=False, dry_run=False) -> dict:
+def run_download(sets, raw_root, client, *, state_root, now=None, only=None, force=False, dry_run=False,
+                 as_of: date | None = None, evening: bool = False) -> dict:
     """One run over the sets. run["failed"] names every set or file that failed, and
     run["stopped"] says why the run stopped early (HTTP 429)."""
     now = now or datetime.now(timezone.utc)
+    as_of = as_of or boston_today(now)
     if only:
         unknown = sorted(set(only) - {s.name for s in sets})
         if unknown:
@@ -694,7 +752,7 @@ def run_download(sets, raw_root, client, *, state_root, now=None, only=None, for
                       "reason": f"not tried: the run stopped after {stopped}"}
         else:
             try:
-                record = refresh_set(ws, raw_root, state_root, client, now, force, dry_run)
+                record = refresh_set(ws, raw_root, state_root, client, now, force, dry_run, as_of, evening)
             except RateLimited as exc:
                 log.error("%s: %s; the run stops here", ws.name, exc)
                 record = {"set": ws.name, "end": None, "files": [], "failed": [ws.name],
@@ -819,14 +877,19 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--force", action="store_true", help="download every year again, even if stored")
     parser.add_argument("--dry-run", action="store_true", help="print what a run would download; writes nothing")
     parser.add_argument("--pause", type=float, default=PAUSE_SECONDS, help="seconds between requests")
+    parser.add_argument("--as-of", type=date.fromisoformat, help="the run's as-of date, YYYY-MM-DD in Boston; "
+                        "default: today in Boston")
+    parser.add_argument("--evening", action="store_true", help="an evening run: also store each `tomorrow` set's "
+                        f"answer for as-of to as-of + 2 under its state folder's {EVENING}/")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    sets = read_config(args.config)
+    as_of = args.as_of or boston_today()
+    sets = read_config(args.config, as_of)
     raw_dir, state_dir, attribution = Path(args.raw_dir), Path(args.state_dir), Path(args.attribution)
     run = run_download(
         sets, raw_dir, OpenMeteoClient(pause=args.pause), state_root=state_dir,
-        only=args.only, force=args.force, dry_run=args.dry_run,
+        only=args.only, force=args.force, dry_run=args.dry_run, as_of=as_of, evening=args.evening,
     )
     for record in run["sets"]:
         if record["end"] is None:

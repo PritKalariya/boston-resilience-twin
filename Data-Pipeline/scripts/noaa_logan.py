@@ -25,6 +25,7 @@ import time
 import urllib.parse
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import raw_fetch as rf
 from credentials import NOAA_CDO_TOKEN, require
@@ -121,11 +122,14 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--raw-dir", type=Path, default=Path("Data-Pipeline/data/raw/weather/noaa_logan"))
     parser.add_argument("--state-dir", type=Path, default=Path("Data-Pipeline/data/state/weather/noaa_logan"))
+    parser.add_argument("--as-of", type=date.fromisoformat, help="the run's as-of date, YYYY-MM-DD in Boston; "
+                        "default: today in Boston (#160)")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     headers = {"token": require(NOAA_CDO_TOKEN), "User-Agent": "boston-resilience-twin"}
     now = rf.utc_now()
-    records = refresh(args.raw_dir, args.state_dir, lambda url: rf.get(url, headers), now.date(), now)
+    as_of = args.as_of or now.astimezone(ZoneInfo("America/New_York")).date()
+    records = refresh(args.raw_dir, args.state_dir, lambda url: rf.get(url, headers), as_of, now)
     changed = [f"{r['file']} {r['action']}" + (f" ({r['rows']:,} values)" if "rows" in r else "")
                for r in records if r["action"] != "final"]
     print(f"NOAA {STATION}: " + (", ".join(changed) if changed else "every year final"))

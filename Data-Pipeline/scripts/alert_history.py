@@ -604,7 +604,8 @@ def main() -> None:
                         "pull must hold every Boston message sent before this evening's cutoff (ADR-014)")
     parser.add_argument("--settings", default="Data-Pipeline/config/labels_features.csv",
                         help="forecast_cutoff_local for --check-nws")
-    parser.add_argument("--today", help="the run's evening as YYYY-MM-DD, Boston time; default: today")
+    parser.add_argument("--as-of", "--today", dest="today",
+                        help="the run's as-of date (its evening) as YYYY-MM-DD, Boston time; default: today (#160)")
     args = parser.parse_args()
 
     now = datetime.now(timezone.utc)

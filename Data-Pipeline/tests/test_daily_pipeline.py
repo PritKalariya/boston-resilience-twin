@@ -197,3 +197,32 @@ def test_exactly_the_four_heavy_tasks_use_the_heavy_memory_pool(dag):
     heavy = {"ingest_alert_history", "ingest_static_layers", "schema_and_statistics", "bias_slicing"}
     assert {task.task_id for task in dag.tasks if task.pool == "heavy_memory"} == heavy
     assert all(task.pool != "heavy_memory" for task in dag.tasks if task.task_id not in heavy)
+
+
+def test_the_alert_history_runs_after_the_nws_snapshot_it_is_checked_against(dag):
+    assert "ingest_nws_alerts" in upstream_of(dag, "ingest_alert_history")
+
+
+def test_tomorrows_rows_come_after_the_features_and_before_the_push(dag):
+    assert "feature_table" in upstream_of(dag, "forecast_rows")
+    assert "forecast_rows" in upstream_of(dag, "push_data")
+
+
+def test_every_task_of_a_run_reads_the_as_of_date_of_its_run_after(bag, monkeypatch):
+    import importlib.util
+    from datetime import date, datetime, timezone
+    from types import SimpleNamespace
+
+    spec = importlib.util.spec_from_file_location("daily_pipeline_for_test", DAGS / "daily_pipeline.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    params = {"start": "2015-01-01", "end": None, "as_of": None}
+    started = datetime(2026, 11, 24, 23, 5, tzinfo=timezone.utc)  # 18:05 in Boston; later tasks run after UTC midnight
+    for conf, as_of, evening in (({}, date(2026, 11, 24), True), ({"as_of": "2026-11-20"}, date(2026, 11, 20), True)):
+        run = SimpleNamespace(conf=conf, run_after=started)
+        monkeypatch.setattr(module, "get_current_context", lambda: {"params": params, "dag_run": run})
+        days = module.run_range()
+        assert (days.as_of, days.evening, days.is_full) == (as_of, evening, True)
+    noon = SimpleNamespace(conf={}, run_after=datetime(2026, 11, 24, 17, 0, tzinfo=timezone.utc))
+    monkeypatch.setattr(module, "get_current_context", lambda: {"params": params, "dag_run": noon})
+    assert not module.run_range().evening

@@ -154,19 +154,50 @@ def test_last_full_day_is_the_day_before_the_earlier_systems_last_request():
     assert daily_counts.last_full_day(df) == pd.Timestamp("2026-07-09")
 
 
-def test_main_without_an_end_counts_up_to_the_last_full_day(tmp_path, monkeypatch, capsys):
+def test_once_every_storm_group_has_switched_only_the_new_system_sets_the_end():
+    df = pd.DataFrame({
+        "source_system": ["legacy", "new"],
+        "open_dt": pd.to_datetime(["2026-11-10 16:20", "2026-11-19 11:19"]),
+    })
+    switches = [pd.Timestamp("2025-10-27"), pd.Timestamp("2026-06-23")]  # tree, then snow_ice
+    # Legacy holds no tree or snow_ice category after 2026-06-23, so its quiet export no longer holds the counts back.
+    assert daily_counts.last_full_day(df, switches) == pd.Timestamp("2026-11-18")
+    # Before the last switch, legacy still carries snow_ice, so the earlier system sets the end.
+    assert daily_counts.last_full_day(df, [pd.Timestamp("2026-12-01")]) == pd.Timestamp("2026-11-09")
+    assert daily_counts.last_full_day(df) == pd.Timestamp("2026-11-09")
+
+
+def test_the_switch_dates_are_the_storm_group_rows_of_the_change_points(tmp_path):
+    path = tmp_path / "change-points.csv"
+    path.write_text("level,name,storm_group,switch_date,legacy_last,legacy_after_switch,note\n"
+                    "category,Snow Plowing,snow_ice,2026-06-23,2026-03-27,0,\n"
+                    "storm_group,snow_ice,snow_ice,2026-06-23,2026-03-30,0,\n"
+                    "storm_group,tree,tree,2025-10-27,2026-02-12,27,\n")
+    assert daily_counts.storm_switch_dates(path) == [pd.Timestamp("2026-06-23"), pd.Timestamp("2025-10-27")]
+    (tmp_path / "bad.csv").write_text("level,name\n")
+    with pytest.raises(ValueError, match="missing columns \\['switch_date'\\]"):
+        daily_counts.storm_switch_dates(tmp_path / "bad.csv")
+
+
+@pytest.mark.parametrize("switch, last_day", [("2024-02-01", "2024-01-02"), ("2023-12-01", "2024-01-04")],
+                         ids=["before-the-switch", "after-the-switch"])
+def test_main_without_an_end_counts_up_to_the_last_full_day(tmp_path, monkeypatch, capsys, switch, last_day):
     legacy = located([("2024-01-01 08:00", "East", "tree", "placed", False),
                       ("2024-01-03 00:30", "East", "tree", "placed", False)])
     new = located([("2024-01-05 12:00", "West", "tree", "placed", False)]).assign(source_system="new")
     pd.concat([legacy, new], ignore_index=True).to_parquet(tmp_path / "located.parquet", index=False)
     pd.DataFrame({"neighborhood": UNITS}).to_parquet(tmp_path / "hoods.parquet", index=False)
     (tmp_path / "processing.csv").write_text("setting,value\nafter_switch_policy,keep\n")
+    (tmp_path / "change-points.csv").write_text(f"level,name,storm_group,switch_date\nstorm_group,tree,tree,{switch}\n")
     monkeypatch.setattr(sys, "argv", [
         "daily_counts.py", "--located", str(tmp_path / "located.parquet"), "--neighborhoods", str(tmp_path / "hoods.parquet"),
-        "--config", str(tmp_path / "processing.csv"), "--start", "2024-01-01", "--out", str(tmp_path / "counts.parquet")])
+        "--config", str(tmp_path / "processing.csv"), "--change-points", str(tmp_path / "change-points.csv"),
+        "--start", "2024-01-01", "--out", str(tmp_path / "counts.parquet")])
     daily_counts.main()
     counts = pd.read_parquet(tmp_path / "counts.parquet")
-    # The legacy system stops at 2024-01-03 00:30, so 2024-01-02 is the last day both systems cover.
-    assert counts["date"].max() == pd.Timestamp("2024-01-02")
-    assert counts["requests"].sum() == 1
-    assert "(2 units x 2 days x 3 groups)" in capsys.readouterr().out
+    # Before tree's switch, legacy stops at 2024-01-03 00:30, so 2024-01-02 is the last day both systems cover;
+    # after it, the new system's last request (2024-01-05) sets the end alone.
+    assert counts["date"].max() == pd.Timestamp(last_day)
+    days = (pd.Timestamp(last_day) - pd.Timestamp("2024-01-01")).days + 1
+    assert counts["requests"].sum() == (1 if switch == "2024-02-01" else 2)
+    assert f"(2 units x {days} days x 3 groups)" in capsys.readouterr().out
