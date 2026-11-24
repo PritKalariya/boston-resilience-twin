@@ -512,6 +512,7 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
         full = run_paths(DateRange(), root)
         counts, alerts, static = full.processed / "daily_counts.parquet", full.interim / "nws_alerts.parquet", full.interim / "static"
         settings, gfs = config / "labels_features.csv", raw / "open_meteo" / "day_before_ncep_gfs_global"
+        catalog = config / "feature_catalog.csv"  # its use_in_model = yes features are the /predict inputs
         noaa, tides = raw / "weather" / "noaa_logan", raw / "tides" / "predicted"
         gfs_state = raw.parent / "state" / "open_meteo" / "day_before_ncep_gfs_global"
         out = forecast_path(days.as_of, root) if days.as_of else root / "Data-Pipeline" / "data" / "forecast"
@@ -520,8 +521,8 @@ def step_plan(step: str, days: DateRange, root: Path = REPO, year: int | None = 
         return StepPlan(
             args=["--counts", counts, "--alerts", alerts, "--static-dir", static, "--settings", settings,
                   "--noaa-dir", noaa, "--forecast-dir", gfs, "--forecast-state", gfs_state, "--tides-dir", tides,
-                  *as_of, "--out", out],
-            files=StepFiles(data_in=[counts, alerts], config_in=[static, settings, noaa, gfs, gfs_state, tides],
+                  "--catalog", catalog, *as_of, "--out", out],
+            files=StepFiles(data_in=[counts, alerts], config_in=[static, settings, catalog, noaa, gfs, gfs_state, tides],
                             data_out=[out]),
             hint="Run the full build's daily_counts, ingest_alert_history, ingest_open_meteo and ingest_tides "
                  "for the same as-of date first.",

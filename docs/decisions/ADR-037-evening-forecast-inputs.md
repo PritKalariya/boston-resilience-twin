@@ -1,4 +1,4 @@
-# ADR-036: Evening forecast inputs: one as-of date, tomorrow's GFS and tides from the same sources, rows from the history code
+# ADR-037: Evening forecast inputs: one as-of date, tomorrow's GFS and tides from the same sources, rows from the history code
 
 - Status: proposed
 - Date: 2026-11-20
@@ -52,7 +52,10 @@ hour's archived value comes later, from its own run.
 5. **Tomorrow's rows come from the history code.** `forecast_rows.py` calls
    `feature_table.build_features` with its leakage checks, on the full build's counts extended in
    memory with zero-filled days after their last day, and writes
-   `Data-Pipeline/data/forecast/<as_of>/features.parquet`. It stops when the counts end before
+   `Data-Pipeline/data/forecast/<as_of>/features.parquet` as the `/predict` request rows of
+   `docs/contracts/predict.md` ("The forecast rows file": `unit`, `forecast_date`, `as_of` and
+   the catalog's `use_in_model = yes` inputs, with the contract's types), so the evening run
+   sends the file as it is. It stops when the counts end before
    D - 2, when the GFS year files with D's hours were fetched before the cutoff, or when a weather
    or tide feature of D is missing. The zero days are never read (every 311 feature stops at D - 2)
    and never written to `daily_counts`, `labels` or `features`. The step is not a DVC stage: its
@@ -87,8 +90,9 @@ hour's archived value comes later, from its own run.
   hours. On the locked inputs (`a719afeb`), the counts' new end adds 2026-10-26 to the counts, labels
   and features (legacy's last request was 2026-10-26 22:28, the new system's 2026-10-27 08:27),
   and every other row is unchanged.
-- The model service needs the rows' columns to match the `/predict` request contract (D5). They are
-  the columns of `features.parquet`, so the contract can name the model's inputs from them.
+- The rows file follows the `/predict` request contract (#159). A change to the catalog's
+  `use_in_model` column changes the file's columns and is a new contract version, announced in
+  the PR that changes the catalog.
 - One more Open-Meteo request per evening (the evening answer).
 
 ## Revisit when
