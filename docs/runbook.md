@@ -388,6 +388,11 @@ docker compose run --rm test Data-Pipeline/tests/test_dvc_push.py --no-cov   # o
 docker compose run --rm test -x -k dvc --no-cov                               # stop at the first failure
 ```
 
+CI also runs the deployment contract tests (#159) in their own step after the
+full suite: `docker compose run --rm test docs/contracts/tests --no-cov`. They check the contract schemas, fixtures and
+cross-field rules and that the fixtures are in line with `docs/contracts/tools/build_fixtures.py`
+(see [docs/contracts/README.md](contracts/README.md)).
+
 - **`ADR-013 pins Python 3.12, but this is 3.x`.** The script ran outside the
   image, for example `bash Data-Pipeline/tests/run_tests.sh` on the host. Use
   the compose command.
@@ -407,7 +412,8 @@ docker compose run --rm test -x -k dvc --no-cov                               # 
 main: check Python is 3.12, `ruff check .` (errors only, rules in
 `ruff.toml`), then the test command `docker compose run --rm --build test`
 ("Tests" above). So CI runs the DAG tests in the Airflow image and fails below
-the coverage bar. It uses no secrets, the test container has no network, and
+the coverage bar; a second step, `Contract tests (#159)`, runs the contract tests
+(see "Tests" above). It uses no secrets, the test container has no network, and
 `Data-Pipeline/tests/conftest.py` blocks network access in every test, so a
 test that calls a live API or Cloud Storage fails with `NetworkBlocked`.
 The job is cancelled after 15 minutes: on a fresh runner the image is built

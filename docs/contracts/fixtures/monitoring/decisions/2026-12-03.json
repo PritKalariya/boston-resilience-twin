@@ -1,0 +1,12 @@
+{
+  "contract": "retrain-decision/v1",
+  "date": "2026-12-03",
+  "retrain": true,
+  "reasons": [
+    "fairness_gap"
+  ],
+  "source": "live",
+  "forced": false,
+  "cooldown_until": "2026-12-04",
+  "thresholds_sha256": "8ff5deb4399a3f4524272988c50bfa277fd50cad970579025aa19d1137208692"
+}
