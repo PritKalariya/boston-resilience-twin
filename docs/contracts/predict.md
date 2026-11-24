@@ -49,17 +49,24 @@ The model inputs are the features of [`Data-Pipeline/config/feature_catalog.csv`
 | `static_population`, `static_land_sqmi`, `static_density` | number | 0 or more | yes: Harbor Islands has no census values |
 | `static_poverty_share`, `static_older_adult_share`, `static_no_vehicle_share` | number | 0 to 1 | yes: as above |
 | `static_flood_10pct_share`, `static_flood_1pct_share` | number | 0 to 1 | never |
-| `wx_precip_mm`, `wx_snowfall_mm`, `wx_gust_max_ms` | number | 0 or more | yes: a missing forecast or gust |
-| `wx_tmax_c`, `wx_tmin_c` | number | -60 to 60 | yes: a missing forecast |
-| `tide_pred_max_m` | number | metres | yes: blank unless all hourly predictions are there |
+| `wx_precip_mm`, `wx_snowfall_mm`, `wx_gust_max_ms` | number | 0 or more | never |
+| `wx_tmax_c`, `wx_tmin_c` | number | -60 to 60 | never |
+| `tide_pred_max_m` | number | metres | never |
 
-**How null was decided.** An input may be null only where the training data allows it to be missing: the catalog notes ("missing until the neighborhood has a baseline", "forecasts missing ...") and the missing-value table in `docs/feature-table.md` (weather, the 311 relative columns, the six census-based static columns of Harbor Islands, tide days with a missing hour). Calendar, alert and flood-share columns are never missing in training, so the service rejects a null there. What a model does with a null depends on the model (`Model-Development/scripts/models.py`), and the service passes the null through without filling it:
+**How null was decided.** An input may be null only where a scored training row can have one. That leaves 14 inputs: the eight `*_rel*` inputs (missing until a neighborhood has a baseline) and the six census-based static inputs (Harbor Islands has no census values). The other 17 are never null, and a null in any of them is a 422 for the whole request.
+
+- **The five forecast inputs** (`wx_precip_mm`, `wx_snowfall_mm`, `wx_tmax_c`, `wx_tmin_c`, `wx_gust_max_ms`) are the `forecast_inputs` setting in [`Model-Development/config/training.csv`](../../Model-Development/config/training.csv). `training_data.py` (`no_forecast`, then `scored`, near line 324) marks a validation or test row missing any of them as not scored: no threshold and no metric uses it, "because a day with no forecast cannot be forecast live either". So no model was ever scored on a null in one of them, and a live request is that same case. The training table does hold a few null observed values (the missing-value table in `docs/feature-table.md`: 8 gust days from Logan's WSF5), but those rows teach a model about history, not about a forecast it is scored on.
+- **The tide** (`tide_pred_max_m`) is never null in the data: every Boston day has all its tide hours (`docs/feature-table.md`, missing-value table).
+- **A null never seen in train.** LightGBM reads it as 0 and XGBoost takes a branch no training row used (`training_data.py:361-362`, `check_missing_gaps`, `:356`); logistic regression takes the median with no missing flag. The service does not fill anything: it refuses.
+- **The evening rows** (#160) stop before sending when a weather or tide value for tomorrow is missing.
+
+What a model does with a null in the 14 inputs that may be null depends on the model (`Model-Development/scripts/models.py`), and the service passes the null through without filling it:
 
 - **Logistic regression** (`models.py:51-56`, used at `:76` and `:78`) imputes. The log-scaled columns and the plain columns each go through `SimpleImputer(strategy="median", add_indicator=True)`: a null takes the median of the rows the model was fit on, and a column that had nulls in those rows also gets a 0 or 1 missing flag (an input never null in train gets no flag). The calendar columns (`day_of_week`, `month`, `day_of_year`) have no imputer (`:69`, `:72`), which is one more reason they are never null.
-- **XGBoost** (`:216-232`) and **LightGBM** (`:235-253`) do not impute. Each tree takes the branch it learned for a missing value, and only for an input that had nulls in train. For an input never null in train there is no learned branch: LightGBM reads it as 0 and XGBoost takes a branch no training row used, as the comment in `training_data.py:361-362` says (`check_missing_gaps`, `:356`).
+- **XGBoost** (`:216-232`) and **LightGBM** (`:235-253`) do not impute. Each tree takes the branch it learned for a missing value, and only for an input that had nulls in train.
 - **The seasonal baseline** (`:256-258`, `seasonal_baseline.py`) reads no model input. Its probability comes from the label history, so a null input does not change it.
 
-`training_data.check_missing_gaps` stops a training run where an input never null in train is null on a scored row. This contract applies the same rule at the door: a null where the training data had none is a 422, because no model learned a treatment for it.
+`training_data.check_missing_gaps` stops a training run where an input never null in train is null on a scored row. This contract applies the same rule at the door: a null where no scored row had one is a 422.
 
 **Response** (200)
 
@@ -91,6 +98,15 @@ Each prediction:
 | 422 | the body fails the request schema (FastAPI's default `{"detail": [...]}`) | not part of the contract |
 | 503 | no model is loaded | not part of the contract |
 
+### The forecast rows file
+
+`Data-Pipeline/data/forecast/<as_of>/features.parquet`, written by #160, versioned in DVC and named in the manifest as `files.forecast_rows` (see [data-manifest.md](data-manifest.md)).
+
+- It holds exactly the request rows: `unit`, `forecast_date`, `as_of` and the 31 inputs, nothing else. One row per unit, all 24, sorted by `unit`.
+- Arrow types: `unit` string; `forecast_date` and `as_of` date32; the never-null integer inputs (the three calendar columns, the three alert counts and the three alert warnings) int64; every other input float64. Nullability is the same as in the request: the 14 inputs above may be null, every other column may not.
+- #162 sends its rows as the request as-is, so the manifest's md5 names exactly what was sent.
+- Fixture: [fixtures/forecast-rows/2026-11-25/features.parquet](fixtures/forecast-rows/2026-11-25/features.parquet), built from `fixtures/predict/request.json` by `tools/build_fixtures.py`.
+
 ## Rules
 
 - Units are unique within a request.
@@ -119,7 +135,7 @@ Each prediction:
 
 - **A feature leaves or joins the catalog.** The service and the evening run disagree on the column set, and every request is a 422. The contract test reads the catalog, so the PR that changes `use_in_model` fails here first.
 - **Fewer than 24 rows.** Allowed (1 to 24), but the forecast file must have 24, so #162 must send all of them.
-- **A null where none is allowed.** A 422 for the whole request, not the one row. The evening run should check before sending.
+- **A null where none is allowed.** A 422 for the whole request, not the one row. The evening run checks before sending, and stops when tomorrow's weather or tide is missing.
 - **`data_version` is the training one.** It passes the pattern, since both are `sha256:` plus hex, and then joins to nothing. Take it from the live manifest.
 - **A folder name as the run id.** `ci-lightgbm` is the training run folder, not the MLflow run id. It fails the pattern, so the response is rejected before it reaches the forecast file. Read `mlflow_run_id`, not `run_id`, from `metadata.json`.
 - **A model that is loading.** 503 until a model is loaded. The evening run retries and then alerts; it never writes a forecast file without a response.

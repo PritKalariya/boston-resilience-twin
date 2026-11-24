@@ -31,12 +31,14 @@ CATALOG = ROOT / "Data-Pipeline" / "config" / "feature_catalog.csv"
 POVERTY_GROUPS = ROOT / "Model-Development" / "config" / "poverty_groups.csv"
 DVC_CONFIG = ROOT / ".dvc" / "config"
 BUILD_FIXTURES = CONTRACTS / "tools" / "build_fixtures.py"
+TRAINING_CSV = ROOT / "Model-Development" / "config" / "training.csv"
 
 DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
 SCHEMA_NAMES = ["predict-request", "predict-response", "forecast-row", "data-manifest", "monitoring-output",
                 "retrain-decision", "agent-brief", "metric-names"]
 PAGES = {
-    "predict.md": (["predict-request", "predict-response"], ["predict/request.json", "predict/response.json"]),
+    "predict.md": (["predict-request", "predict-response"], ["predict/request.json", "predict/response.json",
+                                                         "forecast-rows/2026-11-25/features.parquet"]),
     "forecast-file.md": (["forecast-row"], ["forecasts/2026-11-26.parquet", "forecasts/2026-11-26.records.json"]),
     "data-manifest.md": (["data-manifest"], ["manifests/2026-11-25.json", "manifests/latest.json",
                                              "manifests/data_version.txt"]),
@@ -65,6 +67,14 @@ JSON_FIXTURES = {
 }
 RECORDS = "forecasts/2026-11-26.records.json"
 PARQUET = "forecasts/2026-11-26.parquet"
+ROWS_PARQUET = "forecast-rows/2026-11-25/features.parquet"
+ROWS_INT_COLUMNS = {"day_of_week", "month", "day_of_year", "alert_snow_ice_count", "alert_snow_ice_warning",
+                    "alert_tree_count", "alert_tree_warning", "alert_flooding_count", "alert_flooding_warning"}
+# the inputs that may be null (predict.md, "How null was decided"): the 8 relative 311 columns and the 6 census ones
+NULLABLE_INPUTS = {"snow_ice_rel_last", "snow_ice_rel3", "snow_ice_rel7", "snow_ice_rel28", "tree_rel_last",
+                   "tree_rel3", "tree_rel7", "tree_rel28", "static_population", "static_land_sqmi", "static_density",
+                   "static_poverty_share", "static_older_adult_share", "static_no_vehicle_share"}
+NEVER_NULL_WEATHER = ["wx_precip_mm", "wx_snowfall_mm", "wx_tmax_c", "wx_tmin_c", "wx_gust_max_ms", "tide_pred_max_m"]
 FORECAST_SCHEMA = pa.schema([
     ("unit", pa.string()), ("forecast_date", pa.date32()), ("as_of", pa.date32()), ("probability", pa.float64()),
     ("prediction", pa.int8()), ("threshold", pa.float64()), ("model_version", pa.string()),
@@ -98,6 +108,23 @@ def errors(name: str, doc) -> list:
 def catalog_inputs() -> list[str]:
     with CATALOG.open(newline="", encoding="utf-8") as handle:
         return [r["feature"] for r in csv.DictReader(handle) if r["use_in_model"].strip() == "yes"]
+
+
+def forecast_inputs() -> list[str]:
+    """The `forecast_inputs` setting of training.csv, read now."""
+    with TRAINING_CSV.open(newline="", encoding="utf-8") as handle:
+        value = next(r["value"] for r in csv.DictReader(handle) if r["setting"] == "forecast_inputs")
+    return [name.strip() for name in value.split(";") if name.strip()]
+
+
+def rows_file() -> pa.Table:
+    return pq.read_table(FIXTURES / ROWS_PARQUET)
+
+
+def nullable_inputs(schema: dict) -> set[str]:
+    """The inputs the request schema lets be null."""
+    props = schema["$defs"]["row"]["properties"]
+    return {name for name, node in props.items() if "null" in (node.get("type") or [])}
 
 
 def poverty_units() -> list[str]:
@@ -337,6 +364,37 @@ def test_unknown_input_value_fails():
     assert errors("predict-request", bad)
 
 
+@pytest.mark.parametrize("name", NEVER_NULL_WEATHER)
+def test_a_null_weather_or_tide_input_fails(name):
+    """A day with no forecast is not scored in training and the evening rows stop before sending one."""
+    bad = load_fixture("predict/request.json")
+    bad["rows"][0][name] = None
+    assert errors("predict-request", bad), f"a null {name} passed"
+
+
+def test_a_null_association_value_fails():
+    bad = load_fixture("forecasts/2026-11-26.brief.json")
+    bad["flagged"][0]["associations"][0]["value"] = None
+    assert errors("agent-brief", bad), "an association with a null value passed"
+
+
+def test_the_forecast_inputs_are_never_nullable_in_the_request():
+    """training.csv forecast_inputs: a validation or test row missing one is not scored, so a live null there was
+    never scored either."""
+    names = forecast_inputs()
+    assert names, "training.csv has no forecast_inputs"
+    nullable = nullable_inputs(load_schema("predict-request"))
+    assert not nullable & set(names), f"forecast inputs that may be null: {sorted(nullable & set(names))}"
+
+
+def test_exactly_the_14_named_inputs_are_nullable():
+    nullable = nullable_inputs(load_schema("predict-request"))
+    assert nullable == NULLABLE_INPUTS, (
+        f"{len(nullable)} nullable inputs, expected {len(NULLABLE_INPUTS)}: "
+        f"unexpected {sorted(nullable - NULLABLE_INPUTS)}, missing {sorted(NULLABLE_INPUTS - nullable)}")
+    assert len(nullable) == 14
+
+
 def test_bad_metric_objects_fail():
     for bad_metric in ({"value": 0.5, "reason": "insufficient data"}, {"value": None, "reason": None},
                        {"value": None, "reason": "because"}, {"value": 1.5, "reason": None},
@@ -476,6 +534,43 @@ def test_forecast_parquet_equals_the_records():
         "issued_at_utc": row["issued_at_utc"].astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     } for row in parquet]
     assert as_json == load_fixture(RECORDS)
+
+
+# ---------------------------------------------------------------- forecast rows file
+def test_rows_file_columns_and_types_are_the_request_row_fields():
+    table = rows_file()
+    row_schema = load_schema("predict-request")["$defs"]["row"]
+    assert table.column_names == [*row_schema["required"]], "the columns are exactly the request row fields"
+    assert table.column_names[:3] == ["unit", "forecast_date", "as_of"]
+    assert len(table.column_names) == 3 + 31
+    for field in table.schema:
+        if field.name == "unit":
+            assert field.type == pa.string(), field
+        elif field.name in ("forecast_date", "as_of"):
+            assert field.type == pa.date32(), field
+        elif field.name in ROWS_INT_COLUMNS:
+            assert field.type == pa.int64(), field
+        else:
+            assert field.type == pa.float64(), field
+    assert table.num_rows == 24
+    units = table.column("unit").to_pylist()
+    assert units == sorted(poverty_units()) == sorted(units), "one row per unit, sorted by unit"
+
+
+def test_rows_file_nulls_are_only_where_the_request_allows_them():
+    table = rows_file()
+    nullable = nullable_inputs(load_schema("predict-request"))
+    for name in table.column_names:
+        if name not in nullable:
+            assert table.column(name).null_count == 0, f"{name} has a null"
+
+
+def test_rows_file_values_equal_the_request():
+    rows = rows_file().to_pylist()
+    as_json = [{**row, "forecast_date": row["forecast_date"].isoformat(), "as_of": row["as_of"].isoformat()}
+               for row in rows]
+    request = sorted(load_fixture("predict/request.json")["rows"], key=lambda r: r["unit"])
+    assert as_json == request
 
 
 def test_forecast_rules():
@@ -742,8 +837,8 @@ def _forecast_rows_path() -> str:
 
 
 def _source_value(claim: dict):
-    """The value a claim names in the file it cites: the forecast fixture, a monitoring fixture, or the row of
-    predict/request.json that stands for the forecast rows file."""
+    """The value a claim names in the file it cites: the forecast fixture, a monitoring fixture, or the row of the
+    forecast rows fixture (the manifest's forecast_rows) by unit and forecast_date."""
     src = claim["source"]
     rel = _fixture_of(src["file"])
     if rel == PARQUET:
@@ -753,8 +848,8 @@ def _source_value(claim: dict):
     if rel.startswith("monitoring/"):
         return get_path(load_fixture(rel), src["field"])
     assert src["file"] == _forecast_rows_path(), f"a source that is not an allowed file: {src['file']}"
-    row = next(r for r in load_fixture("predict/request.json")["rows"]
-               if r["unit"] == src["row"]["unit"] and r["forecast_date"] == src["row"]["date"])
+    row = next(r for r in rows_file().to_pylist()
+               if r["unit"] == src["row"]["unit"] and r["forecast_date"].isoformat() == src["row"]["date"])
     return row[src["field"]]
 
 
@@ -772,7 +867,7 @@ def test_brief_claims_match_their_sources():
     """Every claim is checked: a claim whose source is not one of the three allowed files fails, and so does one
     left unchecked."""
     brief = load_fixture("forecasts/2026-11-26.brief.json")
-    request = load_fixture("predict/request.json")
+    rows_units = set(rows_file().column("unit").to_pylist())
     inputs = set(catalog_inputs())
     forecast_date = brief["forecast_date"]
     unchecked = {c["id"] for c in brief["claims"]}
@@ -783,7 +878,7 @@ def test_brief_claims_match_their_sources():
         if src["file"] == _forecast_rows_path():
             assert src["field"] in inputs, claim
             assert src["row"]["date"] == forecast_date, claim
-            assert src["row"]["unit"] in {r["unit"] for r in request["rows"]}, claim
+            assert src["row"]["unit"] in rows_units, claim
         elif _fixture_of(src["file"]) == PARQUET:
             assert src["row"]["date"] == forecast_date, claim
             assert src["field"] in FORECAST_SCHEMA.names, claim
@@ -795,9 +890,9 @@ def test_brief_claims_match_their_sources():
 
 def test_brief_association_claims_cite_the_forecast_rows_file():
     brief = load_fixture("forecasts/2026-11-26.brief.json")
-    rows_file = _forecast_rows_path()
-    request = {r["unit"]: r for r in load_fixture("predict/request.json")["rows"]}
-    on_rows = [c for c in brief["claims"] if c["source"]["file"] == rows_file]
+    rows_uri = _forecast_rows_path()
+    request = {r["unit"]: {**r, "forecast_date": r["forecast_date"].isoformat()} for r in rows_file().to_pylist()}
+    on_rows = [c for c in brief["claims"] if c["source"]["file"] == rows_uri]
     assert on_rows
     cited = {(c["source"]["row"]["unit"], c["source"]["field"], c["value"]) for c in on_rows}
     for flag in brief["flagged"]:
@@ -913,6 +1008,20 @@ def test_build_fixtures_check_fails_on_a_changed_fixture_and_writes_nothing(tmp_
     assert {p.relative_to(copy_of): p.read_bytes() for p in copy_of.rglob("*") if p.is_file()} == before
 
 
+def test_build_fixtures_check_names_a_stale_rows_file_and_writes_it_back(tmp_path):
+    copy_of = tmp_path / "fixtures"
+    shutil.copytree(FIXTURES, copy_of)
+    path = copy_of / "predict" / "request.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["rows"][0]["wx_precip_mm"] += 1
+    path.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    result = _run_tool("--check", "--fixtures", str(copy_of))
+    assert result.returncode == 1 and ROWS_PARQUET in result.stdout, result.stdout
+    (copy_of / ROWS_PARQUET).unlink()
+    assert _run_tool("--fixtures", str(copy_of)).returncode == 0, "the tool writes a missing rows file"
+    assert _run_tool("--check", "--fixtures", str(copy_of)).returncode == 0
+
+
 def test_build_fixtures_check_fails_on_a_non_canonical_file(tmp_path):
     copy_of = tmp_path / "fixtures"
     shutil.copytree(FIXTURES, copy_of)
@@ -972,5 +1081,5 @@ def test_readme_lists_all_seven_contracts():
 
 def test_every_fixture_file_is_covered_by_a_test():
     on_disk = {p.relative_to(FIXTURES).as_posix() for p in FIXTURES.rglob("*") if p.is_file()}
-    covered = set(JSON_FIXTURES) | {RECORDS, PARQUET, "manifests/data_version.txt"}
+    covered = set(JSON_FIXTURES) | {RECORDS, PARQUET, ROWS_PARQUET, "manifests/data_version.txt"}
     assert on_disk == covered

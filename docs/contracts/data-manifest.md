@@ -27,7 +27,7 @@ Name exactly which versioned data one evening's forecast was built from. The sha
 | `dag_run_id` | string | Airflow run id | no | the `daily_pipeline` run, e.g. `scheduled__2026-11-25T23:00:00+00:00` |
 | `files.labels` | object | | no | `Data-Pipeline/data/processed/labels.parquet` |
 | `files.features` | object | | no | `Data-Pipeline/data/processed/features.parquet` |
-| `files.forecast_rows` | object | | no | `Data-Pipeline/data/forecast/<as_of>/features.parquet` (#160): tomorrow's rows, the ones sent to `/predict`, kept out of the processed `features.parquet` |
+| `files.forecast_rows` | object | | no | `Data-Pipeline/data/forecast/<as_of>/features.parquet` (#160): tomorrow's rows, the ones sent to `/predict`, kept out of the processed `features.parquet`; columns and types in [predict.md](predict.md#the-forecast-rows-file) |
 | `files.<name>.md5` | string | 32 lowercase hex | no | DVC's md5 of the file |
 | `files.<name>.size_bytes` | integer | bytes | no | |
 | `files.<name>.content_path` | string | `gs://<bucket>/<prefix>/files/md5/<first 2 hex>/<other 30 hex>` | no | the full URI of the object in the bucket: the DVC remote's URL plus DVC 3's cache layout |

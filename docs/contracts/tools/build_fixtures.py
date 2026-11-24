@@ -4,6 +4,8 @@ The sources, which a person edits: every JSON fixture and forecasts/<date>.recor
 The derived files, which this tool rewrites:
   - forecasts/<date>.parquet, from the records, with the declared Arrow schema and the
     key-value metadata contract=forecast/v1
+  - forecast-rows/<as_of>/features.parquet, from predict/request.json: the request's rows with the declared
+    Arrow types (predict.md, "The forecast rows file"), no key-value metadata
   - manifests/<as_of>.json in canonical form, and manifests/latest.json as a copy of the newest
   - manifests/data_version.txt: "sha256:" plus the sha256 of the newest manifest's bytes
   - data_version in every fixture that carries one: that value
@@ -36,6 +38,10 @@ FORECAST_SCHEMA = pa.schema([
     ("prediction", pa.int8()), ("threshold", pa.float64()), ("model_version", pa.string()),
     ("model_run_id", pa.string()), ("data_version", pa.string()), ("issued_at_utc", pa.timestamp("us", tz="UTC"))])
 PARQUET_METADATA = {"contract": "forecast/v1"}
+# The forecast rows file (predict.md): the never-null integer inputs are int64, every other input float64.
+ROWS_INT_COLUMNS = ("day_of_week", "month", "day_of_year", "alert_snow_ice_count", "alert_snow_ice_warning",
+                    "alert_tree_count", "alert_tree_warning", "alert_flooding_count", "alert_flooding_warning")
+ROWS_KEYS = ("unit", "forecast_date", "as_of")
 
 
 def canonical(obj) -> bytes:
@@ -75,6 +81,34 @@ def records_to_table(records: list[dict]) -> pa.Table:
     return table.replace_schema_metadata(PARQUET_METADATA)
 
 
+def rows_schema(columns: list[str]) -> pa.Schema:
+    fields = []
+    for name in columns:
+        if name == "unit":
+            kind = pa.string()
+        elif name in ("forecast_date", "as_of"):
+            kind = pa.date32()
+        elif name in ROWS_INT_COLUMNS:
+            kind = pa.int64()
+        else:
+            kind = pa.float64()
+        fields.append((name, kind))
+    return pa.schema(fields)
+
+
+def request_to_rows_table(request: dict) -> pa.Table:
+    """The request's rows as the forecast rows file: the same columns in the same order, one row per unit sorted
+    by unit."""
+    rows = sorted(request["rows"], key=lambda row: row["unit"])
+    schema = rows_schema(list(rows[0]))
+    columns = {name: [] for name in schema.names}
+    for row in rows:
+        for name in schema.names:
+            value = row[name]
+            columns[name].append(date.fromisoformat(value) if name in ("forecast_date", "as_of") else value)
+    return pa.table(columns, schema=schema)
+
+
 def _dated(folder: Path) -> list[Path]:
     return sorted(p for p in folder.glob("*.json") if p.name != "latest.json")
 
@@ -112,6 +146,11 @@ def planned_parquet(fixtures: Path, version: str) -> dict[Path, pa.Table]:
         records = stamp_data_version(json.loads(records_path.read_text(encoding="utf-8")), version)
         tables[records_path.with_name(records_path.name.removesuffix(".records.json") + ".parquet")] = \
             records_to_table(records)
+    request_path = fixtures / "predict" / "request.json"
+    if request_path.is_file():
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        as_of = request["rows"][0]["as_of"]
+        tables[fixtures / "forecast-rows" / as_of / "features.parquet"] = request_to_rows_table(request)
     return tables
 
 
@@ -136,6 +175,7 @@ def build(fixtures: Path, check: bool) -> list[Path]:
         if not parquet_matches(path, table):
             changed.append(path)
             if not check:
+                path.parent.mkdir(parents=True, exist_ok=True)
                 pq.write_table(table, path)
     return sorted(changed)
 

@@ -243,47 +243,29 @@
           "maximum": 1
         },
         "wx_precip_mm": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": "number",
           "minimum": 0
         },
         "wx_snowfall_mm": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": "number",
           "minimum": 0
         },
         "wx_tmax_c": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": "number",
           "minimum": -60,
           "maximum": 60
         },
         "wx_tmin_c": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": "number",
           "minimum": -60,
           "maximum": 60
         },
         "wx_gust_max_ms": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": "number",
           "minimum": 0
         },
         "tide_pred_max_m": {
-          "type": [
-            "number",
-            "null"
-          ]
+          "type": "number"
         }
       },
       "required": [

@@ -47,7 +47,7 @@ The daily brief for the person who reviews the forecast: which neighborhoods are
 
 - the forecast file, `gs://boston-resilience-twin-data/forecasts/<forecast_date>.parquet`: `field` is a column, `row` is `{unit, date: forecast_date}`.
 - a monitoring file, `gs://boston-resilience-twin-data/monitoring/<date>.json`: `field` is a dotted path such as `windows.30d.f1.value`, `row` is null.
-- the forecast rows file, the manifest's `files.forecast_rows.content_path` of the manifest the forecast was built from (a `gs://boston-resilience-twin-data/dvc/files/md5/...` URI): `field` is the input column, `row` is `{unit, date: forecast_date}`.
+- the forecast rows file, the manifest's `files.forecast_rows.content_path` of the manifest the forecast was built from (a `gs://boston-resilience-twin-data/dvc/files/md5/...` URI): `field` is the input column, `row` is `{unit, date}`, where `date` matches the file's `forecast_date` column. Its columns are in [predict.md](predict.md#the-forecast-rows-file).
 
 Any other file is not allowed. Input (association) claims cite the forecast rows file, never the processed features file: the rows for the forecast day are not in it.
 
@@ -63,6 +63,7 @@ Also:
 
 - Claim ids are unique.
 - Every association has a claim for the same unit, input and value, citing the forecast rows file.
+- An input whose value is null for the unit and day is never an association: #173 skips it. `associations[].value` is a number, never null.
 - `flagged` equals the forecast file's rows with `prediction` 1, ordered by `probability` descending and then `unit`; `flagged[].probability` equals the file's.
 - `model_health` is copied from the latest monitoring output at the time the brief is made. With no monitoring output yet (the first evening) each of its three metrics is `{"value": null, "reason": "no data"}`.
 - `data_version` and `model_version` equal the forecast file's.
@@ -70,7 +71,7 @@ Also:
 
 ## Example
 
-[fixtures/forecasts/2026-11-26.brief.json](fixtures/forecasts/2026-11-26.brief.json): three flagged neighborhoods, one at exactly the threshold. The test maps each `gs://` source to a fixture by stripping the bucket prefix: claims on the forecast file are checked against the forecast fixture, claims on a monitoring file against the monitoring fixture, and claims on the forecast rows file against [fixtures/predict/request.json](fixtures/predict/request.json) (the same rows), by unit, column and `forecast_date`. A claim left unchecked fails the test.
+[fixtures/forecasts/2026-11-26.brief.json](fixtures/forecasts/2026-11-26.brief.json): three flagged neighborhoods, one at exactly the threshold. The test maps each `gs://` source to a fixture by stripping the bucket prefix: claims on the forecast file are checked against the forecast fixture, claims on a monitoring file against the monitoring fixture, and claims on the forecast rows file against [fixtures/forecast-rows/2026-11-25/features.parquet](fixtures/forecast-rows/2026-11-25/features.parquet) (the same rows as `fixtures/predict/request.json`), by `unit`, column and `forecast_date`. A claim left unchecked fails the test.
 
 ## Schema
 

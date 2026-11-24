@@ -36,7 +36,7 @@ The schemas enforce the first five. The tests in [tests/test_contracts.py](tests
 
 ## Fixtures
 
-The fixtures in [fixtures/](fixtures) are **synthetic**. No real forecast, label or model produced them, and the numbers mean nothing. They mirror the bucket layout, so a consumer can copy the folder and read it as if it were the bucket. They use the threshold `0.096` and `model_version` `"1"`. Every fixture that has a `data_version` carries the same one, the sha256 of [`fixtures/manifests/latest.json`](fixtures/manifests/latest.json), so a consumer can test a join across contracts. [`tools/build_fixtures.py`](tools/build_fixtures.py) keeps the derived files (the parquet, both manifests and `latest.json` copies, `data_version.txt` and every `data_version`) in line with the sources; see "Changing a contract". Each fixture is consistent in itself, but the files are not one history: the 2026-11-27 and 2026-12-03 monitoring files, for example, are two separate examples (sparse and rich) of one model version.
+The fixtures in [fixtures/](fixtures) are **synthetic**. No real forecast, label or model produced them, and the numbers mean nothing. They mirror the bucket layout, so a consumer can copy the folder and read it as if it were the bucket. They use the threshold `0.096` and `model_version` `"1"`. Every fixture that has a `data_version` carries the same one, the sha256 of [`fixtures/manifests/latest.json`](fixtures/manifests/latest.json), so a consumer can test a join across contracts. [`tools/build_fixtures.py`](tools/build_fixtures.py) keeps the derived files (the parquet files, both manifests and `latest.json` copies, `data_version.txt` and every `data_version`) in line with the sources; see "Changing a contract". The one exception to the bucket layout is [`fixtures/forecast-rows/2026-11-25/features.parquet`](fixtures/forecast-rows/2026-11-25/features.parquet): the forecast rows file lives in DVC (`Data-Pipeline/data/forecast/<as_of>/features.parquet`, named by the manifest's `files.forecast_rows`), not at the bucket's top level. The tool builds it from `predict/request.json` with the declared Arrow types ([predict.md](predict.md#the-forecast-rows-file)), and `--check` compares it by schema and values. The manifest fixture's synthetic `forecast_rows` md5 is not tied to it, since parquet bytes change with the pyarrow version. Each fixture is consistent in itself, but the files are not one history: the 2026-11-27 and 2026-12-03 monitoring files, for example, are two separate examples (sparse and rich) of one model version.
 
 ## Tests
 
@@ -50,13 +50,13 @@ On the host, `python -m pytest docs/contracts/tests` works in any environment th
 
 ## Changing a contract
 
-1. Edit the schema in [schemas/](schemas), the page, and the source fixtures: the JSON fixtures and `fixtures/forecasts/<date>.records.json`. Never edit a derived file by hand: the parquet, `manifests/latest.json`, `manifests/data_version.txt`, `monitoring/decisions/latest.json`, or any `data_version`.
-2. Rebuild the derived files. `--check` writes nothing and exits 1, naming each file that would change; without it the tool rewrites them. The `test` service mounts `docs/contracts` read-only, so the rewrite mounts the folder writable:
+1. Edit the schema in [schemas/](schemas), the page, and the source fixtures: the JSON fixtures and `fixtures/forecasts/<date>.records.json`. Never edit a derived file by hand: a parquet file, `manifests/latest.json`, `manifests/data_version.txt`, `monitoring/decisions/latest.json`, or any `data_version`.
+2. Rebuild the derived files. `--check` writes nothing and exits 1, naming each file that would change; without it the tool rewrites them. The `test` service mounts `docs/contracts` read-only, and a second `-v` on the same path does not override it, so the rewrite mounts the fixtures folder at another path and points the tool at it:
 
    ```bash
    docker compose run --rm --entrypoint python test docs/contracts/tools/build_fixtures.py --check
-   docker compose run --rm --user "$(id -u):0" -v "$PWD/docs/contracts:/opt/airflow/repo/docs/contracts" \
-     --entrypoint python test docs/contracts/tools/build_fixtures.py
+   docker compose run --rm --user "$(id -u):0" -v "$PWD/docs/contracts/fixtures:/work/fixtures" \
+     --entrypoint python test docs/contracts/tools/build_fixtures.py --fixtures /work/fixtures
    ```
 
    Any environment with `pyarrow` can run `python docs/contracts/tools/build_fixtures.py` directly. A changed manifest changes `data_version` everywhere; that is expected.
