@@ -88,7 +88,8 @@ def test_the_reusable_workflow_fixes_the_bar_and_has_no_network_or_token(compone
 
 def test_the_bar_is_not_an_input(component_ci_text):
     inputs = yaml.safe_load(component_ci_text)[True]["workflow_call"]["inputs"]
-    assert set(inputs) == {"component", "cov_source", "dockerfile"}
+    assert set(inputs) == {"component", "context", "cov_source", "dockerfile"}
+    assert not [name for name in inputs if re.search(r"bar|under|cov_fail|threshold", name)]
 
 
 def test_the_existing_job_keeps_its_name_and_the_template_runs_in_parallel(ci):
@@ -114,8 +115,8 @@ def test_mutation_a_job_missing_from_needs_fails(ci):
 
 def test_mutation_a_new_job_not_in_needs_fails(ci):
     bad = copy.deepcopy(ci)
-    bad["jobs"]["serving"] = {"uses": REUSABLE, "with": {"component": "Serving", "cov_source": "serving"}}
-    assert any("serving" in p for p in check_aggregator(bad))
+    bad["jobs"]["mutation-probe"] = {"uses": REUSABLE, "with": {"component": "Probe", "cov_source": "probe"}}
+    assert any("mutation-probe" in p for p in check_aggregator(bad))
 
 
 def test_mutation_an_aggregator_without_always_fails(ci):

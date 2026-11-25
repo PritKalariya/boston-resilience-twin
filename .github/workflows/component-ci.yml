@@ -9,6 +9,9 @@
 #   component   the component folder, for example Serving or .github/component-template
 #   cov_source  the package (or path) to measure, as the tests import it inside the image
 #   dockerfile  optional; defaults to <component>/Dockerfile
+#   context     optional; the docker build context, defaults to the component folder. A component
+#               whose image copies files from outside its folder (Serving copies the contract
+#               schemas and Model-Development's lock) passes `.`, the repository root.
 #
 # To run the same two commands on a laptop, see docs/runbook.md, "CI".
 
@@ -30,6 +33,11 @@ on:
         type: string
         required: false
         default: ""
+      context:
+        description: The Docker build context; defaults to the component folder
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -44,6 +52,7 @@ jobs:
       COMPONENT: ${{ inputs.component }}
       COV_SOURCE: ${{ inputs.cov_source }}
       DOCKERFILE: ${{ inputs.dockerfile }}
+      CONTEXT: ${{ inputs.context }}
       IMAGE: component-ci-test:${{ github.run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,7 +61,7 @@ jobs:
 
       # The inputs reach the shell as environment variables, never spliced into the script.
       - name: Build the test image
-        run: docker build --target test -f "${DOCKERFILE:-$COMPONENT/Dockerfile}" -t "$IMAGE" "$COMPONENT"
+        run: docker build --target test -f "${DOCKERFILE:-$COMPONENT/Dockerfile}" -t "$IMAGE" "${CONTEXT:-$COMPONENT}"
 
       # No network: a test that reaches out fails. The bar is the literal below.
       - name: Run the tests with coverage

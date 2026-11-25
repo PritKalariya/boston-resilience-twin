@@ -323,5 +323,35 @@ services:
     user: "${AIRFLOW_UID:-50000}:0"
     logging: *default-logging
 
+  # The model service on this machine (#161, ADR-037): Serving/Dockerfile's runtime image with one trained
+  # model folder baked in, and every route on one port (SERVING_ROUTES=all; the cloud runs the model and the
+  # web routes as two services). Off by default: only `--profile serve` builds or starts it.
+  #   python3 Serving/scripts/local_model.py <run folder> "$HOME/brt-serve-model"
+  #   SERVE_MODEL_DIR="$HOME/brt-serve-model" docker compose --profile serve up -d --build --wait serving
+  # Then http://127.0.0.1:8081/health. SERVE_MODEL_VERSION is the Vertex version id of a registered model;
+  # the default 0 is a local model that is not registered (Vertex numbers versions from 1). With
+  # SERVE_MODEL_DIR unset the default path below does not exist, so only this service's build fails.
+  serving:
+    profiles: ["serve"]
+    image: brt-serving:local
+    build:
+      context: .
+      dockerfile: Serving/Dockerfile
+      target: runtime
+      additional_contexts:
+        model: ${SERVE_MODEL_DIR:-./Serving/set-SERVE_MODEL_DIR-to-a-model-folder}
+      args:
+        MODEL_VERSION: ${SERVE_MODEL_VERSION:-0}
+    environment:
+      SERVING_ROUTES: all
+      FORECASTS_ROOT: /app/forecasts
+    volumes:
+      - ./docs/contracts/fixtures/forecasts:/app/forecasts:ro  # the synthetic forecast fixtures
+    # 8080 is Airflow's.
+    ports:
+      - "127.0.0.1:8081:8080"
+    mem_limit: 512m
+    logging: *default-logging
+
 volumes:
   postgres-db-volume:
