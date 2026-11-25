@@ -103,3 +103,24 @@ resource "google_project_iam_member" "admins" {
 
   depends_on = [google_project_service.project_2]
 }
+
+# --- CI writer: deploy the model service (#161, ADR-038) ----------------------
+
+# run.developer deploys revisions of the two services (and any other Cloud Run service in the project:
+# a project role is the narrowest the deploy script's calls allow). It cannot set IAM policy or create
+# a service account key. modelRegistrar is unchanged.
+resource "google_project_iam_member" "ci_writer_run_developer" {
+  project = var.project_id
+  role    = "roles/run.developer"
+  member  = "serviceAccount:${google_service_account.ci_writer.email}"
+
+  depends_on = [google_project_service.run]
+}
+
+# A revision that runs as brt-serving can only be deployed by an identity that may act as it. On this
+# one account only, never project wide.
+resource "google_service_account_iam_member" "ci_writer_act_as_serving" {
+  service_account_id = google_service_account.brt_serving.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.ci_writer.email}"
+}

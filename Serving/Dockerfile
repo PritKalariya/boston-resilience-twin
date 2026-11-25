@@ -55,6 +55,10 @@ COPY Model-Development/scripts/models.py Model-Development/scripts/inner_folds.p
 COPY docs/contracts/fixtures/predict/request.json docs/contracts/fixtures/predict/response.json /app/contracts/fixtures/predict/
 COPY docs/contracts/fixtures/forecasts/2026-11-26.parquet docs/contracts/fixtures/forecasts/2026-11-26.records.json /app/contracts/fixtures/forecasts/
 COPY Serving/scripts /app/scripts
+# The deploy script's tests read its two settings files and check its workflow file against model.yml's auth step (#161).
+COPY Serving/deploy.csv /app/Serving/deploy.csv
+COPY Model-Development/registry/registry.csv /app/Model-Development/registry/registry.csv
+COPY .github/workflows/deploy-serving.yml .github/workflows/model.yml /app/.github/workflows/
 COPY Serving/tests /app/tests
 # Only here does the user own /app, so pytest and coverage can write their files there.
 RUN chown app:app /app

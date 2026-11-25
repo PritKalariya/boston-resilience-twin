@@ -1,6 +1,6 @@
 # ADR-037: Deployment architecture: a Cloud Run model service, a monitor workflow in GitHub Actions, a drift-threshold rule, and per-component CI
 
-- Status: accepted 2026-11-23
+- Status: accepted 2026-11-23; decision 8 amended by [ADR-038](ADR-038-serving-on-cloud-run.md) (serving reads `forecasts/` only, not the whole data bucket)
 - Date: 2026-11-23
 - Owner: PritKalariya
 - Phase: deploy

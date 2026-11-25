@@ -1,0 +1,66 @@
+# Deploy the model service to Cloud Run (#161, ADR-038): build the image from the registry's production model
+# (or the version given), push it by digest and point brt-model and brt-web at it. Run by hand from main.
+# ci-writer, which only refs/heads/main can use (ADR-030), pushes the image and deploys the revisions, so this
+# workflow cannot run on a pull request and cannot be proven before it merges.
+
+name: Deploy serving
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Registry version id to deploy; empty means the production alias
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# Two deploys never overlap; a second waits for the first.
+concurrency:
+  group: deploy-serving
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy brt-model and brt-web
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # The token the Google auth step exchanges for credentials (Workload Identity Federation, ADR-030). The
+    # only write this job holds.
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # The input reaches the shell as an environment variable, never spliced into the script.
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The same identity and provider as model.yml (public identifiers, not secrets). The auth action exports
+      # the credentials file the deploy script's Application Default Credentials pick up.
+      - name: Authenticate to Google Cloud (ci-writer)
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: projects/570429679915/locations/global/workloadIdentityPools/github/providers/github-oidc
+          service_account: ci-writer@boston-resilience-twin-p2.iam.gserviceaccount.com
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the deploy script's packages
+        run: pip install -r Serving/requirements-deploy.txt -c Model-Development/requirements.lock
+
+      - name: Build, push and deploy
+        run: |
+          if [ -n "$VERSION" ]; then
+            python Serving/scripts/deploy.py --version "$VERSION"
+          else
+            python Serving/scripts/deploy.py
+          fi

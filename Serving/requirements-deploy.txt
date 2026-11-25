@@ -1,0 +1,5 @@
+# What Serving/scripts/deploy.py needs on the host (a laptop or a runner): nothing else. Install with
+#   pip install -r Serving/requirements-deploy.txt -c Model-Development/requirements.lock
+# Both pins are the lock's versions, and the same ones Serving/requirements.txt ships.
+google-auth==2.58.0
+requests==2.34.2
