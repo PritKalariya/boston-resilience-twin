@@ -52,6 +52,12 @@
         "recall": {
           "value": 0.6154,
           "reason": null
+        },
+        "fp": 20,
+        "negatives": 317,
+        "fpr": {
+          "value": 0.0631,
+          "reason": null
         }
       },
       "lower": {
@@ -59,11 +65,21 @@
         "recall": {
           "value": 0.8571,
           "reason": null
+        },
+        "fp": 10,
+        "negatives": 353,
+        "fpr": {
+          "value": 0.0283,
+          "reason": null
         }
       }
     },
     "gap": {
       "value": 0.2418,
+      "reason": null
+    },
+    "fpr_gap": {
+      "value": 0.0348,
       "reason": null
     }
   },

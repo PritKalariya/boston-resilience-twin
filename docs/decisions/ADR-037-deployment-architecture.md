@@ -5,6 +5,7 @@
 - Owner: PritKalariya
 - Phase: deploy
 - Amends ADR-007: the learned retraining controller (contextual bandit, Q-learning stretch) is cut; the drift-threshold rule stays, with thresholds calibrated on a replay and a cooldown (decision 6). Only ADR-007's status line changes, to point here.
+- Amends ADR-008: MLflow tracing for the agents is cut (decision 9). ADR-008's two monitoring tools stand. Only ADR-008's status line changes, to point here.
 
 ## Context
 
@@ -88,6 +89,14 @@ The critic runs inside the agent service and uses its identity, so it has no gra
 - Why bucket-wide reads: everything in the bucket is derived from public data (311, weather, tides, census); list permission cannot be scoped by prefix; and the forecast rows file sits under `dvc/` anyway, beside the training data.
 - Breaks when: the bucket starts holding non-public data. Then the reads get scoped and the forecast rows file moves to its own prefix.
 
+### 9. No MLflow tracing for the agents
+
+The agent service and the critic write no MLflow traces. ADR-008 kept MLflow for "experiment tracking and agent traces"; the experiment tracking stays, the agent traces are cut.
+
+- Chosen against: MLflow tracing for the agents (ADR-008).
+- Why: MLflow runs only under a compose profile that is off by default (ADR-031, #135), so it is a local tool, and no MLflow server is deployed in the cloud. The agent service on Cloud Run has nowhere to send traces. The brief records every claim's source, the critic's result is kept beside it, and the service's runs are in Cloud Logging.
+- Breaks when: an MLflow server (or another trace store) is deployed in the cloud, or the team needs per-call prompt, latency or token traces that Cloud Logging does not hold.
+
 ## Alternatives considered
 | Option | Cost | Effort | Failure behavior |
 |---|---|---|---|
@@ -110,5 +119,6 @@ The critic runs inside the agent service and uses its identity, so it has no gra
 ## Revisit when
 
 - A signal in a decision's "breaks when" appears: a cold-start timeout (1), a skipped or late monitor run (4, 5), the rule firing daily or never (6), or CI image builds near the job limit (7).
+- A cloud trace store appears, or per-call agent traces are needed (9).
 - #170's replay changes a threshold assumption, or the course asks for a learned controller again (6).
 - The bucket starts holding non-public data (2, 8).
