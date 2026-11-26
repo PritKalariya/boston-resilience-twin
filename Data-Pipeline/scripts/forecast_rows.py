@@ -70,7 +70,8 @@ def request_rows(table: pd.DataFrame, inputs: list[str], as_of: date) -> pa.Tabl
     fields += [(name, pa.int64() if name in INTEGER_INPUTS else pa.float64()) for name in inputs]
     columns = {"unit": rows["unit"].astype(str).tolist(), "forecast_date": [as_of + timedelta(days=1)] * len(rows),
                "as_of": [as_of] * len(rows)}
-    columns.update({name: rows[name].tolist() for name in inputs})
+    # a missing value is a null in the file, as the contract has it, not a float NaN
+    columns.update({name: rows[name].astype(object).where(rows[name].notna(), None).tolist() for name in inputs})
     return pa.table(columns, schema=pa.schema(fields))
 
 

@@ -46,10 +46,14 @@ Boston date the run forecasts from (tomorrow is as_of + 1). The DAG fixes it
 from the run's run_after, the moment the run was triggered or scheduled, so a
 run that starts at 18:05 and finishes after UTC midnight keeps one date; conf
 can pass another. The downloads, the feature readers and the processed checks
-take it as --as-of instead of reading the clock. A run is an evening run when
-it was triggered at or after that date's forecast cutoff (18:00 Boston,
-labels_features.csv): only then does ingest_alert_history check the pull
-against the NWS snapshot (ADR-014) and forecast_rows write tomorrow's rows.
+take it as --as-of instead of reading the clock; a DVC stage needs --as-of or
+BRT_AS_OF. A run is an evening run when it was triggered from that date's
+forecast cutoff (18:00 Boston, labels_features.csv) up to 00:00 Boston on the
+forecast day: only then does ingest_alert_history check the pull against the
+NWS snapshot (ADR-014), ingest_open_meteo store the evening GFS answer and
+forecast_rows write tomorrow's rows. A run for an earlier as-of date, by hand
+days later or just after midnight, is not one: its snapshot and answers would
+come from after that evening.
 """
 
 from __future__ import annotations
@@ -177,8 +181,10 @@ def forecast_cutoff(as_of: date, root: Path = REPO) -> datetime:
 
 
 def is_evening(run_after: datetime, as_of: date, root: Path = REPO) -> bool:
-    """Whether a run triggered at run_after is the evening run of as_of: triggered at or after its cutoff."""
-    return run_after >= forecast_cutoff(as_of, root)
+    """Whether a run triggered at run_after is the evening run of as_of: from its cutoff up to 00:00 Boston on the
+    forecast day, as_of + 1 (module docstring)."""
+    midnight = datetime.combine(as_of + timedelta(days=1), clock_time(0), BOSTON)
+    return forecast_cutoff(as_of, root) <= run_after < midnight
 
 
 @dataclass(frozen=True)
@@ -739,14 +745,17 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("step", choices=sorted([*SCRIPTS, *LOCAL]))
     parser.add_argument("--year", type=int, help="parse_legacy_311 only: parse this legacy year into its own file")
     parser.add_argument("--as-of", type=date.fromisoformat,
-                        help="the as-of date, YYYY-MM-DD in Boston; default: the Boston date when the stage starts")
+                        help="the as-of date, YYYY-MM-DD in Boston; default: BRT_AS_OF, and one of the two is required")
     args = parser.parse_args(argv)
     if args.year is not None and (args.step != "parse_legacy_311" or args.year not in LEGACY_YEARS):
         parser.error(f"--year is for parse_legacy_311 only, one of {LEGACY_YEARS[0]} to {LEGACY_YEARS[-1]}")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    # BRT_AS_OF holds one date across the stages of a dvc repro, which each start their own process; a stage
+    # never falls back to the clock, since a repro that crosses midnight would give its stages two dates.
+    as_of = args.as_of or parse_day(os.environ.get("BRT_AS_OF"), "BRT_AS_OF")
+    if as_of is None:
+        parser.error("set --as-of or BRT_AS_OF (YYYY-MM-DD, Boston): every stage of a dvc repro reads one as-of date")
     try:
-        # BRT_AS_OF holds one date across the stages of a dvc repro, which each start their own process.
-        as_of = args.as_of or parse_day(os.environ.get("BRT_AS_OF"), "BRT_AS_OF") or boston_date(datetime.now(BOSTON))
         run_step(args.step, DateRange(as_of=as_of), year=args.year, run_id="dvc")
     except InputError as e:
         sys.exit(str(e))

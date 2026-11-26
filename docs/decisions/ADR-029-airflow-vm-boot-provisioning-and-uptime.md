@@ -1,6 +1,6 @@
 # ADR-029: airflow-vm boot provisioning and uptime
 
-- Status: accepted; supersedes ADR-010's "runs 24/7 from Nov 1" line; amends ADR-023's mount layout and the root-owned `.env` and checkout in ADR-016 item 3; the "does not write `.env` or read Secret Manager" decision is amended by ADR-034
+- Status: accepted; supersedes ADR-010's "runs 24/7 from Nov 1" line; amends ADR-023's mount layout and the root-owned `.env` and checkout in ADR-016 item 3; the "does not write `.env` or read Secret Manager" decision is amended by ADR-034; the "Uptime" line that the DAG never passes `--check-nws` is amended by ADR-037 (an evening run passes it)
 - Date: 2026-11-05
 - Owner: PritKalariya
 - Phase: deploy

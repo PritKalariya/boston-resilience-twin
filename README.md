@@ -133,11 +133,12 @@ dvc pull
 dvc repro      # "Data and pipelines are up to date." when the pull matches dvc.lock
 ```
 
-**Without access**, for example a grader, skip `dvc pull`. `dvc repro` then rebuilds every stage from the public sources, about 2 GB of downloads. It needs Python 3.12 with `Data-Pipeline/requirements.txt` (Tests, below) and a free NOAA CDO token in `NOAA_CDO_TOKEN` (`docs/data-access.md`):
+**Without access**, for example a grader, skip `dvc pull`. `dvc repro` then rebuilds every stage from the public sources, about 2 GB of downloads. It needs Python 3.12 with `Data-Pipeline/requirements.txt` (Tests, below), a free NOAA CDO token in `NOAA_CDO_TOKEN` (`docs/data-access.md`), and the as-of date every stage reads in `BRT_AS_OF` (ADR-037; a stage that runs stops without it):
 
 ```bash
 cd Data-Pipeline
 export NOAA_CDO_TOKEN='...'
+export BRT_AS_OF=$(TZ=America/New_York date +%F)
 dvc repro
 ```
 

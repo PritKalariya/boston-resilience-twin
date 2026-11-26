@@ -4,6 +4,7 @@
 - Date: 2026-11-20
 - Owner: Srikarmk
 - Phase: deploy
+- Amends ADR-029 ("Uptime": the DAG's `ingest_alert_history` never passes `--check-nws`) and ADR-024 (the steps left out of `dvc.yaml`) by reference. Only their status lines change, to point here.
 
 ## Context
 
@@ -37,11 +38,19 @@ hour's archived value comes later, from its own run.
    from `run_after`, so a run that crosses UTC midnight keeps one date. The downloads
    (`noaa_logan.py`, `tides.py`, `open_meteo.py`, `alert_history.py`), `feature_table.py` and
    `validate_data.py --latest` take it as an argument instead of reading the clock. A DVC stage
-   takes `--as-of` or `BRT_AS_OF`, else the Boston date when the stage starts.
-2. **An evening run** is one triggered at or after the as-of date's cutoff (`forecast_cutoff_local`,
-   18:00 Boston). Only an evening run checks the IEM pull against `ingest_nws_alerts`' snapshot
-   (ADR-014; the snapshot task now runs first), stores the evening GFS answer, and writes
-   tomorrow's rows. A run by hand earlier in the day builds the history only.
+   needs `--as-of` or `BRT_AS_OF` and stops without one: each stage is its own process, so a
+   `dvc repro` that crossed midnight would otherwise give its stages two dates. The as-of date is
+   not a DVC dependency, so a new `BRT_AS_OF` alone makes no stage stale. A new data version is
+   built as the runbook's "Data versions (#40)" says: export `BRT_AS_OF`, run every download step
+   with `pipeline_steps.py`, then `dvc repro`. `dvc repro --force` rebuilds every stage for a new
+   as-of date too, but downloads every year again.
+2. **An evening run** is one triggered from the as-of date's cutoff (`forecast_cutoff_local`,
+   18:00 Boston) up to 00:00 Boston on the forecast day, D = A + 1. Only an evening run checks the
+   IEM pull against `ingest_nws_alerts`' snapshot (ADR-014; the snapshot task now runs first, and
+   this amends ADR-029, whose DAG never passed `--check-nws`), stores the evening GFS answer, and
+   writes tomorrow's rows. A run by hand earlier in the day builds the history only, and so does a
+   run for an earlier as-of date, by hand days later or just after midnight: its NWS snapshot and
+   GFS answer would come from after that evening, and the check covers that evening only.
 3. **The GFS day-before set ends tomorrow** (end rule `tomorrow`: 23:00 UTC on A + 2), from the same
    Previous Runs API and the same request. Its current year is downloaded again on every run, so
    hours stored as forecasts are replaced by archived values once their day is over. The
@@ -59,9 +68,14 @@ hour's archived value comes later, from its own run.
    D - 2, when the GFS year files with D's hours were fetched before the cutoff, or when a weather
    or tide feature of D is missing. The zero days are never read (every 311 feature stops at D - 2)
    and never written to `daily_counts`, `labels` or `features`. The step is not a DVC stage: its
-   rows come from one evening's live downloads.
+   rows come from one evening's live downloads, a third step left out of `dvc.yaml` beside the two
+   NWS snapshots (this amends ADR-024's list). `push_data` does not wait for it: the rows file
+   reaches the bucket through D8's manifest, not `dvc push`.
 6. **Parity is measured.** An evening run stores the GFS answer for A to A + 2 in the set's state
-   folder (`evening/<as_of>.json`). `forecast_parity.py` compares each one, once D is over and the
+   folder (`evening/<as_of>.json`), never at or after 00:00 Boston on D: a cleared task rerun the
+   next day keeps its run's evening, so `save_evening` checks the fetch time itself.
+   `forecast_parity.py` skips an answer fetched before the cutoff or after D began, and compares
+   each other one, once D is over and the
    year files were fetched after D + 1 12:00 UTC, with the archive through the same rule. The
    tolerance is 0.05 per daily value, in its own unit (mm, °C, m/s): the API stores one decimal.
 7. **The counts end on the new system's last full day** once every storm group both systems carry
@@ -94,6 +108,19 @@ hour's archived value comes later, from its own run.
   `use_in_model` column changes the file's columns and is a new contract version, announced in
   the PR that changes the catalog.
 - One more Open-Meteo request per evening (the evening answer).
+- **Legacy-only categories count zero once the legacy export stops.** The new end rule lets the
+  counts run past the legacy export's last request, and from then on every category that
+  `docs/data/category-map.csv` marks `legacy_only` counts zero. For `flooding` that changes nothing
+  the model reads. For `snow_ice` it does: Unshoveled Sidewalk, Misc. Snow Complaint, City/State
+  Snow Issues and Snow/Ice Control are legacy only, and in 2025 they were 6,527 of the 7,297
+  `snow_ice` requests. In the winter of 2025 to 2026 the legacy system received 12,834 Snow Plowing
+  and 12,159 Unshoveled Sidewalk requests. On 2026-11-24 the new system held one Snow Plowing
+  request and no sidewalk or snow complaint category, and the legacy export's last request was on
+  2026-11-10 (359 in November, against 11,763 in September). If the city moves sidewalk snow
+  requests into a new-system category this winter, they stay `unmapped` until the category map
+  maps them (a reviewed PR, as for every map change), so the first storms' `snow_ice` counts, the
+  `snow_ice_rel_*` inputs and the snow labels read low. The old rule would not have hidden this:
+  it stopped the counts at the legacy export's last request, so no live row could be built at all.
 
 ## Revisit when
 
@@ -101,4 +128,6 @@ hour's archived value comes later, from its own run.
   GFS runs arrived more than 7 hours late.
 - The legacy 311 system starts receiving a storm category again (a new `change-points.csv` storm
   group row), or the city moves flooding requests to a new-system category.
+- The first snowfall of the 2026 to 2027 winter: check which new-system categories its sidewalk and
+  snow requests arrive in, and map them before the counts that feed `snow_ice` are trusted.
 - D8 moves the evening run's start past 23:59 Boston, which would change its as-of date.

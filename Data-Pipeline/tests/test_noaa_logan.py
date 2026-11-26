@@ -149,3 +149,16 @@ def test_main_sends_the_token_and_reports_each_year(tmp_path, monkeypatch, capsy
     assert capsys.readouterr().out.strip() == (
         f"NOAA {noaa_logan.STATION}: 2015.json downloaded (300 values), 2016.json downloaded (20 values)")
     assert {headers["token"] for headers in sent} == {"test-token"}
+
+
+def test_main_fetches_up_to_the_as_of_date_in_boston(tmp_path, monkeypatch, capsys):
+    # #160: the years run to the as-of date, given or the Boston date of now, not the UTC date.
+    monkeypatch.setenv("NOAA_CDO_TOKEN", "test-token")
+    fake = FakeCdo({2015: 30, 2016: 5})
+    monkeypatch.setattr(noaa_logan.rf, "get", lambda url, headers: fake(url))
+    monkeypatch.setattr(noaa_logan.rf, "utc_now", lambda: datetime(2016, 1, 1, 3, 0, tzinfo=timezone.utc))  # 22:00 EST
+    noaa_logan.main(["--raw-dir", str(tmp_path / "a"), "--state-dir", str(tmp_path / "sa")])
+    assert {year for year, *_ in fake.calls} == {2015}  # still 31 December in Boston
+    fake.calls.clear()
+    noaa_logan.main(["--raw-dir", str(tmp_path / "b"), "--state-dir", str(tmp_path / "sb"), "--as-of", "2016-01-05"])
+    assert {year for year, *_ in fake.calls} == {2015, 2016}

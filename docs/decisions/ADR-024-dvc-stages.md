@@ -1,6 +1,6 @@
 # ADR-024: DVC stages are generated from the DAG's step plan
 
-- Status: accepted
+- Status: accepted; its list of steps left out of `dvc.yaml` is amended by ADR-037 (`forecast_rows`)
 - Date: 2026-10-27
 - Owner: Kirtan10
 - Phase: data

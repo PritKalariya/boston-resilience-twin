@@ -1,9 +1,11 @@
 """forecast_parity.py (#160) on an evening answer and an archive that open_meteo.py stores from fake answers."""
 
 import json
+import sys
 from datetime import date, datetime, timezone
 
 import pandas as pd
+import pytest
 
 import forecast_parity
 import open_meteo
@@ -68,3 +70,44 @@ def test_an_answer_from_before_the_cutoff_or_an_archive_not_final_yet_is_left_ou
     table, skipped = run(tmp_path)
     assert table.empty and skipped == ["2024-02-02: fetched 2024-02-02 21:00:00+00:00, before the cutoff "
                                        "2024-02-02 23:00:00+00:00"]
+
+
+def test_an_answer_fetched_after_the_forecast_day_began_is_left_out(tmp_path):
+    store(tmp_path, EVENING, lambda name, hour: 1.0, evening=True)
+    captures = tmp_path / "state" / om.SET / "evening" / "_captures.jsonl"
+    line = json.loads(captures.read_text())
+    captures.write_text(json.dumps({**line, "fetched_at": "2024-02-03T05:00:00+00:00"}) + "\n")  # 00:00 EST on D
+    store(tmp_path, LATER, lambda name, hour: 1.0, evening=False)
+    table, skipped = run(tmp_path)
+    assert table.empty and skipped == ["2024-02-02: fetched 2024-02-03 05:00:00+00:00, after 2024-02-03 began at "
+                                       "2024-02-03 05:00:00+00:00"]
+
+
+def run_main(root, monkeypatch):
+    state = root / "state" / om.SET
+    monkeypatch.setattr(sys, "argv", ["forecast_parity.py", "--evening-dir", str(state / "evening"),
+                                      "--forecast-dir", str(root / "raw" / om.SET), "--forecast-state", str(state),
+                                      "--settings", str(CONFIG / "labels_features.csv")])
+    forecast_parity.main()
+
+
+def test_main_prints_the_table_and_passes_within_the_tolerance(tmp_path, monkeypatch, capsys):
+    store(tmp_path, EVENING, filled_late, evening=True)
+    store(tmp_path, LATER, lambda name, hour: 1.0, evening=False)
+    run_main(tmp_path, monkeypatch)
+    out = capsys.readouterr().out
+    assert "| 2024-02-02 |" in out and "1 evenings; largest daily difference 0.000 (tolerance 0.05)" in out
+
+
+def test_main_exits_when_a_day_is_over_the_tolerance(tmp_path, monkeypatch, capsys):
+    store(tmp_path, EVENING, lambda name, hour: 1.0, evening=True)
+    store(tmp_path, LATER, lambda name, hour: 3.0 if name == "precipitation_previous_day1" and hour == "2024-02-03T10:00"
+          else 1.0, evening=False)
+    with pytest.raises(SystemExit, match="1 evenings differ by more than 0.05: 2024-02-02"):
+        run_main(tmp_path, monkeypatch)
+
+
+def test_main_with_no_evening_answer_says_so(tmp_path, monkeypatch, capsys):
+    store(tmp_path, LATER, lambda name, hour: 1.0, evening=False)
+    run_main(tmp_path, monkeypatch)
+    assert capsys.readouterr().out.strip() == "no evening to compare yet"

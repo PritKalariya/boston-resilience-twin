@@ -5,7 +5,8 @@
 An evening run stores the Previous Runs API answer for as-of A to A + 2 in the
 GFS set's state folder, evening/<A>.json (open_meteo.py --evening). Once the
 forecast day D = A + 1 is over, the set's year files hold the archived values
-for D's hours. For every evening answer fetched after A's cutoff and every D
+for D's hours. For every evening answer fetched from A's cutoff up to 00:00
+Boston on D (a later one no longer shows what the evening saw), and every D
 the year files were fetched after FINAL_AFTER, this builds D's daily values
 from both with open_meteo_forecast.daily_forecasts (the availability rule of
 the history) and prints how far they differ, with a count of the raw hourly
@@ -88,6 +89,10 @@ def parity(evening_dir, forecast_dir, state_dir, settings: dict, now: pd.Timesta
         years = om.years_for([day])
         if at < cutoff:
             skipped.append(f"{as_of}: fetched {at}, before the cutoff {cutoff}")
+            continue
+        begins = pd.Timestamp(day, tz="America/New_York").tz_convert("UTC")
+        if at >= begins:
+            skipped.append(f"{as_of}: fetched {at}, after {day.date()} began at {begins}")
             continue
         final = day.tz_localize("UTC") + FINAL_AFTER
         if any(archived.get(year, pd.Timestamp.min.tz_localize("UTC")) < final for year in years):

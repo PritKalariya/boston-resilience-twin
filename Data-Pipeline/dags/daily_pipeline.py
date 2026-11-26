@@ -9,11 +9,11 @@ which the ingest tasks refresh first, for any range.
 
 as_of (#160): the Boston date the run forecasts from, by default the Boston date
 of the run's run_after (when it was triggered or scheduled), so every task of a
-run reads one date even when the run crosses UTC midnight. A run triggered at or
-after that date's 18:00 cutoff is an evening run: ingest_alert_history checks
-the IEM pull against ingest_nws_alerts' snapshot, and forecast_rows writes
-tomorrow's rows to Data-Pipeline/data/forecast/<as_of>/features.parquet. Any
-other run skips both.
+run reads one date even when the run crosses UTC midnight. A run triggered from
+that date's 18:00 cutoff up to midnight is an evening run: ingest_alert_history
+checks the IEM pull against ingest_nws_alerts' snapshot, ingest_open_meteo
+stores the evening GFS answer, and forecast_rows writes tomorrow's rows to
+Data-Pipeline/data/forecast/<as_of>/features.parquet. Any other run skips them.
 
 Twenty-one tasks run pipeline scripts: the two 311 downloads (#6), the five
 weather, tide and Open-Meteo downloads (#7, #8), the alert history, labels
@@ -21,9 +21,10 @@ and features (#16), bias_slicing (#32) and forecast_rows (#160). parse_legacy_31
 legacy year, at most LEGACY_PARALLEL at a time (4 unless .env sets it), and
 merge_legacy_311 joins the years (#37). No task is a placeholder now; a new one
 listed in pipeline_steps.PLANNED logs the issue that builds it until its script
-is in pipeline_steps.SCRIPTS. The last task, push_data, pushes
+is in pipeline_steps.SCRIPTS. push_data, last after the history steps, pushes
 the DVC-tracked data to the team remote (dvc_push.py, #19); without bucket
-access it logs `dvc push skipped: ...` and succeeds.
+access it logs `dvc push skipped: ...` and succeeds. forecast_rows ends beside
+it: the rows file is not a DVC output, so the push does not wait for it.
 
 Every task logs its run id, rows in and rows out (#36). The ingest tasks retry
 twice, about 5 to 10 minutes and then 10 to 15 minutes apart (exponential
@@ -197,9 +198,9 @@ def daily_pipeline():
     [combined, static] >> real("spatial_join") >> counts
     features = real("feature_table")
     counts >> [real("surge_labels"), features] >> validated
-    pushed = push_data()
-    validated >> [real("schema_and_statistics"), real("bias_slicing")] >> pushed
-    features >> real("forecast_rows") >> pushed
+    validated >> [real("schema_and_statistics"), real("bias_slicing")] >> push_data()
+    # The rows file is not a DVC output (D8's manifest task uploads it), so the push does not wait for it.
+    features >> real("forecast_rows")
 
 
 daily_pipeline()

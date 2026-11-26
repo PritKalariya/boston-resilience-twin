@@ -929,15 +929,21 @@ def test_the_as_of_date_is_the_boston_date_of_run_after():
         DateRange.from_params({"as_of": "2014-12-31"})
 
 
-@pytest.mark.parametrize("run_after, evening", [
-    (datetime(2026, 11, 24, 22, 59, tzinfo=timezone.utc), False),  # 17:59 EST
-    (datetime(2026, 11, 24, 23, 0, tzinfo=timezone.utc), True),  # 18:00 EST
-    (datetime(2026, 7, 1, 21, 59, tzinfo=timezone.utc), False),  # 17:59 EDT
-    (datetime(2026, 7, 1, 22, 0, tzinfo=timezone.utc), True),  # 18:00 EDT
-    (datetime(2026, 11, 24, 15, 0, tzinfo=timezone.utc), False),  # a run by hand at 10:00
+@pytest.mark.parametrize("run_after, as_of, evening", [
+    (datetime(2026, 11, 24, 22, 59, tzinfo=timezone.utc), None, False),  # 17:59 EST
+    (datetime(2026, 11, 24, 23, 0, tzinfo=timezone.utc), None, True),  # 18:00 EST
+    (datetime(2026, 7, 1, 21, 59, tzinfo=timezone.utc), None, False),  # 17:59 EDT
+    (datetime(2026, 7, 1, 22, 0, tzinfo=timezone.utc), None, True),  # 18:00 EDT
+    (datetime(2026, 11, 24, 15, 0, tzinfo=timezone.utc), None, False),  # a run by hand at 10:00
+    (datetime(2026, 11, 25, 4, 59, tzinfo=timezone.utc), "2026-11-24", True),  # 23:59 EST, still that evening
+    (datetime(2026, 11, 25, 5, 0, tzinfo=timezone.utc), "2026-11-24", False),  # 00:00 EST: the forecast day began
+    (datetime(2026, 7, 2, 3, 59, tzinfo=timezone.utc), "2026-07-01", True),  # 23:59 EDT
+    (datetime(2026, 7, 2, 4, 0, tzinfo=timezone.utc), "2026-07-01", False),  # 00:00 EDT
+    (datetime(2026, 11, 25, 5, 30, tzinfo=timezone.utc), "2026-11-24", False),  # 00:30 the next day, yesterday's as-of
+    (datetime(2026, 12, 1, 23, 5, tzinfo=timezone.utc), "2026-11-24", False),  # a run by hand 7 days late
 ])
-def test_a_run_is_an_evening_run_from_the_cutoff_on(run_after, evening):
-    assert evening_run(run_after).evening is evening
+def test_a_run_is_an_evening_run_from_the_cutoff_until_the_forecast_day_begins(run_after, as_of, evening):
+    assert evening_run(run_after, {"as_of": as_of} if as_of else None).evening is evening
 
 
 def test_only_an_evening_run_checks_the_alert_pull_against_the_nws_snapshot(tmp_path):

@@ -22,7 +22,9 @@ day D may use (open_meteo_forecast.py) is unchanged. With --evening (an evening
 run, after the cutoff) a `tomorrow` set also stores the answer for as-of to
 as-of + 2, byte for byte, in its state folder under evening/<as_of>.json, with a
 line in evening/_captures.jsonl, so forecast_parity.py can compare what the
-evening run saw with the archive once the day is over. A year already stored
+evening run saw with the archive once the day is over. It stores nothing at or
+after 00:00 Boston on the forecast day (as-of + 1): a cleared task rerun the next
+day keeps its run's evening, and its answer would come from after the evening. A year already stored
 through its end is skipped without a request. A `yesterday` year whose last day came back with gaps in a
 value that has data stays marked incomplete and is fetched again: on every run
 for FINAL_DAY_RETRY_DAYS after that day, then every FINAL_DAY_RECHECK_DAYS until
@@ -646,9 +648,18 @@ def refresh_file(ws, folder, manifest, client, start, stop, now, force=False, dr
     return result
 
 
+def forecast_day_start(as_of: date) -> datetime:
+    """00:00 Boston on the forecast day, as_of + 1: from then on no answer is the evening's."""
+    return datetime.combine(as_of + timedelta(days=1), datetime.min.time(), ZoneInfo("America/New_York"))
+
+
 def save_evening(ws: WeatherSet, state: Path, client, as_of: date, now: datetime) -> dict:
     """Store a `tomorrow` set's answer for as_of to as_of + 2, as the evening run sees it, for forecast_parity.py.
-    A later run of the same evening replaces it; _captures.jsonl keeps a line per answer."""
+    A later run of the same evening replaces it; _captures.jsonl keeps a line per answer. At or after 00:00 Boston
+    on the forecast day it fetches and stores nothing, and returns why."""
+    if now >= forecast_day_start(as_of):
+        return {"as_of": as_of.isoformat(), "refused": f"{now.isoformat(timespec='seconds')} is after "
+                f"{forecast_day_start(as_of).isoformat()}, when {as_of + timedelta(days=1)} began"}
     stop = as_of + timedelta(days=2)
     url = request_url(ws, as_of, stop)
     body = client.get(url)
@@ -719,7 +730,12 @@ def refresh_set(ws: WeatherSet, raw_root: Path, state_root: Path, client, now: d
     record = {"set": ws.name, "as_of": as_of.isoformat(), "end": end.isoformat(), "files": results, "failed": failed}
     if evening and ws.end == "tomorrow" and not dry_run and not stopped:
         try:
-            record["evening"] = save_evening(ws, state, client, as_of, now)["as_of"]
+            saved = save_evening(ws, state, client, as_of, now)
+            if "refused" in saved:
+                log.warning("%s evening answer for %s not stored: %s", ws.name, as_of, saved["refused"])
+                record["evening_refused"] = saved["refused"]
+            else:
+                record["evening"] = saved["as_of"]
         except RateLimited as exc:
             record["stopped"], stopped = str(exc), str(exc)
             failed.append(f"{ws.name}/{EVENING}")

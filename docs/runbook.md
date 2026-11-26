@@ -1225,8 +1225,10 @@ dvc dag         # the stages and their order
 
 Without remote access, `dvc repro` rebuilds every stage from the public
 sources (about 2 GB of downloads). It needs Python 3.12 with
-`Data-Pipeline/requirements.txt` and `NOAA_CDO_TOKEN` in the environment
-(`docs/data-access.md`). Stages run one after the other, with no retries: a
+`Data-Pipeline/requirements.txt`, `NOAA_CDO_TOKEN` in the environment
+(`docs/data-access.md`) and `BRT_AS_OF`, the as-of date every stage reads
+(ADR-037): `export BRT_AS_OF=$(TZ=America/New_York date +%F)`. A stage that
+runs without it stops; a `dvc repro` that runs nothing does not need it. Stages run one after the other, with no retries: a
 clean clone took 630 s on a laptop (2026-10-27), 389 s of it the seven downloads, and a
 second `dvc repro` 12 s. The data and the DVC cache take about 2.1 GB each.
 
@@ -1251,13 +1253,16 @@ files it names pushed to the remote. The versions so far:
 
 **Making one.** From `Data-Pipeline/`, after new public data (the 2026 legacy
 311 file and the new-system export refresh daily). `dvc repro` alone does not
-download it: the download stages depend only on their code and config, so with
-nothing new on disk DVC prints `Stage 'ingest_legacy_311' didn't change,
-skipping`. Fetch first, then rebuild:
+download it: the download stages depend only on their code and config, and the
+as-of date is not a dependency (ADR-037), so with nothing new on disk DVC
+prints `Stage 'ingest_legacy_311' didn't change, skipping`. Fetch first, with
+the version's as-of date, then rebuild:
 
 ```bash
-python scripts/pipeline_steps.py ingest_legacy_311   # replaces a file only when its content changed
-python scripts/pipeline_steps.py ingest_new_311
+export BRT_AS_OF=$(TZ=America/New_York date +%F)   # one date for every step and stage (ADR-037)
+for s in ingest_legacy_311 ingest_new_311 ingest_noaa_logan ingest_tides ingest_open_meteo ingest_alert_history; do
+  python scripts/pipeline_steps.py $s                # replaces a file only when its content changed
+done
 dvc status                                 # the download stages show "changed outs"
 dvc repro                                  # reruns them and everything after; dvc.lock changes
 python scripts/dvc_push.py                 # push first, so the commit never points at missing data

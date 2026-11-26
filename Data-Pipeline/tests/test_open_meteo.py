@@ -653,6 +653,26 @@ def test_only_an_evening_run_stores_tomorrows_answer_in_the_state_folder(tmp_pat
     assert "evening" not in first["sets"][0] and not (tmp_path / "s2" / "first_hours_ecmwf_ifs" / "evening").exists()
 
 
+def test_an_evening_answer_fetched_after_the_forecast_day_began_is_not_stored(tmp_path):
+    # A cleared ingest_open_meteo rerun the next day keeps its run's evening (#160 review).
+    client = FakeOpenMeteo()
+    run_download(tomorrow_set(tmp_path), tmp_path / "raw", client, state_root=tmp_path / "state", now=EVENING_NOW,
+                 evening=True)
+    evening = tmp_path / "state" / "day_before_ncep_gfs_global" / "evening"
+    stored = (evening / "2026-10-22.json").read_bytes()
+    client.urls.clear()
+    next_day = datetime(2026, 10, 23, 4, 0, tzinfo=timezone.utc)  # 00:00 EDT on 23 October, the forecast day
+    result = run_download(tomorrow_set(tmp_path), tmp_path / "raw", client, state_root=tmp_path / "state",
+                          now=next_day, as_of=date(2026, 10, 22), evening=True)
+    record = result["sets"][0]
+    assert result["failed"] == [] and "evening" not in record
+    assert record["evening_refused"] == ("2026-10-23T04:00:00+00:00 is after 2026-10-23T00:00:00-04:00, "
+                                         "when 2026-10-23 began")
+    assert (evening / "2026-10-22.json").read_bytes() == stored
+    assert len((evening / "_captures.jsonl").read_text().splitlines()) == 1
+    assert not any("start_date=2026-10-22" in url for url in client.urls)  # nothing was fetched for it
+
+
 def test_day_before_rerun_on_the_same_day_sends_no_request(tmp_path):
     client = FakeOpenMeteo(value_starts=SNOW_STARTS)
     sets = day_before(tmp_path)

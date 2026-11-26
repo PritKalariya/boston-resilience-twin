@@ -35,6 +35,7 @@ def sources(tmp_path, monkeypatch):
                                                                                         index=False)
     store_logan(tmp_path, AS_OF, lambda datatype, day: 1.0)
     store_tides(tmp_path, AS_OF, lambda hour: 2.0)
+    make_static_dir(tmp_path / "static")
     return tmp_path
 
 
@@ -50,7 +51,7 @@ def run_main(root, monkeypatch, as_of=AS_OF, counts="counts.parquet"):
     out = root / "forecast" / str(as_of) / "features.parquet"
     monkeypatch.setattr(sys, "argv", [
         "forecast_rows.py", "--counts", str(root / counts), "--alerts", str(root / "alerts.parquet"),
-        "--static-dir", str(make_static_dir(root / "static")), "--settings", str(CONFIG / "labels_features.csv"),
+        "--static-dir", str(root / "static"), "--settings", str(CONFIG / "labels_features.csv"),
         "--noaa-dir", str(root / "raw" / "weather" / "noaa_logan"),
         "--forecast-dir", str(root / "raw" / "open_meteo" / om.SET),
         "--forecast-state", str(root / "state" / "open_meteo" / om.SET),
@@ -64,26 +65,27 @@ def full_rows(root, as_of=AS_OF):
     """build_features' rows behind the file, with every column, as forecast_rows.forecast_rows returns them."""
     return forecast_rows.forecast_rows(
         pd.read_parquet(root / "counts.parquet"), pd.read_parquet(root / "alerts.parquet"),
-        feature_table.static_attributes(make_static_dir(root / "static")), load_settings(CONFIG / "labels_features.csv"),
+        feature_table.static_attributes(root / "static"), load_settings(CONFIG / "labels_features.csv"),
         root / "raw" / "weather" / "noaa_logan", root / "raw" / "open_meteo" / om.SET,
         root / "state" / "open_meteo" / om.SET, root / "raw" / "tides" / "predicted", as_of)
 
 
-def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def digests(root):
+    """Every file under root with its sha256."""
+    return {path.relative_to(root): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(root.rglob("*")) if path.is_file()}
 
 
-def test_tomorrows_rows_use_days_up_to_d_minus_2_and_leave_the_processed_files_alone(sources, monkeypatch):
+def test_tomorrows_rows_use_days_up_to_d_minus_2_and_write_nothing_else(sources, monkeypatch):
     store_gfs(sources, EVENING)
-    processed = sources / "processed"
-    processed.mkdir()
-    for name in ("labels.parquet", "features.parquet"):  # stand-ins: only their bytes matter here
-        counts_table(start="2023-12-20", days=44).to_parquet(processed / name, index=False)
-    before = {path.name: digest(path) for path in [sources / "counts.parquet", *processed.iterdir()]}
+    before = digests(sources)
 
     table = run_main(sources, monkeypatch)
 
-    assert {path.name: digest(path) for path in [sources / "counts.parquet", *processed.iterdir()]} == before
+    # The counts and every download are byte for byte as they were; the one new file is the output.
+    after = digests(sources)
+    assert {path: sha for path, sha in after.items() if path in before} == before
+    assert set(after) - set(before) == {Path("forecast") / str(AS_OF) / "features.parquet"}
     # The file is the /predict request rows (docs/contracts/predict.md): the contract fixture's columns and types.
     assert table.schema.equals(pq.read_schema(CONTRACT_ROWS))
     assert table.column_names == ["unit", "forecast_date", "as_of", *INPUTS]
@@ -148,3 +150,38 @@ def test_an_input_the_feature_table_lacks_stops_the_file():
     table = pd.DataFrame({"unit": ["East"], "day_of_week": [1]})
     with pytest.raises(ValueError, match="the feature table has no month, which the catalog marks use_in_model = yes"):
         forecast_rows.request_rows(table, ["day_of_week", "month"], AS_OF)
+
+
+def test_a_missing_input_is_a_null_in_the_file():
+    table = pd.DataFrame({"unit": ["West", "East"], "day_of_week": [1, 1], "tree_rel3": [float("nan"), 2.0]})
+    rows = forecast_rows.request_rows(table, ["day_of_week", "tree_rel3"], AS_OF)
+    assert rows.column("tree_rel3").null_count == 1 and rows.column("tree_rel3").to_pylist() == [2.0, None]
+    assert rows.column("unit").to_pylist() == ["East", "West"]
+
+
+def test_a_gfs_set_with_no_manifest_stops_the_run(sources, monkeypatch):
+    store_gfs(sources, EVENING)
+    (sources / "state" / "open_meteo" / om.SET / "_manifest.json").unlink()
+    with pytest.raises(ValueError, match="_manifest.json not found; run ingest_open_meteo in the evening run"):
+        run_main(sources, monkeypatch)
+
+
+def test_a_missing_weather_value_of_tomorrow_stops_the_run(sources, monkeypatch):
+    sets = open_meteo.read_config(CONFIG / "open_meteo.csv", today=AS_OF)
+
+    def gap(name, hour):  # tomorrow's 12:00 UTC temperature is missing in both forecasts
+        return None if name.startswith("temperature_2m") and hour == "2024-02-03T12:00" else 1.0
+
+    run = open_meteo.run_download(sets, sources / "raw" / "open_meteo", PreviousRuns(gap),
+                                  state_root=sources / "state" / "open_meteo", now=EVENING, only=[om.SET], as_of=AS_OF)
+    assert not run["failed"], run
+    with pytest.raises(ValueError, match="2024-02-03 has no wx_tmax_c, wx_tmin_c; check the evening's Open-Meteo"):
+        run_main(sources, monkeypatch)
+
+
+def test_a_row_count_other_than_one_per_unit_stops_the_run(sources, monkeypatch):
+    store_gfs(sources, EVENING)
+    real = forecast_rows.build_features
+    monkeypatch.setattr(forecast_rows, "build_features", lambda *a, **k: real(*a, **k).head(1))
+    with pytest.raises(AssertionError, match="1 rows for 2 units"):
+        full_rows(sources)

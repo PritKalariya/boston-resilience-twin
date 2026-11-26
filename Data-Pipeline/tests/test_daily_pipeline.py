@@ -147,9 +147,11 @@ def test_every_real_step_and_placeholder_is_one_task(dag):
 
 def test_every_task_runs_after_the_range_check_and_before_the_push(dag):
     # Anything else at the start would run before the params are checked; anything else at
-    # the end would finish after the data is pushed to the DVC remote.
+    # the end would finish after the data is pushed to the DVC remote. forecast_rows is the one
+    # other end: its file is not a DVC output, so the push does not wait for it (#160).
     assert [task.task_id for task in dag.roots] == ["check_range"]
-    assert [task.task_id for task in dag.leaves] == ["push_data"]
+    assert sorted(task.task_id for task in dag.leaves) == ["forecast_rows", "push_data"]
+    assert "forecast_rows" not in upstream_of(dag, "push_data")
 
 
 def test_each_step_runs_after_the_steps_that_write_its_inputs(dag):
@@ -203,9 +205,9 @@ def test_the_alert_history_runs_after_the_nws_snapshot_it_is_checked_against(dag
     assert "ingest_nws_alerts" in upstream_of(dag, "ingest_alert_history")
 
 
-def test_tomorrows_rows_come_after_the_features_and_before_the_push(dag):
+def test_tomorrows_rows_come_after_the_features_and_the_push_does_not_wait_for_them(dag):
     assert "feature_table" in upstream_of(dag, "forecast_rows")
-    assert "forecast_rows" in upstream_of(dag, "push_data")
+    assert "forecast_rows" not in upstream_of(dag, "push_data")
 
 
 def test_every_task_of_a_run_reads_the_as_of_date_of_its_run_after(bag, monkeypatch):
@@ -218,7 +220,8 @@ def test_every_task_of_a_run_reads_the_as_of_date_of_its_run_after(bag, monkeypa
     spec.loader.exec_module(module)
     params = {"start": "2015-01-01", "end": None, "as_of": None}
     started = datetime(2026, 11, 24, 23, 5, tzinfo=timezone.utc)  # 18:05 in Boston; later tasks run after UTC midnight
-    for conf, as_of, evening in (({}, date(2026, 11, 24), True), ({"as_of": "2026-11-20"}, date(2026, 11, 20), True)):
+    # A run for an earlier as-of date is not that evening's run (#160 review): its snapshot is from later.
+    for conf, as_of, evening in (({}, date(2026, 11, 24), True), ({"as_of": "2026-11-20"}, date(2026, 11, 20), False)):
         run = SimpleNamespace(conf=conf, run_after=started)
         monkeypatch.setattr(module, "get_current_context", lambda: {"params": params, "dag_run": run})
         days = module.run_range()
