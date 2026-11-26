@@ -2050,7 +2050,7 @@ Then browse to `http://localhost:18080` and log in as `airflow` with the passwor
 
 ### Update after a merge to main
 
-The VM updates itself at 17:30 Boston, before the 18:05 evening run: `brt-code-sync.timer`, which the startup script installs (ADR-029, note of 2026-11-25), runs `Data-Pipeline/scripts/code_sync.py`. It pulls `main` and rebuilds the stack only when the second line below is needed, and alerts Slack when anything fails. It postpones a rebuild while a `daily_pipeline` run is in progress. Check the timer and the last run, or run it now instead of waiting:
+The VM updates itself at 17:30 Boston, before the 18:05 evening run: `brt-code-sync.timer`, which the startup script installs (ADR-029, note of 2026-11-25), runs `Data-Pipeline/scripts/code_sync.py`. It pulls `main` and rebuilds the stack only when the second line below is needed, and alerts Slack when anything fails. While a `daily_pipeline` run is in progress it waits for the next 17:30, so a run never has its code changed under it. It builds the image before it recreates the containers, so a build never stops a run, and it records the commit the stack was last built from (`/var/lib/brt-code-sync/built`), so a rebuild that waited or failed is tried again, and alerted again, at every 17:30 until it goes through. A rebuild by hand is picked up at the next 17:30 as a cached one. Check the timer and the last run, or run it now instead of waiting:
 
 ```bash
 systemctl list-timers brt-code-sync.timer

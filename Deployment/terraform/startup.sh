@@ -248,9 +248,11 @@ After=network-online.target docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 $CLONE_DIR/Data-Pipeline/scripts/code_sync.py --repo $CLONE_DIR
-# code_sync.py stops each step on its own timeout (30 minutes for a build); this is the backstop.
-TimeoutStartSec=45min
+# systemd creates /var/lib/brt-code-sync, where code_sync.py records the commit the stack was last built from.
+StateDirectory=brt-code-sync
+ExecStart=/usr/bin/python3 $CLONE_DIR/Data-Pipeline/scripts/code_sync.py --repo $CLONE_DIR --state-dir /var/lib/brt-code-sync
+# code_sync.py stops each step on its own timeout (30 minutes for the build, 5 for the recreate); this is the backstop.
+TimeoutStartSec=60min
 EOF
   cat >"$SYSTEMD_DIR/$SYNC_UNIT.timer" <<EOF || return 1
 [Unit]
