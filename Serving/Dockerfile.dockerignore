@@ -13,6 +13,10 @@
 !docs/contracts/fixtures/forecasts/2026-11-26.parquet
 !docs/contracts/fixtures/forecasts/2026-11-26.records.json
 !Model-Development/requirements.lock
+!Serving/deploy.csv
+!Model-Development/registry/registry.csv
+!.github/workflows/deploy-serving.yml
+!.github/workflows/model.yml
 !Model-Development/scripts/models.py
 !Model-Development/scripts/inner_folds.py
 !Model-Development/scripts/model_params.py

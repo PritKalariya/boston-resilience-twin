@@ -46,3 +46,9 @@ variable "vm_admins" {
   EOT
   type        = list(string)
 }
+
+variable "serving_runtime_email" {
+  description = "The runtime service account of the model service in project 2 (Deployment/terraform-project2 cloud_run.tf, output serving_runtime_email). It gets roles/storage.objectViewer on the data bucket, limited to forecasts/ (ADR-038). Apply project 2 first: the account must exist."
+  type        = string
+  default     = "brt-serving@boston-resilience-twin-p2.iam.gserviceaccount.com"
+}

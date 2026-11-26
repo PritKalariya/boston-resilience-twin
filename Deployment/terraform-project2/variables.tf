@@ -56,3 +56,15 @@ variable "project_admins" {
   EOT
   type        = list(string)
 }
+
+variable "airflow_vm_sa_email" {
+  description = "The Airflow VM's service account in project 1 (Deployment/terraform service_account.tf). It is the only identity besides project admins that may call brt-model (roles/run.invoker, ADR-038)."
+  type        = string
+  default     = "airflow-vm-sa@boston-resilience-twin.iam.gserviceaccount.com"
+}
+
+variable "data_bucket_name" {
+  description = "The project 1 data bucket. brt-web reads forecasts/ in it (FORECASTS_ROOT)."
+  type        = string
+  default     = "boston-resilience-twin-data"
+}
