@@ -797,7 +797,8 @@ def test_main_prepares_the_pulled_years(tmp_path, monkeypatch, capsys):
     assert "1 of 2 alerts were first announced to begin after their first bulletin" in printed
 
 
-def test_main_checks_freshness_before_it_writes(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("flag", ["--as-of", "--today"])  # the DAG passes --as-of (#160); --today still works
+def test_main_checks_freshness_before_it_writes(tmp_path, monkeypatch, capsys, flag):
     raw_dir, state_dir, nws_dir = tmp_path / "nws_alerts", tmp_path / "state", tmp_path / "nws"
     raw_dir.mkdir()
     write_csv(raw_path(raw_dir, 2015), running())
@@ -810,7 +811,7 @@ def test_main_checks_freshness_before_it_writes(tmp_path, monkeypatch, capsys):
     out = tmp_path / "alerts.parquet"
     argv = ["alert_history.py", "--raw-dir", str(raw_dir), "--state-dir", str(state_dir), "--map", str(MAP),
             "--out", str(out), "--first-year", "2015", "--last-year", "2015", "--check-nws", str(nws_dir),
-            "--settings", str(SETTINGS), "--today", "2015-01-26"]
+            "--settings", str(SETTINGS), flag, "2015-01-26"]
     monkeypatch.setattr(sys, "argv", argv)
     alert_history.main()
     assert out.exists() and "freshness: the 1 Boston NWS message(s)" in capsys.readouterr().out

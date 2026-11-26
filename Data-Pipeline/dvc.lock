@@ -21,8 +21,8 @@ stages:
       size: 4439
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/raw/311/2015.csv
       hash: md5
@@ -70,8 +70,8 @@ stages:
       size: 159465243
     - path: data/raw/311/2026.csv
       hash: md5
-      md5: 05767a5a16842bebc00f6e35ac55594d
-      size: 107371179
+      md5: 17d11511d1bd25ab5ae222ce518cd0c1
+      size: 107894233
   ingest_new_311:
     cmd: python scripts/pipeline_steps.py ingest_new_311
     deps:
@@ -93,17 +93,17 @@ stages:
       size: 4439
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/new_system_as_published.parquet
       hash: md5
-      md5: 37a249a40b2e8683cb0c6e05399a0a90
-      size: 7723024
+      md5: 5738c4d5facbcda10c9b1dedab3054b8
+      size: 9821270
     - path: data/raw/311/new_system.csv
       hash: md5
-      md5: 980bbfd9bc0ce6b6444b6e720afadf89
-      size: 27357223
+      md5: 243620ed58eb2d037f4a3cb51f78379a
+      size: 34563374
   ingest_noaa_logan:
     cmd: python scripts/pipeline_steps.py ingest_noaa_logan
     deps:
@@ -113,12 +113,12 @@ stages:
       size: 1270
     - path: scripts/noaa_logan.py
       hash: md5
-      md5: ea6794d1f427497143f81f1b93ffb230
-      size: 6186
+      md5: 39574f7e1f1945d4c3007846cff4b0e8
+      size: 6460
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     - path: scripts/raw_fetch.py
       hash: md5
       md5: fd5f908ad988a3781f44d9a74a21b8d4
@@ -126,50 +126,50 @@ stages:
     outs:
     - path: data/raw/weather/noaa_logan
       hash: md5
-      md5: c89e5dfa90a2d972bceec4f5ff4496ad.dir
-      size: 4350811
+      md5: eecc10d2878e902b0ed16b4fd12876a6.dir
+      size: 4373139
       nfiles: 12
   ingest_tides:
     cmd: python scripts/pipeline_steps.py ingest_tides
     deps:
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     - path: scripts/raw_fetch.py
       hash: md5
       md5: fd5f908ad988a3781f44d9a74a21b8d4
       size: 6224
     - path: scripts/tides.py
       hash: md5
-      md5: c08c5d34b6b10c471c97cbc3bd90a939
-      size: 5752
+      md5: 97cf2e1b5472c6eb74643c3b5f3f8235
+      size: 6387
     outs:
     - path: data/raw/tides
       hash: md5
-      md5: 3157f60b6050da72d851e77952fd9be1.dir
-      size: 10295426
+      md5: a5239644da0f3757f9fc8459d2f1ca2d.dir
+      size: 10370617
       nfiles: 48
   ingest_open_meteo:
     cmd: python scripts/pipeline_steps.py ingest_open_meteo
     deps:
     - path: config/open_meteo.csv
       hash: md5
-      md5: 9581b70df7b4e725ad04a5daf418024e
-      size: 1905
+      md5: d5daef3ef29c3edc2297dad5947405f6
+      size: 1904
     - path: scripts/open_meteo.py
       hash: md5
-      md5: 700f134b8f44f0d5782dbc85b94c7fd0
-      size: 40204
+      md5: 5dab9bec071170e6db390e117a14d583
+      size: 45133
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/raw/open_meteo
       hash: md5
-      md5: fe9d785678436dafc0950eef1061e35a.dir
-      size: 6657157
+      md5: 95a30e7db50267f6740ef85a1630c03e.dir
+      size: 6786072
       nfiles: 15
   ingest_static_layers:
     cmd: python scripts/pipeline_steps.py ingest_static_layers
@@ -180,8 +180,8 @@ stages:
       size: 3534
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     - path: scripts/static_layers.py
       hash: md5
       md5: 11556eb7129f4a4cbc2eb6eedfca6faf
@@ -194,7 +194,7 @@ stages:
       nfiles: 8
     - path: data/interim/static-layers.csv
       hash: md5
-      md5: 3aa9dd6564ca19299d466b70c0ec180a
+      md5: e3c15d3f6fe7aab29a6549819ee8e600
       size: 3849
     - path: data/raw/static
       hash: md5
@@ -214,16 +214,16 @@ stages:
       size: 14288
     - path: scripts/alert_history.py
       hash: md5
-      md5: 006d1ea93b8ca1a162563c14c39c3e35
-      size: 37186
+      md5: 193ede777d739e265ce7373382bbb653
+      size: 37259
     - path: scripts/compare_units.py
       hash: md5
       md5: 70d06f683e1ab1ef12a92df3e5fbc871
       size: 9779
     - path: scripts/daily_counts.py
       hash: md5
-      md5: e64f9e4daa4d9a2564f20a059a1a8eeb
-      size: 6229
+      md5: e619b35dcc18adfcce90c138c5918b12
+      size: 8016
     - path: scripts/legacy_311.py
       hash: md5
       md5: 1e00bde097749edc8469a9d48672d4c5
@@ -242,8 +242,8 @@ stages:
       size: 9461
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     - path: scripts/static_layers.py
       hash: md5
       md5: 11556eb7129f4a4cbc2eb6eedfca6faf
@@ -255,13 +255,13 @@ stages:
     outs:
     - path: data/interim/nws_alerts.parquet
       hash: md5
-      md5: 943d32151b299016dad4c442793c87b4
-      size: 58647
+      md5: 4ea046b804258b3decdc2ccebe49c2a1
+      size: 58773
     - path: data/raw/nws_alerts
       hash: md5
-      md5: 656d123019bed35c82a3b2699ae32700.dir
-      size: 18978872
-      nfiles: 1146
+      md5: 034121d29313ce1f3f7bd172dd5c8ec9.dir
+      size: 19033318
+      nfiles: 1148
   validate_raw:
     cmd: python scripts/pipeline_steps.py validate_raw
     deps:
@@ -319,12 +319,12 @@ stages:
       size: 159465243
     - path: data/raw/311/2026.csv
       hash: md5
-      md5: 05767a5a16842bebc00f6e35ac55594d
-      size: 107371179
+      md5: 17d11511d1bd25ab5ae222ce518cd0c1
+      size: 107894233
     - path: data/raw/311/new_system.csv
       hash: md5
-      md5: 980bbfd9bc0ce6b6444b6e720afadf89
-      size: 27357223
+      md5: 243620ed58eb2d037f4a3cb51f78379a
+      size: 34563374
     - path: scripts/legacy_311.py
       hash: md5
       md5: 1e00bde097749edc8469a9d48672d4c5
@@ -339,8 +339,8 @@ stages:
       size: 4439
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     - path: scripts/spatial_join.py
       hash: md5
       md5: 124b3fc869badbf721aabaa19bd2beb5
@@ -356,7 +356,7 @@ stages:
     outs:
     - path: data/interim/validation/raw.json
       hash: md5
-      md5: 4d712383d59f5066b215a10a8df38a36
+      md5: 17eddf2585207ff36d16e41a1835f7aa
       size: 57517
   parse_legacy_311_2015:
     cmd: python scripts/pipeline_steps.py parse_legacy_311 --year 2015
@@ -371,8 +371,8 @@ stages:
       size: 6915
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/legacy_311_by_year/2015.parquet
       hash: md5
@@ -391,8 +391,8 @@ stages:
       size: 6915
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/legacy_311_by_year/2016.parquet
       hash: md5
@@ -411,8 +411,8 @@ stages:
       size: 6915
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/legacy_311_by_year/2017.parquet
       hash: md5
@@ -431,8 +431,8 @@ stages:
       size: 6915
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/legacy_311_by_year/2018.parquet
       hash: md5
@@ -451,8 +451,8 @@ stages:
       size: 6915
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/legacy_311_by_year/2019.parquet
       hash: md5
@@ -471,8 +471,8 @@ stages:
       size: 6915
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/legacy_311_by_year/2020.parquet
       hash: md5
@@ -491,8 +491,8 @@ stages:
       size: 6915
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/legacy_311_by_year/2021.parquet
       hash: md5
@@ -511,8 +511,8 @@ stages:
       size: 6915
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/legacy_311_by_year/2022.parquet
       hash: md5
@@ -531,8 +531,8 @@ stages:
       size: 6915
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/legacy_311_by_year/2023.parquet
       hash: md5
@@ -551,8 +551,8 @@ stages:
       size: 6915
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/legacy_311_by_year/2024.parquet
       hash: md5
@@ -571,8 +571,8 @@ stages:
       size: 6915
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/legacy_311_by_year/2025.parquet
       hash: md5
@@ -583,21 +583,21 @@ stages:
     deps:
     - path: data/raw/311/2026.csv
       hash: md5
-      md5: 05767a5a16842bebc00f6e35ac55594d
-      size: 107371179
+      md5: 17d11511d1bd25ab5ae222ce518cd0c1
+      size: 107894233
     - path: scripts/legacy_311.py
       hash: md5
       md5: 1e00bde097749edc8469a9d48672d4c5
       size: 6915
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/legacy_311_by_year/2026.parquet
       hash: md5
-      md5: cd5bcc1c0cbed472b282e832e6b98570
-      size: 6672176
+      md5: e1b160cd8587132f4bc5fff42c5326bf
+      size: 6686517
   merge_legacy_311:
     cmd: python scripts/pipeline_steps.py merge_legacy_311
     deps:
@@ -647,24 +647,24 @@ stages:
       size: 9345572
     - path: data/interim/legacy_311_by_year/2026.parquet
       hash: md5
-      md5: cd5bcc1c0cbed472b282e832e6b98570
-      size: 6672176
+      md5: e1b160cd8587132f4bc5fff42c5326bf
+      size: 6686517
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/legacy_311.parquet
       hash: md5
-      md5: e057fb960b0a9b85af095bedad9b274d
-      size: 101074257
+      md5: cdb909843b3435c792243fa5db998f61
+      size: 101043328
   parse_new_311:
     cmd: python scripts/pipeline_steps.py parse_new_311
     deps:
     - path: data/raw/311/new_system.csv
       hash: md5
-      md5: 980bbfd9bc0ce6b6444b6e720afadf89
-      size: 27357223
+      md5: 243620ed58eb2d037f4a3cb51f78379a
+      size: 34563374
     - path: scripts/legacy_311.py
       hash: md5
       md5: 1e00bde097749edc8469a9d48672d4c5
@@ -675,13 +675,13 @@ stages:
       size: 4439
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/new_311.parquet
       hash: md5
-      md5: 9b6155e983567e9ea7c7eec75a5e5b3f
-      size: 3479939
+      md5: d5725ea6b5ca2451874db4e32f77beef
+      size: 4354521
   combine_311:
     cmd: python scripts/pipeline_steps.py combine_311
     deps:
@@ -691,29 +691,29 @@ stages:
       size: 18095
     - path: data/interim/legacy_311.parquet
       hash: md5
-      md5: e057fb960b0a9b85af095bedad9b274d
-      size: 101074257
+      md5: cdb909843b3435c792243fa5db998f61
+      size: 101043328
     - path: data/interim/new_311.parquet
       hash: md5
-      md5: 9b6155e983567e9ea7c7eec75a5e5b3f
-      size: 3479939
+      md5: d5725ea6b5ca2451874db4e32f77beef
+      size: 4354521
     - path: scripts/map_311.py
       hash: md5
       md5: ce651ff40d419f9d90860e4738e07933
       size: 12748
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/interim/311_combined.parquet
       hash: md5
-      md5: 2032b02da8d40188c2bfb523a882e8ea
-      size: 106392382
+      md5: 8870a399af699958857ba3cee8486d27
+      size: 107279430
     - path: data/interim/change-points.csv
       hash: md5
-      md5: 2075f7f32466811ad0f1fdfdefb42d21
-      size: 3125
+      md5: 8e28c2b44537cb3e83122ba90f2f4618
+      size: 3182
   spatial_join:
     cmd: python scripts/pipeline_steps.py spatial_join
     deps:
@@ -723,8 +723,8 @@ stages:
       size: 246
     - path: data/interim/311_combined.parquet
       hash: md5
-      md5: 2032b02da8d40188c2bfb523a882e8ea
-      size: 106392382
+      md5: 8870a399af699958857ba3cee8486d27
+      size: 107279430
     - path: data/interim/static/neighborhoods_by_tract20.parquet
       hash: md5
       md5: d3c795a2a16a74739ec70a3748d4f3a5
@@ -735,8 +735,8 @@ stages:
       size: 318707
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     - path: scripts/spatial_join.py
       hash: md5
       md5: 124b3fc869badbf721aabaa19bd2beb5
@@ -744,8 +744,8 @@ stages:
     outs:
     - path: data/interim/311_located.parquet
       hash: md5
-      md5: 518a2b77ff08886b740aac8ab6944e2c
-      size: 111709359
+      md5: 9e78af1e7bd4a7ef6803bb2bdcac6a56
+      size: 112630697
   daily_counts:
     cmd: python scripts/pipeline_steps.py daily_counts
     deps:
@@ -755,8 +755,12 @@ stages:
       size: 155
     - path: data/interim/311_located.parquet
       hash: md5
-      md5: 518a2b77ff08886b740aac8ab6944e2c
-      size: 111709359
+      md5: 9e78af1e7bd4a7ef6803bb2bdcac6a56
+      size: 112630697
+    - path: data/interim/change-points.csv
+      hash: md5
+      md5: 8e28c2b44537cb3e83122ba90f2f4618
+      size: 3182
     - path: data/interim/static/neighborhoods_by_tract20.parquet
       hash: md5
       md5: d3c795a2a16a74739ec70a3748d4f3a5
@@ -771,8 +775,8 @@ stages:
       size: 9779
     - path: scripts/daily_counts.py
       hash: md5
-      md5: e64f9e4daa4d9a2564f20a059a1a8eeb
-      size: 6229
+      md5: e619b35dcc18adfcce90c138c5918b12
+      size: 8016
     - path: scripts/legacy_311.py
       hash: md5
       md5: 1e00bde097749edc8469a9d48672d4c5
@@ -791,13 +795,13 @@ stages:
       size: 9461
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     outs:
     - path: data/processed/daily_counts.parquet
       hash: md5
-      md5: 358b312c4b3d36772c3f54631af5ea9e
-      size: 727732
+      md5: 86f23e08689403742d08124ab34a7939
+      size: 727520
   surge_labels:
     cmd: python scripts/pipeline_steps.py surge_labels
     deps:
@@ -811,8 +815,8 @@ stages:
       size: 870
     - path: data/processed/daily_counts.parquet
       hash: md5
-      md5: 358b312c4b3d36772c3f54631af5ea9e
-      size: 727732
+      md5: 86f23e08689403742d08124ab34a7939
+      size: 727520
     - path: scripts/after_switch.py
       hash: md5
       md5: 9ef4450097f032d5c146017a6cb22c17
@@ -823,8 +827,8 @@ stages:
       size: 9779
     - path: scripts/daily_counts.py
       hash: md5
-      md5: e64f9e4daa4d9a2564f20a059a1a8eeb
-      size: 6229
+      md5: e619b35dcc18adfcce90c138c5918b12
+      size: 8016
     - path: scripts/legacy_311.py
       hash: md5
       md5: 1e00bde097749edc8469a9d48672d4c5
@@ -843,8 +847,8 @@ stages:
       size: 9461
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     - path: scripts/surge_labels.py
       hash: md5
       md5: 0a134587bc8212445e6a22e4dbcadf17
@@ -852,8 +856,8 @@ stages:
     outs:
     - path: data/processed/labels.parquet
       hash: md5
-      md5: e7e3f01f6b3c1e344345d893af55f9b3
-      size: 1457584
+      md5: bb8c88a4fb99dce2f288ef22d02567fc
+      size: 1464493
   feature_table:
     cmd: python scripts/pipeline_steps.py feature_table
     deps:
@@ -863,8 +867,8 @@ stages:
       size: 1734
     - path: data/interim/nws_alerts.parquet
       hash: md5
-      md5: 943d32151b299016dad4c442793c87b4
-      size: 58647
+      md5: 4ea046b804258b3decdc2ccebe49c2a1
+      size: 58773
     - path: data/interim/static
       hash: md5
       md5: fa2bd03a06c790f95de2743e8b7df853.dir
@@ -872,22 +876,22 @@ stages:
       nfiles: 8
     - path: data/processed/daily_counts.parquet
       hash: md5
-      md5: 358b312c4b3d36772c3f54631af5ea9e
-      size: 727732
+      md5: 86f23e08689403742d08124ab34a7939
+      size: 727520
     - path: data/raw/open_meteo/day_before_ncep_gfs_global
       hash: md5
-      md5: 0afe641c5de337d49c974a3912e1eb58.dir
-      size: 1917042
+      md5: 3720eea9de688b48c695811f75cd39ef.dir
+      size: 1979419
       nfiles: 3
     - path: data/raw/tides/predicted
       hash: md5
-      md5: 00f6c363647277eb3bbc6db194e49c7d.dir
-      size: 3930820
+      md5: e9ba8e5df0e84bfb0fabb5fd90a97d9b.dir
+      size: 3959950
       nfiles: 24
     - path: data/raw/weather/noaa_logan
       hash: md5
-      md5: c89e5dfa90a2d972bceec4f5ff4496ad.dir
-      size: 4350811
+      md5: eecc10d2878e902b0ed16b4fd12876a6.dir
+      size: 4373139
       nfiles: 12
     - path: scripts/after_switch.py
       hash: md5
@@ -895,20 +899,20 @@ stages:
       size: 14288
     - path: scripts/alert_history.py
       hash: md5
-      md5: 006d1ea93b8ca1a162563c14c39c3e35
-      size: 37186
+      md5: 193ede777d739e265ce7373382bbb653
+      size: 37259
     - path: scripts/compare_units.py
       hash: md5
       md5: 70d06f683e1ab1ef12a92df3e5fbc871
       size: 9779
     - path: scripts/daily_counts.py
       hash: md5
-      md5: e64f9e4daa4d9a2564f20a059a1a8eeb
-      size: 6229
+      md5: e619b35dcc18adfcce90c138c5918b12
+      size: 8016
     - path: scripts/feature_table.py
       hash: md5
-      md5: f4ceaab7e67a50fa63c8643ed07ec25e
-      size: 25156
+      md5: 8222a538318b2d5a2e10942252d32d2d
+      size: 25434
     - path: scripts/legacy_311.py
       hash: md5
       md5: 1e00bde097749edc8469a9d48672d4c5
@@ -935,8 +939,8 @@ stages:
       size: 1837
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     - path: scripts/static_layers.py
       hash: md5
       md5: 11556eb7129f4a4cbc2eb6eedfca6faf
@@ -956,8 +960,8 @@ stages:
     outs:
     - path: data/processed/features.parquet
       hash: md5
-      md5: 0af01ad276f431efc6d6aac576a1688a
-      size: 3953991
+      md5: 9896e834290c4b1c0feadb2fd02be992
+      size: 3938101
   validate_processed:
     cmd: python scripts/pipeline_steps.py validate_processed
     deps:
@@ -967,12 +971,12 @@ stages:
       size: 1090
     - path: data/interim/311_combined.parquet
       hash: md5
-      md5: 2032b02da8d40188c2bfb523a882e8ea
-      size: 106392382
+      md5: 8870a399af699958857ba3cee8486d27
+      size: 107279430
     - path: data/interim/311_located.parquet
       hash: md5
-      md5: 518a2b77ff08886b740aac8ab6944e2c
-      size: 111709359
+      md5: 9e78af1e7bd4a7ef6803bb2bdcac6a56
+      size: 112630697
     - path: data/interim/static/neighborhoods_by_tract20.parquet
       hash: md5
       md5: d3c795a2a16a74739ec70a3748d4f3a5
@@ -991,8 +995,8 @@ stages:
       size: 4439
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     - path: scripts/spatial_join.py
       hash: md5
       md5: 124b3fc869badbf721aabaa19bd2beb5
@@ -1008,7 +1012,7 @@ stages:
     outs:
     - path: data/interim/validation/processed.json
       hash: md5
-      md5: 0eff897778c99496ea4f7bd9992c92c9
+      md5: a8c2c98215a63452e585207537d0cee0
       size: 10899
   schema_and_statistics:
     cmd: python scripts/pipeline_steps.py schema_and_statistics
@@ -1019,12 +1023,12 @@ stages:
       size: 416
     - path: data/interim/311_located.parquet
       hash: md5
-      md5: 518a2b77ff08886b740aac8ab6944e2c
-      size: 111709359
+      md5: 9e78af1e7bd4a7ef6803bb2bdcac6a56
+      size: 112630697
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     - path: scripts/schema_stats.py
       hash: md5
       md5: 134bab70db16db5e3a91b5dd431df779
@@ -1032,8 +1036,8 @@ stages:
     outs:
     - path: data/processed/stats
       hash: md5
-      md5: a5845b7e35c9b71e21c7a2c7d6eda72d.dir
-      size: 4284220
+      md5: 7664009b189c4d696453f987609ade81.dir
+      size: 4286534
       nfiles: 28
   bias_slicing:
     cmd: python scripts/pipeline_steps.py bias_slicing
@@ -1044,8 +1048,8 @@ stages:
       size: 788
     - path: data/interim/311_located.parquet
       hash: md5
-      md5: 518a2b77ff08886b740aac8ab6944e2c
-      size: 111709359
+      md5: 9e78af1e7bd4a7ef6803bb2bdcac6a56
+      size: 112630697
     - path: data/interim/static
       hash: md5
       md5: fa2bd03a06c790f95de2743e8b7df853.dir
@@ -1053,16 +1057,16 @@ stages:
       nfiles: 8
     - path: data/processed/labels.parquet
       hash: md5
-      md5: e7e3f01f6b3c1e344345d893af55f9b3
-      size: 1457584
+      md5: bb8c88a4fb99dce2f288ef22d02567fc
+      size: 1464493
     - path: scripts/after_switch.py
       hash: md5
       md5: 9ef4450097f032d5c146017a6cb22c17
       size: 14288
     - path: scripts/alert_history.py
       hash: md5
-      md5: 006d1ea93b8ca1a162563c14c39c3e35
-      size: 37186
+      md5: 193ede777d739e265ce7373382bbb653
+      size: 37259
     - path: scripts/bias_slicing.py
       hash: md5
       md5: 0bcfc3745b967c032520455b753dfde5
@@ -1073,12 +1077,12 @@ stages:
       size: 9779
     - path: scripts/daily_counts.py
       hash: md5
-      md5: e64f9e4daa4d9a2564f20a059a1a8eeb
-      size: 6229
+      md5: e619b35dcc18adfcce90c138c5918b12
+      size: 8016
     - path: scripts/feature_table.py
       hash: md5
-      md5: f4ceaab7e67a50fa63c8643ed07ec25e
-      size: 25156
+      md5: 8222a538318b2d5a2e10942252d32d2d
+      size: 25434
     - path: scripts/legacy_311.py
       hash: md5
       md5: 1e00bde097749edc8469a9d48672d4c5
@@ -1105,8 +1109,8 @@ stages:
       size: 1837
     - path: scripts/pipeline_steps.py
       hash: md5
-      md5: 903f924f0770aad76c919dc7c1368a8f
-      size: 34159
+      md5: 7ec75259fb7ae8ecd8578046d5e7da52
+      size: 40695
     - path: scripts/static_layers.py
       hash: md5
       md5: 11556eb7129f4a4cbc2eb6eedfca6faf
@@ -1126,13 +1130,13 @@ stages:
     outs:
     - path: data/interim/reports/bias/gaps.csv
       hash: md5
-      md5: 556ac259463993f3187eb33a83a11b20
-      size: 51830
+      md5: e9063ff45e539b4d52f7dc531a66a115
+      size: 51826
     - path: data/interim/reports/bias/report.md
       hash: md5
-      md5: 95e1efe7966a7b981e112fdd64f1b231
-      size: 31305
+      md5: aef14b347b1d0a084b5d76f05548f677
+      size: 31304
     - path: data/interim/reports/bias/slices.csv
       hash: md5
-      md5: 25f2508f5e4033070f0ce48c2a81ef22
-      size: 46669
+      md5: acf05a4c21b95d6a14059306055d795e
+      size: 46665

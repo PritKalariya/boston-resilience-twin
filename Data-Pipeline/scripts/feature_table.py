@@ -57,6 +57,7 @@ counts (surge_labels.requested_days).
 from __future__ import annotations
 
 import argparse
+from datetime import date
 from pathlib import Path
 
 import geopandas as gpd
@@ -402,6 +403,8 @@ def main() -> None:
     parser.add_argument("--settings", default="Data-Pipeline/config/labels_features.csv")
     parser.add_argument("--start", help="first day to write; earlier days still feed the lags")
     parser.add_argument("--end", help="last day to write")
+    parser.add_argument("--as-of", type=date.fromisoformat, help="the run's as-of date, YYYY-MM-DD in Boston: the "
+                        "weather and tide files of its year or half-year may be absent; default: today (#160)")
     parser.add_argument("--out", default="Data-Pipeline/data/processed/features.parquet")
     args = parser.parse_args()
     if bool(args.noaa_dir) != bool(args.forecast_dir):
@@ -414,9 +417,9 @@ def main() -> None:
     weather = tides = None
     if args.noaa_dir:
         weather = weather_features(days, cutoff, args.noaa_dir, args.forecast_dir, settings["observed_weather_lag_days"],
-                                   settings["forecast_issue_margin_hours"])
+                                   settings["forecast_issue_margin_hours"], args.as_of)
     if args.tides_dir:
-        tides = tide_features(days, args.tides_dir)
+        tides = tide_features(days, args.tides_dir, args.as_of)
     table = build_features(
         counts, groups, min_lag,
         alerts=pd.read_parquet(args.alerts), cutoff_local=cutoff,

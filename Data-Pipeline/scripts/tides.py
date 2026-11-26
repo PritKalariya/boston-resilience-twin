@@ -9,7 +9,10 @@ Each product has its own folder under --raw-dir with one JSON file per
 half-year, exactly as CO-OPS returned it: the API refuses more than 365 days
 per request, so a leap year cannot be fetched whole. Verified observations lag
 about a month, so an observed half-year is final 45 days after it ends;
-predictions are final once the half-year is over. The manifests that record
+predictions are final once the half-year is over. Observations run up to the
+as-of date (--as-of, a Boston date; default: today in Boston) and predictions
+up to as-of + 2, the UTC day in which tomorrow's Boston day ends (#160), so the
+evening run has every hour of tomorrow's tides. The manifests that record
 this live in --state-dir, one folder per product, not in the raw folders
 (raw_fetch has the rerun rules).
 
@@ -23,6 +26,7 @@ import logging
 import urllib.parse
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import raw_fetch as rf
 
@@ -30,10 +34,11 @@ STATION = "8443970"
 FIRST_DAY = date(2015, 1, 1)
 API = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
 APPLICATION = "boston-resilience-twin"
-# folder: (product parameters, the answer's list key, days after a half-year ends until it is final)
+# folder: (product parameters, the answer's list key, days after a half-year ends until it is final,
+# days after the as-of date to fetch through)
 PRODUCTS = {
-    "observed": ({"product": "hourly_height"}, "data", 45),
-    "predicted": ({"product": "predictions", "interval": "h"}, "predictions", 0),
+    "observed": ({"product": "hourly_height"}, "data", 45, 0),
+    "predicted": ({"product": "predictions", "interval": "h"}, "predictions", 0, 2),
 }
 NO_DATA = "No data was found"
 
@@ -74,12 +79,13 @@ def check_answer(body: bytes, key: str, period: rf.Period) -> int | None:
 
 
 def refresh(raw_dir: Path, state_dir: Path, fetch, today: date, now: datetime) -> list[dict]:
-    """Bring both products up to today. Returns one record per half-year."""
+    """Bring observations up to today, the as-of date, and predictions up to today + 2. Returns one record
+    per half-year."""
     records = []
-    for folder_name, (params, key, settle_days) in PRODUCTS.items():
+    for folder_name, (params, key, settle_days, ahead) in PRODUCTS.items():
         folder, state = raw_dir / folder_name, state_dir / folder_name
         manifest = rf.load_manifest(state)
-        for period in rf.half_years(FIRST_DAY, today):
+        for period in rf.half_years(FIRST_DAY, today + timedelta(days=ahead)):
             filename = f"{period.name}.json"
             record = {"product": folder_name, "file": filename}
             if rf.is_final(manifest.get(filename), period, settle_days) and (folder / filename).exists():
@@ -102,10 +108,13 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--raw-dir", type=Path, default=Path("Data-Pipeline/data/raw/tides"))
     parser.add_argument("--state-dir", type=Path, default=Path("Data-Pipeline/data/state/tides"))
+    parser.add_argument("--as-of", type=date.fromisoformat, help="the run's as-of date, YYYY-MM-DD in Boston; "
+                        "default: today in Boston")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     now = rf.utc_now()
-    records = refresh(args.raw_dir, args.state_dir, lambda url: rf.get(url, {"User-Agent": APPLICATION}), now.date(), now)
+    as_of = args.as_of or now.astimezone(ZoneInfo("America/New_York")).date()
+    records = refresh(args.raw_dir, args.state_dir, lambda url: rf.get(url, {"User-Agent": APPLICATION}), as_of, now)
     changed = [r for r in records if r["action"] in ("downloaded", "updated")]
     print(f"tides {STATION}: {len(changed)} half-year files downloaded or updated, "
           f"{sum(r['action'] == 'final' for r in records)} final, "

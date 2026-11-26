@@ -315,11 +315,12 @@ Outside this folder: [docker-compose.yaml](../docker-compose.yaml) and [airflow.
 cd Data-Pipeline
 dvc remote list
 dvc dag
+export BRT_AS_OF=$(TZ=America/New_York date +%F)   # the as-of date every stage reads (ADR-037)
 dvc repro daily_counts
 dvc repro daily_counts
 ```
 
-`dvc remote list` prints `gcs  gs://boston-resilience-twin-data/dvc  (default)` (#19). On the fresh clone's data, the first `dvc repro daily_counts` ran the 20 stages it needs in 63 seconds, and the second printed `Data and pipelines are up to date.` **Without bucket access** (a grader), skip `dvc pull` and rebuild everything with `dvc repro`, which needs `NOAA_CDO_TOKEN` (about 2 GB of downloads; 630 seconds in Kirtan's clean-clone run). Your download is newer than the one `dvc.lock` pins (the 2026 and new-system 311 files change daily), so your row counts and hashes will differ a little from ours; that is new data, not a reproducibility failure. If `ingest_static_layers` stops with `... could not be read as a vector layer`, delete that file in `Data-Pipeline/data/raw/static/` and run `dvc repro` again; it resumes from that stage. `dvc repro` updates `dvc.lock` in your working copy; keep the committed one with `git checkout dvc.lock`.
+`dvc remote list` prints `gcs  gs://boston-resilience-twin-data/dvc  (default)` (#19). On the fresh clone's data, the first `dvc repro daily_counts` ran the 20 stages it needs in 63 seconds, and the second printed `Data and pipelines are up to date.` **Without bucket access** (a grader), skip `dvc pull` and rebuild everything with `dvc repro`, which needs `NOAA_CDO_TOKEN` and `BRT_AS_OF` (about 2 GB of downloads; 630 seconds in Kirtan's clean-clone run). Your download is newer than the one `dvc.lock` pins (the 2026 and new-system 311 files change daily), so your row counts and hashes will differ a little from ours; that is new data, not a reproducibility failure. If `ingest_static_layers` stops with `... could not be read as a vector layer`, delete that file in `Data-Pipeline/data/raw/static/` and run `dvc repro` again; it resumes from that stage. `dvc repro` updates `dvc.lock` in your working copy; keep the committed one with `git checkout dvc.lock`.
 
 `push_data`, the last task of the DAG, runs `scripts/dvc_push.py`. Without access to the team bucket, a grader's own machine included, it logs `dvc push skipped: no Google credentials ...` and succeeds, so the run does not fail on it. To run it alone, pause the DAG first, as for `dags test`:
 

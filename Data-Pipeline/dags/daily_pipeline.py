@@ -1,21 +1,30 @@
 """Daily pipeline: ingestion, processing and validation, one task per module (#22).
 
-Triggered by hand until the evening run starts on the VM (#39). Params, both
+Triggered by hand until the evening run starts on the VM (D8). Params, both
 inclusive: start (2015-01-01 or later) and end (empty: through the latest
 data). The defaults are the full build, written to Data-Pipeline/data/interim/
 and processed/. Any other range is a slice, written to
 Data-Pipeline/data/slices/<start>_<end>/. Every run reads Data-Pipeline/data/raw/,
 which the ingest tasks refresh first, for any range.
 
-Twenty tasks run pipeline scripts: the two 311 downloads (#6), the five
+as_of (#160): the Boston date the run forecasts from, by default the Boston date
+of the run's run_after (when it was triggered or scheduled), so every task of a
+run reads one date even when the run crosses UTC midnight. A run triggered from
+that date's 18:00 cutoff up to midnight is an evening run: ingest_alert_history
+checks the IEM pull against ingest_nws_alerts' snapshot, ingest_open_meteo
+stores the evening GFS answer, and forecast_rows writes tomorrow's rows to
+Data-Pipeline/data/forecast/<as_of>/features.parquet. Any other run skips them.
+
+Twenty-one tasks run pipeline scripts: the two 311 downloads (#6), the five
 weather, tide and Open-Meteo downloads (#7, #8), the alert history, labels
-and features (#16), and bias_slicing (#32). parse_legacy_311 runs once per
+and features (#16), bias_slicing (#32) and forecast_rows (#160). parse_legacy_311 runs once per
 legacy year, at most LEGACY_PARALLEL at a time (4 unless .env sets it), and
 merge_legacy_311 joins the years (#37). No task is a placeholder now; a new one
 listed in pipeline_steps.PLANNED logs the issue that builds it until its script
-is in pipeline_steps.SCRIPTS. The last task, push_data, pushes
+is in pipeline_steps.SCRIPTS. push_data, last after the history steps, pushes
 the DVC-tracked data to the team remote (dvc_push.py, #19); without bucket
-access it logs `dvc push skipped: ...` and succeeds.
+access it logs `dvc push skipped: ...` and succeeds. forecast_rows ends beside
+it: the rows file is not a DVC output, so the push does not wait for it.
 
 Every task logs its run id, rows in and rows out (#36). The ingest tasks retry
 twice, about 5 to 10 minutes and then 10 to 15 minutes apart (exponential
@@ -25,6 +34,7 @@ task that fails for good sends the W3-3 alert (alerts.py), which goes to its
 log until #34 adds Slack or email.
 """
 
+import dataclasses
 import logging
 
 import pendulum
@@ -45,10 +55,12 @@ HEAVY_MEMORY_POOL = "heavy_memory"
 
 
 def run_range() -> steps.DateRange:
-    """The run's date range. Conf keys are checked too, so a misspelled key fails the run."""
+    """The run's date range and as-of date, the same in every task of the run. Conf keys are checked
+    too, so a misspelled key fails the run."""
     context = get_current_context()
-    conf = context["dag_run"].conf or {}
-    return steps.DateRange.from_params({**context["params"], **conf})
+    dag_run = context["dag_run"]
+    days = steps.DateRange.from_params({**context["params"], **(dag_run.conf or {})}, run_after=dag_run.run_after)
+    return dataclasses.replace(days, evening=steps.is_evening(dag_run.run_after, days.as_of))
 
 
 def run_id() -> str:
@@ -91,6 +103,14 @@ def retries(step: str) -> dict:
             title="End date",
             description="Last day, inclusive. Empty: through the latest data.",
         ),
+        "as_of": Param(
+            None,
+            type=["null", "string"],
+            format="date",
+            title="As-of date",
+            description="The Boston date the run forecasts from (tomorrow is the day after). "
+            "Empty: the Boston date when the run was triggered.",
+        ),
     },
 )
 def daily_pipeline():
@@ -100,8 +120,9 @@ def daily_pipeline():
         days = run_range()
         kind = "full build" if days.is_full else "slice"
         log.info(
-            "%s %s: legacy years %s, outputs in %s",
-            kind, days.label, days.legacy_years, steps.run_paths(days).interim.parent,
+            "%s %s, as of %s%s: legacy years %s, outputs in %s",
+            kind, days.label, days.as_of, " (evening run)" if days.evening else "",
+            days.legacy_years, steps.run_paths(days).interim.parent,
         )
         steps.log_task(run_id(), "check_range", None, None)
         return days.legacy_years
@@ -169,12 +190,17 @@ def daily_pipeline():
     validated = real("validate_processed")
 
     years >> [*ingest.values(), static, alert_history] >> raw_checked
+    # An evening run checks the alert pull against this snapshot (ADR-014), so the snapshot comes first.
+    ingest["ingest_nws_alerts"] >> alert_history
     raw_checked >> [parse_legacy, parse_new]
     parse_legacy >> merged
     [merged, parse_new] >> combined
     [combined, static] >> real("spatial_join") >> counts
-    counts >> [real("surge_labels"), real("feature_table")] >> validated
+    features = real("feature_table")
+    counts >> [real("surge_labels"), features] >> validated
     validated >> [real("schema_and_statistics"), real("bias_slicing")] >> push_data()
+    # The rows file is not a DVC output (D8's manifest task uploads it), so the push does not wait for it.
+    features >> real("forecast_rows")
 
 
 daily_pipeline()

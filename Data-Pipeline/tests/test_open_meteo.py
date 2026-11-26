@@ -228,7 +228,7 @@ def test_repo_config():
     day_before = sets["day_before_ncep_gfs_global"]
     assert (history.model, history.start, history.end) == ("era5", date(2021, 1, 1), "latest_values")
     assert (first_hours.model, first_hours.start, first_hours.end) == ("ecmwf_ifs", date(2021, 1, 1), "yesterday")
-    assert (day_before.model, day_before.start, day_before.end) == ("ncep_gfs_global", date(2024, 1, 21), "yesterday")
+    assert (day_before.model, day_before.start, day_before.end) == ("ncep_gfs_global", date(2024, 1, 21), "tomorrow")
     assert "showers" not in history.hourly  # the history API has no showers value
     assert "showers" in first_hours.hourly
     values = ("precipitation", "rain", "showers", "snowfall", "temperature_2m", "wind_gusts_10m")
@@ -594,6 +594,85 @@ def test_day_before_set_stores_both_offsets_through_yesterday(tmp_path):
     assert values["snowfall_previous_day2"]["first"] == "2024-12-07T18:00"
 
 
+# The tomorrow rule and the evening answer (#160)
+
+TOMORROW_ROW = DAY_BEFORE_ROW.replace(",2024-11-15,yesterday,", ",2025-12-01,tomorrow,")
+EVENING_NOW = datetime(2026, 10, 22, 22, 30, tzinfo=timezone.utc)  # 18:30 EDT on 22 October
+
+
+def tomorrow_set(tmp_path):
+    return read_config(write_config(tmp_path, TOMORROW_ROW), today=EVENING_NOW.date())
+
+
+def test_a_tomorrow_set_runs_to_the_utc_day_in_which_tomorrows_station_day_ends(tmp_path):
+    result = run_download(tomorrow_set(tmp_path), tmp_path / "raw", FakeOpenMeteo(), state_root=tmp_path / "state",
+                          now=EVENING_NOW)
+    record = result["sets"][0]
+    assert (record["as_of"], record["end"], record["failed"]) == ("2026-10-22", "2026-10-24", [])
+    assert manifest(tmp_path, "day_before_ncep_gfs_global")["last_hour"] == "2026-10-24T23:00"
+
+
+def test_the_as_of_date_is_the_boston_date_or_the_one_given(tmp_path):
+    late = datetime(2026, 10, 23, 1, 30, tzinfo=timezone.utc)  # 21:30 EDT on 22 October, past UTC midnight
+    result = run_download(tomorrow_set(tmp_path), tmp_path / "raw", FakeOpenMeteo(), state_root=tmp_path / "a", now=late)
+    assert (result["sets"][0]["as_of"], result["sets"][0]["end"]) == ("2026-10-22", "2026-10-24")
+    given = run_download(tomorrow_set(tmp_path), tmp_path / "raw2", FakeOpenMeteo(), state_root=tmp_path / "b",
+                         now=late, as_of=date(2026, 10, 20))
+    assert (given["sets"][0]["as_of"], given["sets"][0]["end"]) == ("2026-10-20", "2026-10-22")
+
+
+def test_a_tomorrow_year_is_fetched_again_on_every_run_and_records_when(tmp_path):
+    client, sets = FakeOpenMeteo(), tomorrow_set(tmp_path)
+    run_download(sets, tmp_path / "raw", client, state_root=tmp_path / "state", now=EVENING_NOW)
+    client.urls.clear()
+    later = EVENING_NOW + timedelta(minutes=40)
+    second = run_download(sets, tmp_path / "raw", client, state_root=tmp_path / "state", now=later)
+    actions = {f["file"]: f["action"] for f in second["sets"][0]["files"]}
+    # 2025 ends long before the as-of date; 2026 holds forecasts for tomorrow, so it is asked for again.
+    assert actions == {"2025.json": "skipped", "2026.json": "unchanged"}
+    assert len(client.urls) == 1 and "start_date=2026-01-01" in client.urls[0]
+    entry = manifest(tmp_path, "day_before_ncep_gfs_global")["files"]["2026.json"]
+    assert (entry["downloaded_at"], entry["fetched_at"]) == (EVENING_NOW.isoformat(), later.isoformat())
+
+
+def test_only_an_evening_run_stores_tomorrows_answer_in_the_state_folder(tmp_path):
+    client = FakeOpenMeteo()
+    run_download(tomorrow_set(tmp_path), tmp_path / "raw", client, state_root=tmp_path / "state", now=EVENING_NOW)
+    evening = tmp_path / "state" / "day_before_ncep_gfs_global" / "evening"
+    assert not evening.exists()
+    result = run_download(tomorrow_set(tmp_path), tmp_path / "raw", client, state_root=tmp_path / "state",
+                          now=EVENING_NOW, evening=True)
+    assert result["failed"] == [] and result["sets"][0]["evening"] == "2026-10-22"
+    url = next(u for u in client.urls if "start_date=2026-10-22" in u)
+    assert "end_date=2026-10-24" in url and (evening / "2026-10-22.json").read_bytes() == client.bodies[url]
+    capture = json.loads((evening / "_captures.jsonl").read_text())
+    assert (capture["as_of"], capture["fetched_at"], capture["by"]) == ("2026-10-22", EVENING_NOW.isoformat(), "open_meteo.py")
+    assert sorted(files_in(tmp_path / "raw" / "day_before_ncep_gfs_global")) == ["2025.json", "2026.json"]  # years only
+    first = run_download(first_hours(tmp_path), tmp_path / "raw", client, state_root=tmp_path / "s2", now=EVENING_NOW,
+                         evening=True)
+    assert "evening" not in first["sets"][0] and not (tmp_path / "s2" / "first_hours_ecmwf_ifs" / "evening").exists()
+
+
+def test_an_evening_answer_fetched_after_the_forecast_day_began_is_not_stored(tmp_path):
+    # A cleared ingest_open_meteo rerun the next day keeps its run's evening (#160 review).
+    client = FakeOpenMeteo()
+    run_download(tomorrow_set(tmp_path), tmp_path / "raw", client, state_root=tmp_path / "state", now=EVENING_NOW,
+                 evening=True)
+    evening = tmp_path / "state" / "day_before_ncep_gfs_global" / "evening"
+    stored = (evening / "2026-10-22.json").read_bytes()
+    client.urls.clear()
+    next_day = datetime(2026, 10, 23, 4, 0, tzinfo=timezone.utc)  # 00:00 EDT on 23 October, the forecast day
+    result = run_download(tomorrow_set(tmp_path), tmp_path / "raw", client, state_root=tmp_path / "state",
+                          now=next_day, as_of=date(2026, 10, 22), evening=True)
+    record = result["sets"][0]
+    assert result["failed"] == [] and "evening" not in record
+    assert record["evening_refused"] == ("2026-10-23T04:00:00+00:00 is after 2026-10-23T00:00:00-04:00, "
+                                         "when 2026-10-23 began")
+    assert (evening / "2026-10-22.json").read_bytes() == stored
+    assert len((evening / "_captures.jsonl").read_text().splitlines()) == 1
+    assert not any("start_date=2026-10-22" in url for url in client.urls)  # nothing was fetched for it
+
+
 def test_day_before_rerun_on_the_same_day_sends_no_request(tmp_path):
     client = FakeOpenMeteo(value_starts=SNOW_STARTS)
     sets = day_before(tmp_path)
@@ -639,7 +718,7 @@ def test_day_before_attribution_marks_validation_and_where_values_start(tmp_path
 # The last day of a `yesterday` year (review: a year is not complete just because every hour came back)
 
 FORECAST_HOST = "historical-forecast-api.open-meteo.com"
-NEW_YEAR = datetime(2026, 1, 1, 3, 0, tzinfo=timezone.utc)  # yesterday is 2025-12-31
+NEW_YEAR = datetime(2026, 1, 1, 8, 0, tzinfo=timezone.utc)  # 03:00 in Boston, so yesterday is 2025-12-31
 
 
 def first_hours(tmp_path):

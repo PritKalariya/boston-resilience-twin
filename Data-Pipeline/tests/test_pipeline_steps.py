@@ -1,9 +1,10 @@
+import dataclasses
 import json
 import logging
 import re
 import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -85,6 +86,13 @@ def test_outputs_stay_in_the_run_folder(tmp_path, step, days):
     args = script_args(step, days, tmp_path)
     outputs = [Path(v) for flag, v in flag_values(args).items() if flag in OUTPUT_FLAGS]
     paths = run_paths(days, tmp_path)
+    if step == "forecast_rows":
+        # Tomorrow's rows go to the forecast store, outside every run folder, and only an evening run
+        # of the full build writes them (test_forecast_rows_run_only_in_an_evening_run_of_the_full_build).
+        evening = dataclasses.replace(days, as_of=date(2026, 11, 24), evening=True)
+        out = Path(flag_values(script_args(step, evening, tmp_path))["--out"])
+        assert out == tmp_path / "Data-Pipeline" / "data" / "forecast" / "2026-11-24" / "features.parquet"
+        return
     if step.startswith("ingest_") and not outputs:
         # A raw download (#7): it adds to the shared raw folder and keeps its
         # history, so it writes nothing else, in a slice or a full build.
@@ -880,3 +888,90 @@ def test_merge_needs_every_year(tmp_path, monkeypatch):
     run_step("parse_legacy_311", MID_2024_ON, root, year=2024)  # 2025 never parsed
     with pytest.raises(steps.InputError, match=r"merge_legacy_311 cannot start: missing .*2025\.parquet\. Run parse_legacy_311"):
         run_step("merge_legacy_311", MID_2024_ON, root)
+
+
+# The as-of date and the evening run (#160)
+
+EVENING_START = datetime(2026, 11, 24, 23, 5, tzinfo=timezone.utc)  # 18:05 in Boston, 5 minutes after the cutoff
+# Steps whose scripts would otherwise read the clock, and the flag that carries the as-of date to them.
+DATED = {"ingest_noaa_logan": "--as-of", "ingest_tides": "--as-of", "ingest_open_meteo": "--as-of",
+         "ingest_alert_history": "--as-of", "feature_table": "--as-of", "forecast_rows": "--as-of",
+         "validate_processed": "--latest"}
+
+
+def evening_run(run_after=EVENING_START, params=None):
+    """The DateRange every task of a run computes, as daily_pipeline.run_range does."""
+    days = DateRange.from_params(params or {}, run_after=run_after)
+    return dataclasses.replace(days, evening=steps.is_evening(run_after, days.as_of))
+
+
+class NoClock(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        raise AssertionError("a step read the clock")
+
+
+def test_every_task_of_a_run_that_crosses_utc_midnight_reads_one_as_of_date(tmp_path, monkeypatch):
+    # The run starts at 23:05 UTC on 24 November and its later tasks start after UTC midnight. Each
+    # task computes the range from the run's run_after, never from the clock, so they agree.
+    monkeypatch.setattr(steps, "datetime", NoClock)
+    dates = {flag_values(script_args(step, evening_run(), tmp_path))[flag] for step, flag in DATED.items()}
+    assert dates == {"2026-11-24"}
+
+
+def test_the_as_of_date_is_the_boston_date_of_run_after():
+    assert evening_run(datetime(2026, 11, 25, 1, 0, tzinfo=timezone.utc)).as_of == date(2026, 11, 24)  # 20:00 EST
+    assert evening_run(datetime(2026, 7, 1, 3, 30, tzinfo=timezone.utc)).as_of == date(2026, 6, 30)  # 23:30 EDT
+    assert evening_run(params={"as_of": "2026-11-20"}).as_of == date(2026, 11, 20)
+    with pytest.raises(ValueError, match="has no time zone"):
+        DateRange.from_params({}, run_after=datetime(2026, 11, 24, 23, 5))
+    with pytest.raises(ValueError, match="as_of 2014-12-31 is before 2015-01-01"):
+        DateRange.from_params({"as_of": "2014-12-31"})
+
+
+@pytest.mark.parametrize("run_after, as_of, evening", [
+    (datetime(2026, 11, 24, 22, 59, tzinfo=timezone.utc), None, False),  # 17:59 EST
+    (datetime(2026, 11, 24, 23, 0, tzinfo=timezone.utc), None, True),  # 18:00 EST
+    (datetime(2026, 7, 1, 21, 59, tzinfo=timezone.utc), None, False),  # 17:59 EDT
+    (datetime(2026, 7, 1, 22, 0, tzinfo=timezone.utc), None, True),  # 18:00 EDT
+    (datetime(2026, 11, 24, 15, 0, tzinfo=timezone.utc), None, False),  # a run by hand at 10:00
+    (datetime(2026, 11, 25, 4, 59, tzinfo=timezone.utc), "2026-11-24", True),  # 23:59 EST, still that evening
+    (datetime(2026, 11, 25, 5, 0, tzinfo=timezone.utc), "2026-11-24", False),  # 00:00 EST: the forecast day began
+    (datetime(2026, 7, 2, 3, 59, tzinfo=timezone.utc), "2026-07-01", True),  # 23:59 EDT
+    (datetime(2026, 7, 2, 4, 0, tzinfo=timezone.utc), "2026-07-01", False),  # 00:00 EDT
+    (datetime(2026, 11, 25, 5, 30, tzinfo=timezone.utc), "2026-11-24", False),  # 00:30 the next day, yesterday's as-of
+    (datetime(2026, 12, 1, 23, 5, tzinfo=timezone.utc), "2026-11-24", False),  # a run by hand 7 days late
+])
+def test_a_run_is_an_evening_run_from_the_cutoff_until_the_forecast_day_begins(run_after, as_of, evening):
+    assert evening_run(run_after, {"as_of": as_of} if as_of else None).evening is evening
+
+
+def test_only_an_evening_run_checks_the_alert_pull_against_the_nws_snapshot(tmp_path):
+    evening = flag_values(script_args("ingest_alert_history", evening_run(), tmp_path))
+    assert evening["--check-nws"] == str(tmp_path / "Data-Pipeline" / "data" / "raw" / "weather" / "nws_alerts")
+    assert evening["--settings"].endswith("labels_features.csv")
+    noon = script_args("ingest_alert_history", evening_run(datetime(2026, 11, 24, 17, 0, tzinfo=timezone.utc)), tmp_path)
+    assert "--check-nws" not in noon and flag_values(noon)["--as-of"] == "2026-11-24"
+
+
+def test_only_an_evening_run_stores_the_evening_gfs_answer(tmp_path):
+    assert "--evening" in script_args("ingest_open_meteo", evening_run(), tmp_path)
+    assert "--evening" not in script_args("ingest_open_meteo", DateRange(as_of=date(2026, 11, 24)), tmp_path)
+
+
+def test_forecast_rows_run_only_in_an_evening_run_of_the_full_build(tmp_path, monkeypatch, caplog):
+    assert steps.step_plan("forecast_rows", evening_run(), tmp_path).skip == ""
+    by_hand = DateRange(as_of=date(2026, 11, 24))
+    evening_slice = dataclasses.replace(evening_run(params={"start": "2025-01-01", "end": "2025-12-31"}))
+    assert evening_slice.evening and steps.step_plan("forecast_rows", evening_slice, tmp_path).skip
+    monkeypatch.setattr(steps, "run_script", lambda *a: pytest.fail("a skipped step ran its script"))
+    with caplog.at_level(logging.INFO, logger=steps.__name__):
+        assert run_step("forecast_rows", by_hand, tmp_path, run_id="r1") == (None, None)
+    assert "task forecast_rows: skipped: 2015-01-01_latest is not an evening run of the full build" in caplog.text
+
+
+def test_the_counts_read_the_switch_dates_of_their_own_run(tmp_path):
+    plan = steps.step_plan("daily_counts", SLICE, tmp_path)
+    switches = run_paths(SLICE, tmp_path).interim / "change-points.csv"
+    assert flag_values(script_args("daily_counts", SLICE, tmp_path))["--change-points"] == str(switches)
+    assert switches in plan.files.config_in

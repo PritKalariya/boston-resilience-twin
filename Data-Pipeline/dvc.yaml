@@ -294,6 +294,7 @@ stages:
     - data/interim/311_located.parquet
     - data/interim/static/neighborhoods_by_tract20.parquet
     - config/processing.csv
+    - data/interim/change-points.csv
     outs:
     - data/processed/daily_counts.parquet
   surge_labels:
