@@ -4,6 +4,7 @@
 - Date: 2026-11-13
 - Owner: PritKalariya
 - Phase: deploy
+- Note (2026-11-25): #162. The render writes a second constant line after `AIRFLOW_UID=50000`, `BRT_EVENING_RUN=1`, so the log reads `11 keys`. It is not a secret: it marks this VM as the live evening run, and #162's evening tasks run, and fail on a lost data bucket instead of skipping, only where it is set. "It never starts or restarts compose" still holds for the startup script. The code-sync timer it installs (ADR-029, note of 2026-11-25) runs `docker compose up -d --build --wait` only when the stack's inputs change on `main`, never because `.env` changed, so a changed secret still needs the runbook's recreate. The timer's service reads `SLACK_ALERT_WEBHOOK` from `.env` as root to send its alerts.
 
 ## Context
 
