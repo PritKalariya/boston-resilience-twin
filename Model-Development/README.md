@@ -27,23 +27,32 @@ Training, evaluation and the bias checks need only Docker and the two data files
 
 **1. The data.** Build it with the Data Pipeline README's [Run it in Airflow](../Data-Pipeline/README.md#run-it-in-airflow), with your own free NOAA token and NWS user agent ([API keys](../Data-Pipeline/README.md#api-keys)). It writes `Data-Pipeline/data/processed/labels.parquet` and `features.parquet`. Use the full build, not the one-year slice: a label compares a day with the 3 years before it, and training needs the train years 2015 to 2023. The first build downloads about 1.7 GB of 311 files, and the alert history fetches 1,134 first bulletins, about 20 minutes. With access to the team's bucket, `dvc pull Data-Pipeline/data/processed/labels.parquet Data-Pipeline/data/processed/features.parquet` fetches the same two files instead (about 5 MB).
 
-**2. Train, evaluate and check bias** in the training image, from the repo root:
+**2. Train, evaluate and check bias** in the training image, from the root of a git clone (the block reads the commit with `git rev-parse`, so a ZIP download of the repo does not work):
 
 ```bash
 docker build -f Model-Development/Dockerfile -t brt-train:local .
-export IMAGE=brt-train:local ARTIFACTS_DIR=$(mktemp -d) GITHUB_SHA=$(git rev-parse HEAD)
-for s in pull_data train evaluate rescore_champion; do bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_$s.py --artifacts artifacts || break; done
-bash .github/scripts/in_image.sh python Model-Development/scripts/gates.py --metrics artifacts/metrics.json --out artifacts/gate_report.json
-for s in reload_check registry_push set_champion; do bash .github/scripts/in_image.sh python Model-Development/scripts/steps/step_$s.py --artifacts artifacts || break; done
-bash .github/scripts/in_image.sh python Model-Development/scripts/bias.py --run Model-Development/runs/ci-lightgbm
-bash .github/scripts/in_image.sh python Model-Development/scripts/selection.py
-bash .github/scripts/in_image.sh python Model-Development/scripts/sensitivity.py
+(
+  set -eu
+  GITHUB_SHA=$(git rev-parse HEAD)
+  export IMAGE=brt-train:local ARTIFACTS_DIR=$(mktemp -d) GITHUB_SHA
+  echo "artifacts in $ARTIFACTS_DIR"
+  run() { bash .github/scripts/in_image.sh python "$@"; }
+  for s in pull_data train evaluate rescore_champion; do run Model-Development/scripts/steps/step_$s.py --artifacts artifacts; done
+  run Model-Development/scripts/gates.py --metrics artifacts/metrics.json --out artifacts/gate_report.json
+  for s in reload_check registry_push set_champion; do run Model-Development/scripts/steps/step_$s.py --artifacts artifacts; done
+  winner=$(run -c "import json; print(json.load(open('artifacts/evaluation.json'))['winner_run'])")
+  run Model-Development/scripts/bias.py --run "Model-Development/runs/$winner"
+  run Model-Development/scripts/selection.py
+  run Model-Development/scripts/sensitivity.py
+)
 ```
 
-- **The chain** (the two loops and `gates.py`) is what `model.yml` runs on main, about 85 s: it checks the data and records its version, trains the baseline and the three candidates, picks the winner after the bias check, applies the gates and reloads the saved model. `gates.py` writes the decision to `$ARTIFACTS_DIR/gate_report.json` and exits 0 (promote or keep the champion), 1 (a gate failed) or 2; here it is `promote`, with `margin 0.221623 >= threshold 0.05` and `gap 0.043454 <= threshold 0.15`. The reload check prints `reload check ok: lightgbm, 8304 validation rows, largest probability difference 0`.
+After the image build, the block prints its artifacts folder, since `ARTIFACTS_DIR` ends with the subshell. It runs in a subshell, so a step that fails stops it with that step's exit code and your shell stays open; so does a failed gate (`gates.py` exit 1), as on main. Outside a git clone it stops at once with git's message (exit 128). The block reads the winner's run folder from `evaluation.json` (`winner_run`; here `ci-lightgbm`) and passes it to `bias.py`.
+
+- **The chain** (the two loops and `gates.py`) is what `model.yml` runs on main, about 85 s: it checks the data and records its version, trains the baseline and the three candidates, picks the winner after the bias check, applies the gates and reloads the saved model. `gates.py` writes the decision to `gate_report.json` in the artifacts folder and exits 0 (promote or keep the champion), 1 (a gate failed) or 2; here it is `promote`, with `margin 0.221623 >= threshold 0.05` and `gap 0.043454 <= threshold 0.15`. The reload check prints `reload check ok: lightgbm, 8304 validation rows, largest probability difference 0`.
 - **The registry steps skip:** `champion re-score skipped`, `registry push skipped` and `set champion skipped`, each with `no project 2 access`, and each exits 0. `in_image.sh` mounts Google credentials only with `MOUNT_GCP_CREDENTIALS=1`, which only main's workflow sets (ADR-035).
-- **`bias.py`** writes the winner's validation and test bias report into its run folder (about 5 s); **`selection.py`** writes the comparison plots and test slices to `$ARTIFACTS_DIR/reports/` (about 55 s); **`sensitivity.py`** writes the SHAP and tuning charts to `$ARTIFACTS_DIR/reports/sensitivity/` (about 7 s).
-- **Everything lands in `$ARTIFACTS_DIR`:** `metrics.json`, `evaluation.json`, `gate_report.json`, `bias/`, `runs/ci-<model>/` with each model's predictions, metrics and `model.joblib`, `reports/`, and `mlruns/`, the MLflow store of these runs (`mlflow.db` and the artifacts; M4's "Tracking" shows how to browse a store with `mlflow ui`).
+- **`bias.py`** writes the winner's validation and test bias report into its run folder (about 5 s); **`selection.py`** writes the comparison plots and test slices to `reports/` in the artifacts folder (about 55 s); **`sensitivity.py`** writes the SHAP and tuning charts to `reports/sensitivity/` (about 7 s).
+- **Everything lands in the artifacts folder the block printed:** `metrics.json`, `evaluation.json`, `gate_report.json`, `bias/`, `runs/ci-<model>/` with each model's predictions, metrics and `model.joblib`, `reports/`, and `mlruns/`, the MLflow store of these runs (`mlflow.db` and the artifacts; M4's "Tracking" shows how to browse a store with `mlflow ui`).
 
 **What to expect.** This block was run as written on 2026-11-16 in a fresh clone of this branch with no `.env` and no Google credentials, on the two files of data version `a719afeb`. Every number matched the locked selection exactly: the winner, every model's validation F1, precision, recall and PR-AUC, and `test_slices.csv` byte for byte. Only timings and run ids differ. A build of the data on a later date reads newer 311 records and forecasts, so its numbers can differ from these; how much was not measured.
 
@@ -103,44 +112,44 @@ How fold F1 varied with LightGBM's two most important tuning settings across the
 
 ## Assignment criteria
 
-Each item of sections 2 to 8 of the Model Development guidelines, with where it is met. A path is in `Model-Development/` unless it starts with another top-level folder (`.github/`, `Data-Pipeline/`).
+Each item of sections 2 to 8 of the Model Development guidelines, with where it is met. A path is in `Model-Development/` unless it starts with another top-level folder ([`.github/`](../.github), [`Data-Pipeline/`](../Data-Pipeline)).
 
 **2. Model development and ML code**
 
 | Item | Where |
 |---|---|
-| 2.1 Loading data from the data pipeline | `scripts/training_data.py` (`load_table`): the DVC-versioned `labels.parquet` and `features.parquet`, joined on unit and date, with the inputs `feature_catalog.csv` marks for the model and the data version (sha256 of `Data-Pipeline/dvc.lock`) recorded in every run. `scripts/steps/step_pull_data.py` checks the files in CI. [M4](#training-core-candidate-models-tracking-selection-hold-out-results-m4) |
-| 2.2 Training and selecting the best model | `scripts/train.py`, `scripts/models.py` (four models behind one interface), `scripts/inner_folds.py` (each candidate's own settings on the train years), `scripts/selection.py` (highest validation F1 that reaches the gate). [M4](#training-core-candidate-models-tracking-selection-hold-out-results-m4) |
-| 2.3 Model validation on a hold-out set | `scripts/threshold.py` (F1, precision, recall, AUC, PR-AUC, log loss, Brier skill), `scripts/evaluate.py`; validation 2024 picks threshold and winner, the 2025 to 2026 test window is scored once, with storm, freeze and heat slices and bootstrap intervals (`scripts/slices.py`). [Results](#the-model-and-its-results) |
-| 2.4 Bias detection with slicing (Fairlearn) | `scripts/bias.py`: Fairlearn `MetricFrame` over ACS poverty (gated), people of color, limited English, flood zone, student areas and each neighborhood, on validation and test. [M7](#model-bias-check-m7), [Bias report](#evidence) |
-| 2.5 Code to check bias, reports, mitigation | `bias.py` writes `bias_report.md`, `bias_slices.csv`, `bias.json` and `bias_recall.png`; `scripts/gates.py` applies ADR-026's fairness gate. Mitigation: see 6.3 below |
-| 2.6 Pushing the model to a registry | `scripts/registry.py push` and `scripts/steps/step_registry_push.py`: Vertex AI Model Registry in project 2, the files in its model bucket; the training image goes to Artifact Registry (`brt-images`). [M8](#model-registry-push-champion-and-rollback-m8) |
+| 2.1 Loading data from the data pipeline | [`scripts/training_data.py`](scripts/training_data.py) (`load_table`): the DVC-versioned `labels.parquet` and `features.parquet`, joined on unit and date, with the inputs [`feature_catalog.csv`](../Data-Pipeline/config/feature_catalog.csv) marks for the model and the data version (sha256 of [`Data-Pipeline/dvc.lock`](../Data-Pipeline/dvc.lock)) recorded in every run. [`scripts/steps/step_pull_data.py`](scripts/steps/step_pull_data.py) checks the files in CI. [M4](#training-core-candidate-models-tracking-selection-hold-out-results-m4) |
+| 2.2 Training and selecting the best model | [`scripts/train.py`](scripts/train.py), [`scripts/models.py`](scripts/models.py) (four models behind one interface), [`scripts/inner_folds.py`](scripts/inner_folds.py) (each candidate's own settings on the train years), [`scripts/selection.py`](scripts/selection.py) (highest validation F1 that reaches the gate). [M4](#training-core-candidate-models-tracking-selection-hold-out-results-m4) |
+| 2.3 Model validation on a hold-out set | [`scripts/threshold.py`](scripts/threshold.py) (F1, precision, recall, AUC, PR-AUC, log loss, Brier skill), [`scripts/evaluate.py`](scripts/evaluate.py); validation 2024 picks threshold and winner, the 2025 to 2026 test window is scored once, with storm, freeze and heat slices and bootstrap intervals ([`scripts/slices.py`](scripts/slices.py)). [Results](#the-model-and-its-results) |
+| 2.4 Bias detection with slicing (Fairlearn) | [`scripts/bias.py`](scripts/bias.py): Fairlearn `MetricFrame` over ACS poverty (gated), people of color, limited English, flood zone, student areas and each neighborhood, on validation and test. [M7](#model-bias-check-m7), [Bias report](#evidence) |
+| 2.5 Code to check bias, reports, mitigation | [`scripts/bias.py`](scripts/bias.py) writes `bias_report.md`, `bias_slices.csv`, `bias.json` and `bias_recall.png`; [`scripts/gates.py`](scripts/gates.py) applies ADR-026's fairness gate. Mitigation: see 6.3 below |
+| 2.6 Pushing the model to a registry | [`scripts/registry.py push`](scripts/registry.py) and [`scripts/steps/step_registry_push.py`](scripts/steps/step_registry_push.py): Vertex AI Model Registry in project 2, the files in its model bucket; the training image goes to Artifact Registry (`brt-images`). [M8](#model-registry-push-champion-and-rollback-m8) |
 
 **3. Hyperparameter tuning**
 
 | Item | Where |
 |---|---|
-| Technique, search space and process | `scripts/tune.py`: Optuna's TPE (Bayesian optimization), 80 trials per candidate, scored on the inner folds of the train years only, then confirmed on fresh seeds; the search space is `SPACES` in `tune.py`, tabled in [M6](#hyperparameter-tuning-with-optuna-m6); settings in `config/tuning.csv`; every study in `tuning/<model>.json`. Result: no gain beyond the noise on 2024 (`tuning/comparison.json`), so the starting values stay active |
+| Technique, search space and process | [`scripts/tune.py`](scripts/tune.py): Optuna's TPE (Bayesian optimization), 80 trials per candidate, scored on the inner folds of the train years only, then confirmed on fresh seeds; the search space is `SPACES` in `tune.py`, tabled in [M6](#hyperparameter-tuning-with-optuna-m6); settings in [`config/tuning.csv`](config/tuning.csv); every study in `tuning/<model>.json`. Result: no gain beyond the noise on 2024 ([`tuning/comparison.json`](tuning/comparison.json)), so the starting values stay active |
 
 **4. Experiment tracking and results**
 
 | Item | Where |
 |---|---|
-| Tracking tool: parameters, metrics, model versions | MLflow (`scripts/tracking.py`, `scripts/mlflow_runs.py`): every run logs its parameters, metrics, tags (data version, commit, split days) and model; a registered run is tagged with its Vertex AI version (`registry_version`). [M1](#mlflow-tracking-server-m1), [screenshots](#evidence) |
-| Visualizations and how the model was selected | `comparison.png` and `confusion_matrix.png` from `selection.py`, and the selection rule above. [Evidence](#evidence) |
+| Tracking tool: parameters, metrics, model versions | MLflow ([`scripts/tracking.py`](scripts/tracking.py), [`scripts/mlflow_runs.py`](scripts/mlflow_runs.py)): every run logs its parameters, metrics, tags (data version, commit, split days) and model; a registered run is tagged with its Vertex AI version (`registry_version`, set by [`scripts/registry.py`](scripts/registry.py) `push`). [M1](#mlflow-tracking-server-m1), [screenshots](#evidence) |
+| Visualizations and how the model was selected | `comparison.png` and `confusion_matrix.png` from [`scripts/selection.py`](scripts/selection.py), and the selection rule above. [Evidence](#evidence) |
 
 **5. Model sensitivity analysis**
 
 | Item | Where |
 |---|---|
-| Feature importance (SHAP) | `scripts/sensitivity.py`: TreeExplainer on every scored test row, the importance table, beeswarm and three example days. [M10](#sensitivity-analysis-shap-and-hyperparameter-importance-m10) |
-| Hyperparameter sensitivity | `sensitivity.py`: seeded fANOVA importance of each setting in M6's studies, with slice plots of the top two. [M10](#sensitivity-analysis-shap-and-hyperparameter-importance-m10) |
+| Feature importance (SHAP) | [`scripts/sensitivity.py`](scripts/sensitivity.py): TreeExplainer on every scored test row, the importance table, beeswarm and three example days. [M10](#sensitivity-analysis-shap-and-hyperparameter-importance-m10) |
+| Hyperparameter sensitivity | [`scripts/sensitivity.py`](scripts/sensitivity.py): seeded fANOVA importance of each setting in M6's studies, with slice plots of the top two. [M10](#sensitivity-analysis-shap-and-hyperparameter-importance-m10) |
 
 **6. Model bias detection (slicing)**
 
 | Item | Where |
 |---|---|
-| 6.1 Perform slicing | `bias.py` with the groups in `config/poverty_groups.csv` and `config/slice_groups.csv` (written from #32's slicing by `Data-Pipeline/scripts/model_groups.py`). [M7](#model-bias-check-m7) |
+| 6.1 Perform slicing | [`scripts/bias.py`](scripts/bias.py) with the groups in [`config/poverty_groups.csv`](config/poverty_groups.csv) and [`config/slice_groups.csv`](config/slice_groups.csv) (written from #32's slicing by [`Data-Pipeline/scripts/model_groups.py`](../Data-Pipeline/scripts/model_groups.py)). [M7](#model-bias-check-m7) |
 | 6.2 Track metrics across slices | Recall, precision and F1 per group on validation and test, in `bias_slices.csv` and in the winner's MLflow run (`validation_worst_group_recall_gap`, tags `bias_gate`, `bias_reopen_*`). [Bias report](#evidence) |
 | 6.3 Bias mitigation | Applied at the inputs: the 311 lags are self-relative (each neighborhood's requests against its own baseline, ADR-025), because raw counts carry a reporting gap between poorer and richer neighborhoods (#32, #33). The comparison below kept them. No model-level mitigation (reweighting, per-group thresholds) was applied, since every candidate passes the gate (ADR-033, decision 8); if one fails, ADR-033 applies those with before and after numbers |
 | 6.4 Document mitigation and trade-offs | [ADR-025](../docs/decisions/ADR-025-bias-mitigation.md), [ADR-033](../docs/decisions/ADR-033-model-bias-check.md) and the table below |
@@ -160,24 +169,24 @@ The trade-off: raw lags tie on F1 (LightGBM +0.004 with raw, XGBoost +0.007 with
 
 | Item | Where |
 |---|---|
-| 7.1 Training on every model change | `.github/workflows/model.yml`: a pull request or push that touches `Model-Development/`, the workflow, `in_image.sh`, `Data-Pipeline/dvc.lock` or the feature catalog trains in the image on GitHub Actions. [M9](#model-cicd-pipeline-and-training-image) |
-| 7.2 Automated validation with a threshold | `gates.py`: validation F1 at least the baseline's plus 0.05 (`config/gates.csv`, ADR-026); a failure blocks the push on main |
-| 7.3 Automated bias detection | `step_evaluate.py` runs the bias check on every candidate and the fairness gate (recall gap at most 0.15) blocks on main; the report is uploaded with the run's artifacts |
-| 7.4 Registry push | `step_registry_push.py` on main, after the gates and the reload check; runs [43749795990](https://github.com/PritKalariya/boston-resilience-twin/actions/runs/43749795990) and [43758289814](https://github.com/PritKalariya/boston-resilience-twin/actions/runs/43758289814) |
-| 7.5 Notifications | `scripts/steps/step_notify.py`: Slack for training complete, gate failed and pipeline failed (runs listed under [Evidence](#evidence)) |
-| 7.6 Rollback | `registry.py`: the champion (`production`) changes only on `promote`, after the old champion is re-scored on the same rows; `registry.py rollback` moves it back, exercised live on 2026-11-16. [M8](#model-registry-push-champion-and-rollback-m8) |
+| 7.1 Training on every model change | [`.github/workflows/model.yml`](../.github/workflows/model.yml): a pull request or push that touches `Model-Development/`, the workflow, [`in_image.sh`](../.github/scripts/in_image.sh), [`Data-Pipeline/dvc.lock`](../Data-Pipeline/dvc.lock) or the feature catalog trains in the image on GitHub Actions. [M9](#model-cicd-pipeline-and-training-image) |
+| 7.2 Automated validation with a threshold | [`scripts/gates.py`](scripts/gates.py): validation F1 at least the baseline's plus 0.05 ([`config/gates.csv`](config/gates.csv), ADR-026); a failure blocks the push on main |
+| 7.3 Automated bias detection | [`scripts/steps/step_evaluate.py`](scripts/steps/step_evaluate.py) runs the bias check on every candidate and the fairness gate (recall gap at most 0.15) blocks on main; the report is uploaded with the run's artifacts |
+| 7.4 Registry push | [`scripts/steps/step_registry_push.py`](scripts/steps/step_registry_push.py) on main, after the gates and the reload check; runs [43749795990](https://github.com/PritKalariya/boston-resilience-twin/actions/runs/43749795990) and [43758289814](https://github.com/PritKalariya/boston-resilience-twin/actions/runs/43758289814) |
+| 7.5 Notifications | [`scripts/steps/step_notify.py`](scripts/steps/step_notify.py): Slack for training complete, gate failed and pipeline failed (runs listed under [Evidence](#evidence)) |
+| 7.6 Rollback | [`scripts/registry.py`](scripts/registry.py): the champion (`production`) changes only on `promote`, after the old champion is re-scored on the same rows; `registry.py rollback` moves it back, exercised live on 2026-11-16. [M8](#model-registry-push-champion-and-rollback-m8) |
 
 **8. Code implementation**
 
 | Item | Where |
 |---|---|
-| 8.1 Docker | `Dockerfile` (Python 3.12, base pinned by digest, packages from `requirements.lock`), `.github/scripts/in_image.sh` runs every step in it |
-| 8.2 Loading data | `scripts/training_data.py`, `scripts/steps/step_pull_data.py` (2.1) |
-| 8.3 Training and selecting | `scripts/train.py`, `scripts/selection.py` (2.2) |
-| 8.4 Validation | `scripts/threshold.py`, `scripts/evaluate.py` (2.3) |
-| 8.5 Bias checking with reports and visualizations | `scripts/bias.py` (2.4, 2.5) |
-| 8.6 Selection after bias checking | `scripts/steps/step_evaluate.py`: ranks the candidates by validation F1 and picks the first whose fairness gate passes (ADR-033) |
-| 8.7 Push to a registry | `scripts/registry.py`, `scripts/steps/step_registry_push.py` (2.6) |
+| 8.1 Docker | [`Dockerfile`](Dockerfile) (Python 3.12, base pinned by digest, packages from [`requirements.lock`](requirements.lock)), [`.github/scripts/in_image.sh`](../.github/scripts/in_image.sh) runs every step in it |
+| 8.2 Loading data | [`scripts/training_data.py`](scripts/training_data.py), [`scripts/steps/step_pull_data.py`](scripts/steps/step_pull_data.py) (2.1) |
+| 8.3 Training and selecting | [`scripts/train.py`](scripts/train.py), [`scripts/selection.py`](scripts/selection.py) (2.2) |
+| 8.4 Validation | [`scripts/threshold.py`](scripts/threshold.py), [`scripts/evaluate.py`](scripts/evaluate.py) (2.3) |
+| 8.5 Bias checking with reports and visualizations | [`scripts/bias.py`](scripts/bias.py) (2.4, 2.5) |
+| 8.6 Selection after bias checking | [`scripts/steps/step_evaluate.py`](scripts/steps/step_evaluate.py): ranks the candidates by validation F1 and picks the first whose fairness gate passes (ADR-033) |
+| 8.7 Push to a registry | [`scripts/registry.py`](scripts/registry.py), [`scripts/steps/step_registry_push.py`](scripts/steps/step_registry_push.py) (2.6) |
 
 ## Component sections
 
