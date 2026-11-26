@@ -19,6 +19,9 @@ ROOT = Path(__file__).resolve().parents[2]
 CI = ROOT / ".github" / "workflows" / "ci.yml"
 COMPONENT_CI = ROOT / ".github" / "workflows" / "component-ci.yml"
 REUSABLE = "./.github/workflows/component-ci.yml"
+# The run step's per-element check, as one exact line. The ::error:: message names the same character class, so
+# the check is looked for as this line, never as the class anywhere in the file.
+CHECK_LINE = 'if [[ ! "$source" =~ ^[A-Za-z0-9_./-]+$ ]]; then'
 
 
 def check_aggregator(ci: dict) -> list[str]:
@@ -56,7 +59,7 @@ def check_reusable(text: str) -> list[str]:
     if "--network none" not in text:
         problems.append("no --network none")
     # cov_source is split into an array, each element checked, one --cov flag each; never spliced.
-    if '"${cov_flags[@]}"' not in text or "[A-Za-z0-9_./-]+" not in text:
+    if '"${cov_flags[@]}"' not in text or CHECK_LINE not in (line.strip() for line in text.splitlines()):
         problems.append("the run step does not build --cov flags from a checked array")
     if re.findall(r"\$\{?COV_SOURCE\b", text) != ["$COV_SOURCE"] or '<<< "$COV_SOURCE"' not in text:
         problems.append("COV_SOURCE is used anywhere but the array read")
@@ -143,8 +146,35 @@ def test_mutation_the_bar_set_to_60_fails(component_ci_text):
 def test_mutation_cov_source_spliced_into_the_command_fails(component_ci_text):
     spliced = component_ci_text.replace('"${cov_flags[@]}"', '--cov="$COV_SOURCE"')
     assert any("checked array" in p for p in check_reusable(spliced))
-    unchecked = component_ci_text.replace("[A-Za-z0-9_./-]+", "[a-z]+")
+    unchecked = replace_check_line(component_ci_text, 'if [[ ! "$source" =~ ^[a-z]+$ ]]; then')
     assert any("checked array" in p for p in check_reusable(unchecked))
+
+
+def replace_check_line(text: str, new: str) -> str:
+    """Change only the check line (keeping its indentation); the ::error:: message stays as it is."""
+    lines = text.splitlines(keepends=True)
+    index = [i for i, line in enumerate(lines) if line.strip() == CHECK_LINE]
+    assert len(index) == 1
+    indent = lines[index[0]][: len(lines[index[0]]) - len(lines[index[0]].lstrip())]
+    lines[index[0]] = indent + new + "\n"
+    return "".join(lines)
+
+
+def test_the_error_message_still_names_the_class_so_the_guard_must_not_rely_on_it(component_ci_text):
+    assert component_ci_text.count("[A-Za-z0-9_./-]+") == 2
+
+
+@pytest.mark.parametrize("pattern", ["^.+$", ".*"])
+def test_mutation_a_loosened_check_pattern_fails(component_ci_text, pattern):
+    loosened = replace_check_line(component_ci_text, f'if [[ ! "$source" =~ {pattern} ]]; then')
+    assert "::error::cov_source element is not [A-Za-z0-9_./-]+" in loosened  # the message is untouched
+    assert any("checked array" in p for p in check_reusable(loosened))
+
+
+def test_mutation_a_deleted_check_fails(component_ci_text):
+    deleted = replace_check_line(component_ci_text, "")  # the line only; the message stays
+    assert CHECK_LINE not in deleted and "::error::cov_source element is not [A-Za-z0-9_./-]+" in deleted
+    assert any("checked array" in p for p in check_reusable(deleted))
 
 
 def test_mutation_network_allowed_fails(component_ci_text):

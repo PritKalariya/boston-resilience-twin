@@ -133,8 +133,11 @@ class Runner:
         if env and "DOCKER_CONFIG" in env:
             self.config_dirs.append((env["DOCKER_CONFIG"], Path(env["DOCKER_CONFIG"]).is_dir()))
         if argv[0] == "git" and "fetch" in argv:
-            return (128, "fatal: unable to access 'https://github.com/x/y/': Could not resolve host\n") \
-                if self.fetch_fails else (0, "")
+            if self.fetch_fails:
+                text = self.fetch_fails if isinstance(self.fetch_fails, str) else \
+                    "fatal: unable to access 'https://github.com/x/y/': Could not resolve host\n"
+                return 128, text
+            return 0, ""
         if argv[0] == "git" and "rev-parse" in argv:
             return 0, (self.main_tip if "FETCH_HEAD" in argv else COMMIT) + "\n"
         if argv[0] == "git":
@@ -219,6 +222,24 @@ def test_a_failed_fetch_is_a_refusal_before_any_vertex_call(world, settings, cap
     assert "deploy failed at step tree" in err and "cannot fetch origin main" in err
     assert "deploy from an up-to-date main checkout" in err
     assert world.calls == [] and not [argv for argv, _ in runner.calls if argv[0] == "docker"]
+
+
+GIT_TAIL = (
+    "fatal: Could not read from remote repository.\n\n"
+    "Please make sure you have the correct access rights\nand the repository exists.\n"
+)
+
+
+@pytest.mark.parametrize("first_line", [
+    "git@github.com: Permission denied (publickey).",
+    "fatal: '/nowhere' does not appear to be a git repository",
+])
+def test_a_failed_fetch_names_gits_first_line_not_its_generic_advice(world, settings, capsys, first_line):
+    runner = Runner(settings, fetch_fails=first_line + "\n" + GIT_TAIL)
+    assert go(world, runner) == 2
+    err = capsys.readouterr().err
+    assert f"cannot fetch origin main ({first_line})" in err
+    assert "and the repository exists" not in err
 
 
 def test_a_dry_run_with_a_stale_head_warns_and_continues(world, settings, capsys):

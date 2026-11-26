@@ -300,7 +300,8 @@ def stale_reason(runner: Runner, commit: str) -> str:
     advice = "deploy from an up-to-date main checkout"
     code, out = runner.run(["git", "-C", str(ROOT), "fetch", "--quiet", "origin", "main"])
     if code != 0:
-        detail = out.strip().splitlines()[-1] if out.strip() else "no output"
+        # the first non-empty line is git's reason; the last is usually its generic advice
+        detail = next((line.strip() for line in out.splitlines() if line.strip()), "no output")
         return f"cannot fetch origin main ({detail}); {advice}"
     code, out = runner.run(["git", "-C", str(ROOT), "rev-parse", "FETCH_HEAD"])
     tip = out.strip()
