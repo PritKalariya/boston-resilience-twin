@@ -3,7 +3,8 @@
 
   python Serving/scripts/deploy.py [--version <id>] [--dry-run] [--keep <dir>]
 
-Steps: (1) refuse a tree with uncommitted changes under what the image copies, (2) resolve the registry version
+Steps: (1) refuse a tree with uncommitted changes under what the image copies, and a HEAD that is not the tip of
+origin/main (git fetch, then HEAD must equal FETCH_HEAD; --dry-run only warns), (2) resolve the registry version
 (the `production` alias, or --version), (3) download the files its metadata.json lists and check every sha256,
 (4) put model.joblib and metadata.json in one folder, (5) --dry-run stops here, (6) docker build, (7) docker push
 and read the digest, (8) point both services at the image digest, (9) print each service's URL and revision.
@@ -292,6 +293,24 @@ def git_commit(runner: Runner) -> str:
     return commit
 
 
+def stale_reason(runner: Runner, commit: str) -> str:
+    """Why `commit` (HEAD) is not the tip of origin/main, or "" when it is. Fetches main, then compares HEAD with
+    FETCH_HEAD for equality: an ancestor check would let a stale main through, and needs history a shallow
+    checkout lacks. A failed fetch or an unreadable FETCH_HEAD is a reason too."""
+    advice = "deploy from an up-to-date main checkout"
+    code, out = runner.run(["git", "-C", str(ROOT), "fetch", "--quiet", "origin", "main"])
+    if code != 0:
+        detail = out.strip().splitlines()[-1] if out.strip() else "no output"
+        return f"cannot fetch origin main ({detail}); {advice}"
+    code, out = runner.run(["git", "-C", str(ROOT), "rev-parse", "FETCH_HEAD"])
+    tip = out.strip()
+    if code != 0 or not re.fullmatch(r"[0-9a-f]{40}", tip):
+        return f"cannot read the tip of origin main after the fetch; {advice}"
+    if tip != commit:
+        return f"HEAD {commit[:12]} is not the tip of origin main {tip[:12]}; {advice}"
+    return ""
+
+
 def dirty_paths(runner: Runner) -> list[str]:
     code, out = runner.run(["git", "-C", str(ROOT), "status", "--porcelain", "--", *CLEAN_PATHS])
     if code != 0:
@@ -425,6 +444,11 @@ def run(args, runner: Runner | None = None, session_factory=default_session, out
                                           f"from a commit:\n{detail}")
             print(f"warning: uncommitted changes under {', '.join(CLEAN_PATHS)} (a real deploy stops here):\n{detail}",
                   file=sys.stderr)
+        stale = stale_reason(runner, commit)
+        if stale:
+            if not args.dry_run:
+                raise DeployError("tree", stale)
+            print(f"warning: {stale} (a real deploy stops here)", file=sys.stderr)
 
         step = "credentials"
         session = session_factory(settings.project)

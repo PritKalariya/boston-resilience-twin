@@ -119,9 +119,10 @@ class World:
 
 
 class Runner:
-    def __init__(self, settings, dirty="", inspect_digest=DIGEST, fail=()):
+    def __init__(self, settings, dirty="", inspect_digest=DIGEST, fail=(), main_tip=COMMIT, fetch_fails=False):
         self.settings = settings
         self.dirty, self.inspect_digest, self.fail = dirty, inspect_digest, fail
+        self.main_tip, self.fetch_fails = main_tip, fetch_fails  # origin/main as `git rev-parse FETCH_HEAD` reads it
         self.calls: list[tuple[list[str], str | None]] = []
         self.envs: list[dict | None] = []
         self.config_dirs: list[tuple[str, bool]] = []  # (DOCKER_CONFIG, existed during the call)
@@ -131,8 +132,11 @@ class Runner:
         self.envs.append(env)
         if env and "DOCKER_CONFIG" in env:
             self.config_dirs.append((env["DOCKER_CONFIG"], Path(env["DOCKER_CONFIG"]).is_dir()))
+        if argv[0] == "git" and "fetch" in argv:
+            return (128, "fatal: unable to access 'https://github.com/x/y/': Could not resolve host\n") \
+                if self.fetch_fails else (0, "")
         if argv[0] == "git" and "rev-parse" in argv:
-            return 0, COMMIT + "\n"
+            return 0, (self.main_tip if "FETCH_HEAD" in argv else COMMIT) + "\n"
         if argv[0] == "git":
             return 0, self.dirty
         if argv[:2] == ["docker", "image"]:
@@ -179,6 +183,50 @@ def test_a_dirty_tree_is_refused_before_any_cloud_call(world, settings, capsys):
     err = capsys.readouterr().err
     assert err.count("\n") >= 1 and "deploy failed at step tree" in err and "Serving/src/serving/app.py" in err
     assert world.calls == [] and runner.docker("build") == []
+
+
+STALE = "89abcdef0123456789abcdef0123456789abcdef"
+
+
+def git_calls(runner):
+    return [argv for argv, _ in runner.calls if argv[0] == "git"]
+
+
+def test_head_equal_to_the_tip_of_main_proceeds_after_a_fetch_of_main(world, settings):
+    runner = Runner(settings)
+    assert go(world, runner, "--dry-run") == 0
+    fetch = next(argv for argv in git_calls(runner) if "fetch" in argv)
+    assert fetch[fetch.index("fetch"):] == ["fetch", "--quiet", "origin", "main"]
+    assert world.calls  # it went on to the registry
+    # the order: the dirty check, then the fetch, before any registry call
+    verbs = [("status" if "status" in argv else "fetch" if "fetch" in argv else "rev-parse") for argv in git_calls(runner)]
+    assert verbs.index("status") < verbs.index("fetch")
+
+
+def test_head_that_is_not_the_tip_of_main_is_refused_before_any_vertex_call(world, settings, capsys):
+    runner = Runner(settings, main_tip=STALE)
+    assert go(world, runner) == 2
+    err = capsys.readouterr().err
+    assert "deploy failed at step tree" in err and COMMIT[:12] in err and STALE[:12] in err
+    assert "deploy from an up-to-date main checkout" in err
+    assert world.calls == [] and not [argv for argv, _ in runner.calls if argv[0] == "docker"]
+
+
+def test_a_failed_fetch_is_a_refusal_before_any_vertex_call(world, settings, capsys):
+    runner = Runner(settings, fetch_fails=True)
+    assert go(world, runner) == 2
+    err = capsys.readouterr().err
+    assert "deploy failed at step tree" in err and "cannot fetch origin main" in err
+    assert "deploy from an up-to-date main checkout" in err
+    assert world.calls == [] and not [argv for argv, _ in runner.calls if argv[0] == "docker"]
+
+
+def test_a_dry_run_with_a_stale_head_warns_and_continues(world, settings, capsys):
+    runner = Runner(settings, main_tip=STALE)
+    assert go(world, runner, "--dry-run") == 0
+    captured = capsys.readouterr()
+    assert "warning:" in captured.err and COMMIT[:12] in captured.err and STALE[:12] in captured.err
+    assert "dry run: nothing built, pushed or deployed" in captured.out and world.calls
 
 
 def test_the_dirty_check_covers_what_the_image_copies(world, settings):

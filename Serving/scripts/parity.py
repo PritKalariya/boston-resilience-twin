@@ -58,6 +58,8 @@ def served(request: dict, url: str, token: str | None) -> dict[str, float]:
                                   headers=headers, method="POST")
     try:
         with urllib.request.urlopen(post, timeout=60) as response:
+            if response.status != 200:  # urlopen raises only on 4xx and 5xx; a 204 or a 3xx body is not an answer
+                sys.exit(f"FAIL: /predict answered {response.status}, not 200")
             body = json.load(response)
     except urllib.error.HTTPError as exc:
         sys.exit(f"FAIL: /predict answered {exc.code}: {exc.read().decode('utf-8', 'replace')[:500]}")

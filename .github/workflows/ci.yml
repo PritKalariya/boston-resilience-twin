@@ -84,7 +84,7 @@ jobs:
     with:
       component: Serving
       context: .
-      cov_source: serving
+      cov_source: serving /app/scripts
 
   # The one status check to require. It always runs, so it reports even when a job fails or
   # is cancelled, and it fails unless every job it needs succeeded. A new component adds its

@@ -55,6 +55,11 @@ def check_reusable(text: str) -> list[str]:
         problems.append("the bar is not --cov-fail-under=70")
     if "--network none" not in text:
         problems.append("no --network none")
+    # cov_source is split into an array, each element checked, one --cov flag each; never spliced.
+    if '"${cov_flags[@]}"' not in text or "[A-Za-z0-9_./-]+" not in text:
+        problems.append("the run step does not build --cov flags from a checked array")
+    if re.findall(r"\$\{?COV_SOURCE\b", text) != ["$COV_SOURCE"] or '<<< "$COV_SOURCE"' not in text:
+        problems.append("COV_SOURCE is used anywhere but the array read")
     workflow = yaml.safe_load(text)
     permissions = [workflow.get("permissions")] + [j.get("permissions") for j in workflow["jobs"].values()]
     if any("id-token" in (p or {}) for p in permissions) or "id-token" in text:
@@ -133,6 +138,13 @@ def test_mutation_a_caller_without_cov_source_fails(ci):
 
 def test_mutation_the_bar_set_to_60_fails(component_ci_text):
     assert check_reusable(component_ci_text.replace("--cov-fail-under=70", "--cov-fail-under=60"))
+
+
+def test_mutation_cov_source_spliced_into_the_command_fails(component_ci_text):
+    spliced = component_ci_text.replace('"${cov_flags[@]}"', '--cov="$COV_SOURCE"')
+    assert any("checked array" in p for p in check_reusable(spliced))
+    unchecked = component_ci_text.replace("[A-Za-z0-9_./-]+", "[a-z]+")
+    assert any("checked array" in p for p in check_reusable(unchecked))
 
 
 def test_mutation_network_allowed_fails(component_ci_text):
