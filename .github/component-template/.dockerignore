@@ -1,0 +1,11 @@
+# Keep the build context to what the Dockerfile copies.
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.coverage
+.coverage.*
+htmlcov
+.venv
+.env
+.env.*
+*.md

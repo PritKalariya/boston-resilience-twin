@@ -80,6 +80,32 @@
       "written_when": "each monitoring run, after grading, unless the metric is null (a null metric writes no point)"
     },
     {
+      "name": "group_fpr",
+      "metric_kind": "GAUGE",
+      "value_type": "DOUBLE",
+      "unit": "1",
+      "labels": [
+        {
+          "key": "group",
+          "allowed_values": [
+            "lower",
+            "higher"
+          ]
+        }
+      ],
+      "producer": "#169",
+      "written_when": "each monitoring run, after grading, unless the metric is null (a null metric writes no point)"
+    },
+    {
+      "name": "fpr_gap",
+      "metric_kind": "GAUGE",
+      "value_type": "DOUBLE",
+      "unit": "1",
+      "labels": [],
+      "producer": "#169",
+      "written_when": "each monitoring run, after grading, unless the metric is null (a null metric writes no point)"
+    },
+    {
       "name": "drift_share",
       "metric_kind": "GAUGE",
       "value_type": "DOUBLE",

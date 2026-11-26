@@ -28,7 +28,7 @@ The schemas enforce the first five. The tests in [tests/test_contracts.py](tests
 
   | reason | meaning |
   |---|---|
-  | `insufficient data` | fewer than 5 positives (surge days, after final labels) in the window or the poverty group, zero included, even when nothing is graded yet |
+  | `insufficient data` | fewer than 5 positives (surge days, after final labels) in the window or the poverty group, zero included, even when nothing is graded yet; for a group's false-positive rate, fewer than 5 negatives (non-surge days) in the group |
   | `no data` | only two cases: drift with no earlier rows to compare against, and the brief's `model_health` before the first monitoring file exists. Never a performance or fairness metric in a monitoring file |
   | `undefined` | enough data, but the formula has a zero denominator, for example precision when nothing was flagged |
 

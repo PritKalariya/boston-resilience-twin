@@ -12,8 +12,8 @@
     },
     "metrics": {
       "type": "array",
-      "minItems": 8,
-      "maxItems": 8,
+      "minItems": 10,
+      "maxItems": 10,
       "items": {
         "$ref": "#/$defs/descriptor"
       }
@@ -36,6 +36,8 @@
             "recall",
             "positives",
             "fairness_gap",
+            "group_fpr",
+            "fpr_gap",
             "drift_share",
             "retrain_decision",
             "forecast_freshness_hours"

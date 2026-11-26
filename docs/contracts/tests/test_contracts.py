@@ -11,6 +11,7 @@ import copy
 import csv
 import hashlib
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -80,6 +81,7 @@ FORECAST_SCHEMA = pa.schema([
     ("prediction", pa.int8()), ("threshold", pa.float64()), ("model_version", pa.string()),
     ("model_run_id", pa.string()), ("data_version", pa.string()), ("issued_at_utc", pa.timestamp("us", tz="UTC"))])
 THRESHOLD = 0.096
+NUMBER_WORDS = {8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve"}
 REASONS = {"insufficient data", "no data", "undefined"}
 MIN_POSITIVES = 5
 RUN_ID = "3f9a1c07d2e84b56a0c1e7d94b2f6a85"
@@ -672,6 +674,10 @@ def test_sparse_monitoring_fixture_is_insufficient_data():
         assert group["positives"] < MIN_POSITIVES
         assert group["recall"] == {"value": None, "reason": "insufficient data"}
     assert doc["fairness"]["gap"] == {"value": None, "reason": "insufficient data"}
+    for group in doc["fairness"]["groups"].values():
+        assert group["negatives"] == 0 and group["fp"] == 0
+        assert group["fpr"] == {"value": None, "reason": "insufficient data"}
+    assert doc["fairness"]["fpr_gap"] == {"value": None, "reason": "insufficient data"}
 
 
 def test_rich_monitoring_fixture_has_numbers_and_some_drift():
@@ -682,6 +688,78 @@ def test_rich_monitoring_fixture_has_numbers_and_some_drift():
             assert window[key]["value"] is not None
     assert doc["drift"]["drifted_features"] and doc["drift"]["share"]["value"] > 0
     assert doc["drift"]["prediction_drift"]["detected"] is True
+    groups = doc["fairness"]["groups"]
+    assert all(g["negatives"] >= MIN_POSITIVES and g["fpr"]["value"] is not None for g in groups.values())
+    assert doc["fairness"]["fpr_gap"]["value"] >= 0.01, "a visible false-positive-rate gap"
+
+
+def fpr_problems(doc: dict) -> list[str]:
+    """The false-positive-rate rules of monitoring-output.md that a schema cannot say; empty when the file keeps them."""
+    problems = []
+    groups = doc["fairness"]["groups"]
+    for name, group in groups.items():
+        fp, negatives, fpr = group["fp"], group["negatives"], group["fpr"]
+        if fp > negatives:
+            problems.append(f"{name}: fp {fp} is more than negatives {negatives}")
+        if negatives < MIN_POSITIVES:
+            if fpr != {"value": None, "reason": "insufficient data"}:
+                problems.append(f"{name}: fewer than 5 negatives needs a null fpr with insufficient data")
+        elif fpr["value"] is None or not math.isclose(fpr["value"], fp / negatives, abs_tol=5e-5):
+            problems.append(f"{name}: fpr is not fp / negatives")
+        if fpr["reason"] == "no data":
+            problems.append(f"{name}: fpr says no data")
+    gap = doc["fairness"]["fpr_gap"]
+    rates = [g["fpr"]["value"] for g in groups.values()]
+    if None in rates:
+        if gap != {"value": None, "reason": "insufficient data"}:
+            problems.append("fpr_gap must be null with insufficient data when a group fpr is null")
+    elif gap["value"] is None or not math.isclose(gap["value"], abs(groups["lower"]["fpr"]["value"]
+                                                                   - groups["higher"]["fpr"]["value"]), abs_tol=1e-4):
+        problems.append("fpr_gap is not |fpr(lower) - fpr(higher)|")
+    if gap["reason"] == "no data":
+        problems.append("fpr_gap says no data")
+    if sum(g["fp"] for g in groups.values()) > doc["windows"]["30d"]["fp"]:
+        problems.append("the groups' fp sum to more than windows.30d.fp")
+    return problems
+
+
+@pytest.mark.parametrize("rel", ["monitoring/2026-11-27.json", "monitoring/2026-12-03.json"])
+def test_monitoring_fpr_rules(rel):
+    doc = load_fixture(rel)
+    assert fpr_problems(doc) == []
+    assert set(doc["fairness"]["groups"]) == poverty_group_names()
+    # the gap the recall rules check is still the recall gap
+    assert set(doc["fairness"]) == {"groups", "gap", "fpr_gap"}
+
+
+@pytest.mark.parametrize("rel", ["monitoring/2026-11-27.json", "monitoring/2026-12-03.json"])
+def test_a_bad_fpr_fails(rel):
+    def mutated(change):
+        doc = load_fixture(rel)
+        change(doc)
+        return doc
+
+    groups = lambda doc: doc["fairness"]["groups"]  # noqa: E731
+    # the schema accepts each of these shapes; only the rules of the page catch them
+    wrong_fpr = mutated(lambda d: groups(d)["higher"].update(fpr={"value": 0.5, "reason": None}))
+    assert errors("monitoring-output", wrong_fpr) == [] and fpr_problems(wrong_fpr)
+    fp_over = mutated(lambda d: groups(d)["lower"].update(fp=groups(d)["lower"]["negatives"] + 1))
+    assert errors("monitoring-output", fp_over) == [] and fpr_problems(fp_over)
+    few = mutated(lambda d: groups(d)["higher"].update(negatives=4, fp=1, fpr={"value": 0.25, "reason": None}))
+    assert errors("monitoring-output", few) == [] and fpr_problems(few), "a non-null fpr with negatives < 5 passed"
+    wrong_gap = mutated(lambda d: d["fairness"].update(fpr_gap={"value": 0.5, "reason": None}))
+    assert errors("monitoring-output", wrong_gap) == [] and fpr_problems(wrong_gap)
+    too_many_fp = mutated(lambda d: groups(d)["higher"].update(fp=d["windows"]["30d"]["fp"] + 1,
+                                                               negatives=d["windows"]["30d"]["fp"] + 1))
+    assert errors("monitoring-output", too_many_fp) == [] and fpr_problems(too_many_fp)
+    no_data = mutated(lambda d: groups(d)["lower"].update(fpr={"value": None, "reason": "no data"}))
+    assert errors("monitoring-output", no_data) == [] and fpr_problems(no_data)
+    null_gap_with_rates = mutated(lambda d: d["fairness"].update(fpr_gap={"value": None, "reason": "undefined"}))
+    assert fpr_problems(null_gap_with_rates), "a null gap with enough data, or the wrong reason, passed"
+    for key in ("fp", "negatives", "fpr"):
+        missing = mutated(lambda d: groups(d)["lower"].pop(key))
+        assert errors("monitoring-output", missing), f"a group without {key} passed"
+    assert errors("monitoring-output", mutated(lambda d: d["fairness"].pop("fpr_gap")))
 
 
 @pytest.mark.parametrize("rel", ["monitoring/2026-11-27.json", "monitoring/2026-12-03.json"])
@@ -964,12 +1042,24 @@ def test_brief_critic_catches_a_wrong_claim():
 def test_metric_names_descriptors():
     doc = load_fixture("metrics/metric-names.json")
     names = [m["name"] for m in doc["metrics"]]
-    assert names == ["f1", "precision", "recall", "positives", "fairness_gap", "drift_share", "retrain_decision",
-                     "forecast_freshness_hours"]
+    assert names == ["f1", "precision", "recall", "positives", "fairness_gap", "group_fpr", "fpr_gap", "drift_share",
+                     "retrain_decision", "forecast_freshness_hours"]
     by_name = {m["name"]: m for m in doc["metrics"]}
+    assert by_name["fpr_gap"]["labels"] == [] and by_name["fairness_gap"]["labels"] == []
+    for name in ("group_fpr", "fpr_gap"):
+        assert (by_name[name]["metric_kind"], by_name[name]["value_type"], by_name[name]["unit"]) == (
+            "GAUGE", "DOUBLE", "1")
     for name in ("f1", "precision", "recall", "positives"):
         assert by_name[name]["labels"] == [{"key": "window", "allowed_values": ["7d", "30d"]}]
     assert by_name["retrain_decision"]["labels"] == [{"key": "source", "allowed_values": ["live", "replay", "manual"]}]
+    # the group label's values are the group keys of poverty_groups.csv, read now
+    assert len(by_name["group_fpr"]["labels"]) == 1 and by_name["group_fpr"]["labels"][0]["key"] == "group"
+    assert set(by_name["group_fpr"]["labels"][0]["allowed_values"]) == poverty_group_names()
+    assert set(load_fixture("monitoring/2026-12-03.json")["fairness"]["groups"]) == poverty_group_names()
+    page = (CONTRACTS / "metric-names.md").read_text(encoding="utf-8")
+    assert f"one of the {NUMBER_WORDS[len(names)]} below" in page, "the page's count of metrics"
+    for name in names:
+        assert f"| `{name}` |" in page, name
     assert {m["producer"] for m in doc["metrics"]} == {"#169"}, "every metric, freshness included, is #169's"
     # the windows and sources the labels allow are the ones the other contracts use
     assert set(load_fixture("monitoring/2026-12-03.json")["windows"]) == {"7d", "30d"}
