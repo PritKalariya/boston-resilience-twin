@@ -30,8 +30,12 @@ def test_a_forecast_is_the_records_fixture_exactly(make_client, folder):
 
 
 @pytest.mark.parametrize("date", ["2026-13-01", "2026-02-30", "26-11-26", "2026-1-26", "tomorrow", "20261126",
-                                  "2026-11-26T00"])
-def test_a_bad_date_is_422(make_client, folder, date):
+                                  "2026-11-26T00", "2026-W48-4", "2026-W48", "２026-11-26"])
+def test_a_bad_date_is_422(make_client, folder, date, monkeypatch):
+    def no_read(*args):
+        raise AssertionError("a bad date must not read a file")
+
+    monkeypatch.setattr(forecasts, "fetch", no_read)
     response = make_client("web", forecasts_root=str(folder)).get(f"/forecasts/{date}")
     assert response.status_code == 422
     assert response.json()["detail"][0]["path"] == "/date"

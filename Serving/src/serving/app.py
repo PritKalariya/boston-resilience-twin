@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -20,7 +21,9 @@ from serving.config import ROUTES, ConfigError, Settings
 from serving.contract import Contract, cross_field_errors, feature_set_errors
 
 log = logging.getLogger("serving")
-FORECAST_DATE_SHAPE = 10  # YYYY-MM-DD
+# YYYY-MM-DD only. [0-9], not \d: \d matches any Unicode digit. date.fromisoformat alone also takes ISO week
+# dates and the basic form, so the pattern comes first and the round trip below holds the rest.
+FORECAST_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
 def _configure_logging() -> None:
@@ -129,9 +132,8 @@ def create_app(settings: Settings, session_factory=forecasts.default_session) ->
         @app.get("/forecasts/{date}")
         def forecast(date: str, request: Request):
             try:
-                if len(date) != FORECAST_DATE_SHAPE:
+                if not FORECAST_DATE.fullmatch(date) or calendar_date.fromisoformat(date).isoformat() != date:
                     raise ValueError
-                calendar_date.fromisoformat(date)
             except ValueError:
                 return _unprocessable([{"path": "/date", "message": f"{date!r} is not a date as YYYY-MM-DD"}])
             state = request.app.state
