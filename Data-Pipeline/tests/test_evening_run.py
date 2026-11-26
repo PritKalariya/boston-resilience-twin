@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 import evening_run
@@ -59,3 +61,37 @@ def test_live_only_where_the_vm_sets_it(monkeypatch, value, expected):
 def test_not_live_without_the_variable(monkeypatch):
     monkeypatch.delenv(evening_run.LIVE_ENV, raising=False)
     assert live() is False
+
+
+RESULT = {
+    "forecast_date": "2026-11-26",
+    "flagged": ["Dorchester", "Roxbury", "Mattapan"],
+    "units": 24,
+    "model_version": "1",
+    "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+    "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4",
+    "forecast_uri": "gs://boston-resilience-twin-data/forecasts/2026-11-26.parquet",
+}
+STARTED = datetime(2026, 11, 25, 23, 5, 12, tzinfo=timezone.utc)  # 18:05 in Boston (EST)
+
+
+def test_the_summary_has_the_date_the_flags_the_model_and_the_run_time():
+    text = evening_run.summary_text(RESULT, STARTED, STARTED + timedelta(minutes=38, seconds=20))
+    assert text == (
+        "Forecast for Thu 2026-11-26: 3 of 24 neighborhoods flagged: Dorchester, Roxbury, Mattapan.\n"
+        "Model version 1 (MLflow run 3f9a1c07), data version sha256:7ea79623...\n"
+        "The evening run started at 18:05 Boston time and took 38 min.\n"
+        "gs://boston-resilience-twin-data/forecasts/2026-11-26.parquet"
+    )
+
+
+def test_a_quiet_evening_flags_none():
+    text = evening_run.summary_text({**RESULT, "flagged": []}, STARTED, STARTED)
+    assert text.startswith("Forecast for Thu 2026-11-26: 0 of 24 neighborhoods flagged.\n")
+    assert "took 0 min" in text
+
+
+def test_the_start_time_is_boston_time_in_summer_too():
+    started = datetime(2026, 7, 1, 22, 5, tzinfo=timezone.utc)  # 18:05 EDT
+    text = evening_run.summary_text({**RESULT, "forecast_date": "2026-07-02"}, started, started + timedelta(minutes=30))
+    assert "started at 18:05 Boston time and took 30 min" in text

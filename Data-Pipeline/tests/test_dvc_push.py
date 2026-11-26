@@ -6,6 +6,7 @@ import sys
 import pytest
 
 import dvc_push
+from data_bucket import NoBucketAccess
 from dvc_push import REPO_ROOT, has_google_credentials, is_no_access, main, push, remote_url
 
 ANONYMOUS = (
@@ -184,3 +185,67 @@ def test_main_fails_on_other_errors(monkeypatch, tmp_path):
     monkeypatch.setattr(dvc_push.subprocess, "run", fake_run(1, stderr="ERROR: boom"))
     with pytest.raises(RuntimeError, match="boom"):
         main(["--repo", str(tmp_path)])
+
+
+# ---- require_access: the live evening run (#162) ----
+
+def test_require_access_without_credentials_fails_loudly(tmp_path):
+    run = fake_run(0)
+    with pytest.raises(NoBucketAccess, match="needs Google credentials, and none were found"):
+        push(tmp_path, run=run, credentials=lambda: False, require_access=True, probe=lambda: None)
+    assert run.calls == []
+
+
+def test_require_access_probes_the_bucket_before_pushing(tmp_path):
+    order = []
+    run = fake_run(0, stdout="Everything is up to date.\n")
+
+    def recorded_run(args, **kwargs):
+        order.append("push")
+        return run(args, **kwargs)
+
+    assert push(tmp_path, run=recorded_run, credentials=lambda: True, require_access=True,
+                probe=lambda: order.append("probe")) is True
+    assert order == ["probe", "push"]
+
+
+def test_require_access_fails_when_the_probe_finds_no_access(tmp_path):
+    def no_access():
+        raise NoBucketAccess("these credentials lack storage.objects.create on gs://boston-resilience-twin-data")
+
+    run = fake_run(0)
+    with pytest.raises(NoBucketAccess, match="lack storage.objects.create"):
+        push(tmp_path, run=run, credentials=lambda: True, require_access=True, probe=no_access)
+    assert run.calls == []  # a push that would upload nothing cannot hide the lost grant
+
+
+@pytest.mark.parametrize("error", [ANONYMOUS, DENIED])
+def test_require_access_turns_dvcs_no_access_into_a_failure(tmp_path, error):
+    with pytest.raises(NoBucketAccess, match="was refused"):
+        push(tmp_path, run=fake_run(255, stderr=error), credentials=lambda: True, require_access=True,
+             probe=lambda: None)
+
+
+def test_require_access_probes_the_repos_bucket_by_default(monkeypatch):
+    seen = []
+
+    class Probe:
+        @classmethod
+        def from_repo(cls, repo):
+            seen.append(repo)
+            return cls()
+
+        def probe(self):
+            seen.append("probed")
+
+    monkeypatch.setattr(dvc_push, "DataBucket", Probe)
+    push(REPO_ROOT, run=fake_run(0), credentials=lambda: True, require_access=True)
+    assert seen == [REPO_ROOT, "probed"]
+
+
+def test_main_passes_require_access(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(dvc_push, "push", lambda repo, require_access=False: calls.append((repo, require_access)))
+    main(["--repo", str(tmp_path), "--require-access"])
+    main(["--repo", str(tmp_path)])
+    assert calls == [(tmp_path, True), (tmp_path, False)]

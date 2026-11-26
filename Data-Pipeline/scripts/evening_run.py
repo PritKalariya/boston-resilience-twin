@@ -13,6 +13,9 @@ settings(): Data-Pipeline/config/evening_run.csv (setting, value, options, note)
 - predict_retry_waits_seconds: the waits before each retry of a 5xx, a 429, a timeout or a lost
   connection, separated by ";".
 
+summary_text(): the one Slack message a night, from what forecast_scoring.score returns: the
+forecast date, how many neighborhoods are flagged and which, the model version, and the run time.
+
 Standard library only, so the DAG imports it at parse time for free.
 """
 
@@ -21,9 +24,12 @@ from __future__ import annotations
 import csv
 import os
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+BOSTON = ZoneInfo("America/New_York")
 LIVE_ENV = "BRT_EVENING_RUN"
 SETTINGS_PATH = REPO_ROOT / "Data-Pipeline" / "config" / "evening_run.csv"
 SETTINGS = ("predict_url", "predict_timeout_seconds", "predict_retry_waits_seconds")
@@ -42,6 +48,22 @@ class Settings:
 
 def live() -> bool:
     return os.environ.get(LIVE_ENV, "").strip() == "1"
+
+
+def summary_text(result: dict, started: datetime, finished: datetime) -> str:
+    """The evening summary for Slack. `result` is forecast_scoring.score's return value; `started`
+    is when the DAG run started and `finished` when the summary is written, both with a time zone."""
+    flagged = result["flagged"]
+    which = f": {', '.join(flagged)}" if flagged else ""
+    minutes = max(0, round((finished - started).total_seconds() / 60))
+    day = date.fromisoformat(result["forecast_date"])
+    return "\n".join([
+        f"Forecast for {day:%a %Y-%m-%d}: {len(flagged)} of {result['units']} neighborhoods flagged{which}.",
+        f"Model version {result['model_version']} (MLflow run {result['model_run_id'][:8]}), "
+        f"data version {result['data_version'][:15]}...",
+        f"The evening run started at {started.astimezone(BOSTON):%H:%M} Boston time and took {minutes} min.",
+        result["forecast_uri"],
+    ])
 
 
 def whole_number(name: str, text: str, minimum: int) -> int:

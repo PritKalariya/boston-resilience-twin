@@ -21,6 +21,9 @@ by key), so an error that quotes a request URL, such as a Census
 call with `key=...`, cannot leak a key into the log or Slack. Standard library
 only.
 
+send_summary posts the evening run's one summary a night (#162) the same way,
+under its own title, and logs it at INFO: it is news, not an alert.
+
     python Data-Pipeline/scripts/alerts.py --test   # post one test alert
 """
 
@@ -66,6 +69,8 @@ SLACK_WEBHOOK_PREFIX = "https://hooks.slack.com/"
 SLACK_TIMEOUT_SECONDS = 10
 # Slack shows up to 40,000 characters; a long ValidationFailed list is cut well before that.
 SLACK_MAX_CHARS = 3000
+ALERT_TITLE, ALERT_ICON = "Pipeline alert", ":rotating_light:"
+SUMMARY_TITLE, SUMMARY_ICON = "Evening forecast", ":bar_chart:"
 
 log = logging.getLogger(__name__)
 
@@ -108,19 +113,20 @@ def slack_escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def slack_text(message: str) -> str:
-    """The Slack message: escaped, then cut to SLACK_MAX_CHARS without splitting an
-    entity such as &amp;. The task log keeps the raw text."""
-    text = f":rotating_light: *Pipeline alert*\n{slack_escape(message)}"
+def slack_text(message: str, title: str = ALERT_TITLE, icon: str = ALERT_ICON) -> str:
+    """The Slack message under its title: escaped, then cut to SLACK_MAX_CHARS without
+    splitting an entity such as &amp;. The task log keeps the raw text."""
+    text = f"{icon} *{title}*\n{slack_escape(message)}"
     if len(text) > SLACK_MAX_CHARS:
         cut = "\n... (cut; the full alert is in the task log)"
         text = re.sub(r"&[a-z]*$", "", text[: SLACK_MAX_CHARS - len(cut)]) + cut
     return text
 
 
-def post_to_slack(url: str, message: str, timeout: float = SLACK_TIMEOUT_SECONDS) -> None:
+def post_to_slack(url: str, message: str, timeout: float = SLACK_TIMEOUT_SECONDS,
+                  title: str = ALERT_TITLE, icon: str = ALERT_ICON) -> None:
     """POST one message to a Slack incoming webhook, which answers 200 "ok"."""
-    body = json.dumps({"text": slack_text(message)}).encode()
+    body = json.dumps({"text": slack_text(message, title, icon)}).encode()
     request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -180,6 +186,19 @@ def send_alert(message: str, post=None) -> None:
         return
     (post or post_to_slack)(url, message)
     log.info("alert sent to Slack")
+
+
+def send_summary(message: str, post=None) -> None:
+    """Write the evening summary to the task log at INFO, and post it to Slack under its own
+    title when a webhook is set. A refused post raises AlertNotSent, so the task fails visibly."""
+    message = mask_secrets(message)
+    log.info("SUMMARY %s", message)
+    url = slack_webhook()
+    if url is None:
+        log.warning("%s is not set: the evening summary is in the task log only", SLACK_WEBHOOK_ENV)
+        return
+    (post or post_to_slack)(url, message, title=SUMMARY_TITLE, icon=SUMMARY_ICON)
+    log.info("summary sent to Slack")
 
 
 def on_task_failure(context: Mapping) -> None:

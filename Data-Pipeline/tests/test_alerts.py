@@ -370,3 +370,59 @@ def test_main_without_test_is_a_usage_error():
     with pytest.raises(SystemExit) as exited:
         alerts.main([])
     assert exited.value.code == 2
+
+
+# ---- the evening summary (#162) ----
+
+def test_slack_text_takes_a_title():
+    text = alerts.slack_text("3 of 24 neighborhoods flagged", alerts.SUMMARY_TITLE, alerts.SUMMARY_ICON)
+    assert text == ":bar_chart: *Evening forecast*\n3 of 24 neighborhoods flagged"
+
+
+def test_post_to_slack_sends_the_summary_title():
+    server, url = serve(200)
+    try:
+        alerts.post_to_slack(url, "Forecast for Thu 2026-11-26", timeout=5, title=alerts.SUMMARY_TITLE,
+                             icon=alerts.SUMMARY_ICON)
+    finally:
+        server.server_close()
+    assert SlackStub.received[0][2] == {"text": ":bar_chart: *Evening forecast*\nForecast for Thu 2026-11-26"}
+
+
+def test_send_summary_logs_at_info_and_posts_under_its_title(monkeypatch, caplog):
+    monkeypatch.setenv(alerts.SLACK_WEBHOOK_ENV, "https://hooks.slack.com/services/T000/B000/xyz")
+    sent = []
+    with caplog.at_level(logging.INFO, logger="alerts"):
+        alerts.send_summary("Forecast for Thu 2026-11-26: 3 of 24 neighborhoods flagged",
+                            post=lambda url, message, **kwargs: sent.append((url, message, kwargs)))
+    assert sent == [("https://hooks.slack.com/services/T000/B000/xyz",
+                     "Forecast for Thu 2026-11-26: 3 of 24 neighborhoods flagged",
+                     {"title": "Evening forecast", "icon": ":bar_chart:"})]
+    [summary] = [r for r in caplog.records if r.getMessage().startswith("SUMMARY ")]
+    assert summary.levelno == logging.INFO
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]  # news, not an alert
+
+
+def test_send_summary_without_a_webhook_stays_in_the_log(monkeypatch, caplog):
+    monkeypatch.delenv(alerts.SLACK_WEBHOOK_ENV, raising=False)
+    with caplog.at_level(logging.INFO, logger="alerts"):
+        alerts.send_summary("Forecast for Thu 2026-11-26", post=lambda *a, **k: pytest.fail("posted"))
+    assert "the evening summary is in the task log only" in caplog.text
+
+
+def test_send_summary_masks_secrets(monkeypatch):
+    monkeypatch.setenv("CENSUS_API_KEY", "census-key-abc123")
+    monkeypatch.setenv(alerts.SLACK_WEBHOOK_ENV, "https://hooks.slack.com/services/T000/B000/xyz")
+    sent = []
+    alerts.send_summary("quoted census-key-abc123 by mistake", post=lambda url, message, **kwargs: sent.append(message))
+    assert sent == ["quoted <CENSUS_API_KEY> by mistake"]
+
+
+def test_a_refused_summary_fails_the_task(monkeypatch):
+    monkeypatch.setenv(alerts.SLACK_WEBHOOK_ENV, "https://hooks.slack.com/services/T000/B000/xyz")
+
+    def refuse(url, message, **kwargs):
+        raise alerts.AlertNotSent("Slack refused the alert: HTTP 404 Not Found")
+
+    with pytest.raises(alerts.AlertNotSent, match="HTTP 404"):
+        alerts.send_summary("Forecast for Thu 2026-11-26", post=refuse)

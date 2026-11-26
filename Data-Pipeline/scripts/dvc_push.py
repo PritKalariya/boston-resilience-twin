@@ -5,6 +5,13 @@ members and airflow-vm can write to it; anyone else, such as a grader,
 cannot. Without Google credentials, or with credentials the bucket refuses,
 the push is skipped with one log line and the run still succeeds: the data
 stays in the local DVC cache. Any other failure fails the run.
+
+With require_access (`--require-access`), which the live evening run on
+airflow-vm passes (#162), a lost bucket fails the run instead of being logged:
+no credentials, a probe that finds the object permissions missing, or DVC's
+no-access error raise data_bucket.NoBucketAccess. The probe comes first because
+a DAG run adds nothing to the DVC cache, so its push may upload nothing and
+never touch the bucket: DVC alone would not notice a lost grant.
 """
 
 from __future__ import annotations
@@ -16,6 +23,8 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
+
+from data_bucket import DataBucket, NoBucketAccess
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 # Lowercase fragments of the GCS errors for "no access" (401 anonymous, 403
@@ -75,17 +84,22 @@ def is_no_access(output: str) -> bool:
     return no_access_line(output) is not None
 
 
-def push(repo: Path = REPO_ROOT, run=None, credentials=None) -> bool:
-    """Run `dvc push` in `repo`. True if pushed, False if skipped for lack of access."""
+def push(repo: Path = REPO_ROOT, run=None, credentials=None, require_access: bool = False, probe=None) -> bool:
+    """Run `dvc push` in `repo`. True if pushed, False if skipped for lack of access; with
+    require_access, a lack of access raises NoBucketAccess instead of skipping."""
     run = run or subprocess.run
     credentials = credentials or has_google_credentials
     remote = remote_url(repo)
     if not credentials():
+        if require_access:
+            raise NoBucketAccess(f"dvc push to {remote} needs Google credentials, and none were found")
         log.warning(
             "dvc push skipped: no Google credentials (run `gcloud auth application-default login`). "
             "Data stays in the local DVC cache."
         )
         return False
+    if require_access:
+        (probe or DataBucket.from_repo(repo).probe)()
     # The dvc that belongs to this Python, so a missing install fails with the
     # runbook's "No module named dvc" and not a bare FileNotFoundError.
     command = [sys.executable, "-m", "dvc", "push"]
@@ -100,6 +114,8 @@ def push(repo: Path = REPO_ROOT, run=None, credentials=None) -> bool:
         log.info("dvc push to %s: %s", remote, summary)
         return True
     reason = no_access_line(output)
+    if reason and require_access:
+        raise NoBucketAccess(f"dvc push to {remote} was refused: {reason}")
     if reason:
         log.warning(
             "dvc push skipped: these credentials have no access to %s. Data stays in the local DVC cache. DVC said: %s",
@@ -113,9 +129,11 @@ def main(argv: list[str] | None = None) -> None:
     """Push the DVC-tracked data, or log why the push is skipped (push)."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo", type=Path, default=REPO_ROOT, help="repository root (default: this checkout)")
+    parser.add_argument("--require-access", action="store_true",
+                        help="fail instead of skipping when the bucket is out of reach (the live evening run, #162)")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    push(args.repo)
+    push(args.repo, require_access=args.require_access)
 
 
 if __name__ == "__main__":
