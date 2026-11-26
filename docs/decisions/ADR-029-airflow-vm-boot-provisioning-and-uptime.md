@@ -4,6 +4,7 @@
 - Date: 2026-11-05
 - Owner: PritKalariya
 - Phase: deploy
+- Note (2026-11-25): #162 adds a code-sync timer, so "It does not ... run `docker compose up`" under Boot provisioning, and the runbook's "never pulls", now hold for the startup script only. The script installs `brt-code-sync.timer`, which starts `brt-code-sync.service` daily at 17:30 America/New_York, before the 18:05 evening run. The service runs `Data-Pipeline/scripts/code_sync.py` as root with the host's python3: `git pull --ff-only origin main` as `airflow` (on `main` only), then `docker compose up -d --build --wait` only when `docker-compose.yaml`, `airflow.Dockerfile`, its `.dockerignore`, a file the Dockerfile copies or a requirements file changed, with `--force-recreate` for `.dvcignore` (a single-file mount, the inode problem in Context). It postpones a rebuild while a `daily_pipeline` run is in progress (recreating the scheduler kills its tasks, ADR-016) or when `.env` is missing or empty (ADR-034), and every failure alerts Slack; a pull that cannot fast-forward leaves the checkout as it was. What runs as root on the VM is now what `main` holds at 17:30, so the trust boundary is branch protection on `main` (every change through a reviewed PR); anyone with `compute.instanceAdmin.v1` could already run a script as root (Context).
 
 ## Context
 

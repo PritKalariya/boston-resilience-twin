@@ -1821,11 +1821,11 @@ The VM runs 24/7 only for the live run and for tests, and is stopped otherwise (
 
 ### First-time setup (new or rebuilt VM only)
 
-The VM's startup script (`Deployment/terraform/startup.sh`, set as the `startup-script` metadata key) installs Docker Engine and the compose plugin, creates the `airflow` user, clones `main` into `/opt/boston-resilience-twin` and, last, renders `.env` from Secret Manager ("Secrets on the VM"). It runs on every boot and does nothing for a part that is already done. It does not start the stack.
+The VM's startup script (`Deployment/terraform/startup.sh`, set as the `startup-script` metadata key) installs Docker Engine and the compose plugin, creates the `airflow` user, clones `main` into `/opt/boston-resilience-twin`, installs the code-sync timer ("Update after a merge to main") and, last, renders `.env` from Secret Manager ("Secrets on the VM"). It runs on every boot and does nothing for a part that is already done. It does not start the stack.
 
 1. Add the five `airflow-*` values to Secret Manager first ("Secrets on the VM", "Generating and adding values"). Without them the script stops at the `.env` step and the stack has no `.env`. Compose would then start on the dev defaults (`airflow`/`airflow`), which is why step 3 refuses to start without one.
 
-2. After `terraform apply`, check the startup log. Every line starts with `brt-startup:`, the `.env` line says `rendered /opt/boston-resilience-twin/.env: 10 keys`, and the last line is `brt-startup: done`:
+2. After `terraform apply`, check the startup log. Every line starts with `brt-startup:`, the `.env` line says `rendered /opt/boston-resilience-twin/.env: 11 keys`, and the last line is `brt-startup: done`:
 
    ```bash
    sudo journalctl -u google-startup-scripts.service --no-pager | grep brt-startup
@@ -1851,7 +1851,7 @@ The VM's startup script (`Deployment/terraform/startup.sh`, set as the `startup-
 
 To update after a merge to `main`, see "Update after a merge to main" below.
 
-The script never pulls, never changes ownership of an existing checkout, and exits with an error rather than touch a `/opt/boston-resilience-twin` that is not a git repository. A VM made before #60 has a root-owned checkout: replace it with `terraform apply -replace=google_compute_instance.airflow` instead of repairing it by hand. The `vm_admins` sudo grants are recreated in the same apply. DVC inside a container works only from the repo root (`/opt/airflow/repo`): from inside `Data-Pipeline/` it reports "not inside of a DVC repository", because that directory is a mount point.
+The script itself never pulls (the code-sync timer it installs does, "Update after a merge to main"), never changes ownership of an existing checkout, and exits with an error rather than touch a `/opt/boston-resilience-twin` that is not a git repository. A VM made before #60 has a root-owned checkout: replace it with `terraform apply -replace=google_compute_instance.airflow` instead of repairing it by hand. The `vm_admins` sudo grants are recreated in the same apply. DVC inside a container works only from the repo root (`/opt/airflow/repo`): from inside `Data-Pipeline/` it reports "not inside of a DVC repository", because that directory is a mount point.
 
 ### Secrets on the VM (#64, ADR-034)
 
@@ -1924,7 +1924,7 @@ The `python` line needs `cryptography` (the repo venv has it). Without it, use t
    sudo google_metadata_script_runner startup
    ```
 
-   The script's output ends with `rendered ... 10 keys`.
+   The script's output ends with `rendered ... 11 keys`.
 
 4. Recreate the containers only if `.env` was rewritten (its inode changed from `$before`); otherwise stop and read the startup output above (the closing commands under "Rotation" do steps 3 and 4 together):
 
@@ -2050,12 +2050,22 @@ Then browse to `http://localhost:18080` and log in as `airflow` with the passwor
 
 ### Update after a merge to main
 
+The VM updates itself at 17:30 Boston, before the 18:05 evening run: `brt-code-sync.timer`, which the startup script installs (ADR-029, note of 2026-11-25), runs `Data-Pipeline/scripts/code_sync.py`. It pulls `main` and rebuilds the stack only when the second line below is needed, and alerts Slack when anything fails. It postpones a rebuild while a `daily_pipeline` run is in progress. Check the timer and the last run, or run it now instead of waiting:
+
+```bash
+systemctl list-timers brt-code-sync.timer
+sudo journalctl -u brt-code-sync.service -n 20 --no-pager
+sudo systemctl start brt-code-sync.service
+```
+
+By hand, the same two steps:
+
 ```bash
 sudo -u airflow git -C /opt/boston-resilience-twin pull --ff-only
 cd /opt/boston-resilience-twin && sudo docker compose up -d --build --wait
 ```
 
-`Data-Pipeline/` is mounted as a directory (ADR-029), so the containers see the pulled files at once. The second line is needed only when `docker-compose.yaml`, the image inputs (`airflow.Dockerfile`, `Data-Pipeline/requirements.txt`) or `.dvcignore` changed, because `.dvcignore` is still a single-file mount. It reads the `.env` the startup script rendered. The VM runs `main` only. Test branches on your laptop.
+`Data-Pipeline/` is mounted as a directory (ADR-029), so the containers see the pulled files at once. The second line is needed only when `docker-compose.yaml`, the image inputs (`airflow.Dockerfile`, `Data-Pipeline/requirements.txt`) or `.dvcignore` changed. `.dvcignore` is still a single-file mount, and `up -d` keeps a container whose settings did not change, so after a `.dvcignore` change add `--force-recreate`. It reads the `.env` the startup script rendered. The VM runs `main` only. Test branches on your laptop.
 
 ### Run a DAG from the CLI
 

@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# airflow-vm boot provisioning (#60) and .env render (#64, ADR-034). Set as the
-# instance's `startup-script` metadata key, so GCE runs it as root on every boot.
-# Every step is safe to repeat.
+# airflow-vm boot provisioning (#60), the code-sync timer (#162) and the .env render
+# (#64, ADR-034). Set as the instance's `startup-script` metadata key, so GCE runs it
+# as root on every boot. Every step is safe to repeat.
 #
-# It installs Docker, creates the `airflow` host user, clones the repo and, last,
-# renders the repo's `.env` from Secret Manager. It never runs `docker compose`:
-# containers read `.env` only when they are created, so after a changed secret
-# run `sudo docker compose up -d --wait` (runbook, "Airflow on the VM").
+# It installs Docker, creates the `airflow` host user, clones the repo, installs the
+# code-sync timer and, last, renders the repo's `.env` from Secret Manager. It never
+# pulls and never runs `docker compose` itself: the timer's service runs
+# Data-Pipeline/scripts/code_sync.py at 17:30 Boston, which pulls main and rebuilds the
+# stack only when its inputs changed (ADR-029, note of 2026-11-25). Containers read
+# `.env` only when they are created, so after a changed secret run
+# `sudo docker compose up -d --wait` (runbook, "Airflow on the VM").
 #
 # Read its log with:
 #   sudo journalctl -u google-startup-scripts.service --no-pager | grep brt-startup
@@ -16,6 +19,8 @@
 # Test the render alone, with no root and no Docker (Deployment/terraform/README.md):
 #   BRT_RENDER_ONLY=1 BRT_ENV_FILE=/tmp/t/.env BRT_ENV_OWNER="$(id -u):$(id -g)" \
 #     BRT_SECRET_FETCH_CMD=./stub_fetch.sh bash startup.sh
+# Write the code-sync units alone, with no root and no systemctl (same README):
+#   BRT_UNITS_ONLY=1 BRT_SYSTEMD_DIR=/tmp/t/units bash startup.sh
 set -euo pipefail
 
 REPO_URL="https://github.com/PritKalariya/boston-resilience-twin.git"
@@ -147,7 +152,10 @@ render_env() {
     return 1
   fi
 
-  lines=("AIRFLOW_UID=$AIRFLOW_UID")
+  # Constants, not secrets. BRT_EVENING_RUN marks this machine as the live evening run
+  # (#162): #162's evening tasks run, and fail on a lost data bucket instead of skipping,
+  # only where it is set. A laptop's .env never has it.
+  lines=("AIRFLOW_UID=$AIRFLOW_UID" "BRT_EVENING_RUN=1")
 
   for pair in "${REQUIRED_SECRETS[@]}"; do
     var="${pair%%=*}"
@@ -217,9 +225,67 @@ render_env() {
   log "rendered $ENV_FILE: $count keys, $empty optional empty, owner $ENV_OWNER, mode 600"
 }
 
+# ---- Code sync (#162, ADR-029 note of 2026-11-25) ----
+
+# brt-code-sync.timer starts brt-code-sync.service at 17:30 Boston, before the 18:05
+# evening run. The service runs Data-Pipeline/scripts/code_sync.py from the checkout
+# with the host's python3: it pulls main as the airflow user, rebuilds the stack only
+# when its inputs changed, and alerts Slack when anything fails.
+SYNC_UNIT="brt-code-sync"
+SYSTEMD_DIR="${BRT_SYSTEMD_DIR:-/etc/systemd/system}"
+
+# Writes both unit files whole. Returns 1 when either cannot be written.
+write_code_sync_units() {
+  if [ ! -d "$SYSTEMD_DIR" ]; then
+    log "error: $SYSTEMD_DIR does not exist; code-sync units not written"
+    return 1
+  fi
+  cat >"$SYSTEMD_DIR/$SYNC_UNIT.service" <<EOF || return 1
+[Unit]
+Description=Pull main and rebuild the Airflow stack when its inputs changed (#162)
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 $CLONE_DIR/Data-Pipeline/scripts/code_sync.py --repo $CLONE_DIR
+# code_sync.py stops each step on its own timeout (30 minutes for a build); this is the backstop.
+TimeoutStartSec=45min
+EOF
+  cat >"$SYSTEMD_DIR/$SYNC_UNIT.timer" <<EOF || return 1
+[Unit]
+Description=Run $SYNC_UNIT.service at 17:30 Boston, before the 18:05 evening run (#162)
+
+[Timer]
+OnCalendar=*-*-* 17:30:00 America/New_York
+# A VM started after 17:30 does not sync at boot; start the service by hand if it should.
+Persistent=false
+Unit=$SYNC_UNIT.service
+
+[Install]
+WantedBy=timers.target
+EOF
+  log "wrote $SYNC_UNIT.service and $SYNC_UNIT.timer in $SYSTEMD_DIR"
+}
+
+# Writes the units and starts the timer. Returns 1 on any failure; the caller warns and
+# goes on, so a broken timer never stops the .env render.
+install_code_sync() {
+  write_code_sync_units || return 1
+  systemctl daemon-reload || return 1
+  systemctl enable --now "$SYNC_UNIT.timer" || return 1
+  log "$SYNC_UNIT.timer enabled (daily at 17:30 America/New_York)"
+}
+
 # Render alone: no root, no Docker, no clone. For the stub test.
 if [ "${BRT_RENDER_ONLY:-0}" = 1 ]; then
   render_env
+  exit $?
+fi
+
+# The code-sync units alone: no root, no systemctl, no clone. For a laptop check.
+if [ "${BRT_UNITS_ONLY:-0}" = 1 ]; then
+  write_code_sync_units
   exit $?
 fi
 
@@ -331,6 +397,13 @@ else
   mv "$PARTIAL_DIR" "$CLONE_DIR"
   log "cloned $(as_airflow git -C "$CLONE_DIR" rev-parse --short HEAD) from $BRANCH into $CLONE_DIR"
 fi
+
+# ---- Code-sync timer (#162) ----
+
+# After the clone, so the checkout it runs from exists, and before the render. Not fatal:
+# without the timer the VM is updated by hand (runbook, "Update after a merge to main"),
+# and the render still runs.
+install_code_sync || log "warning: $SYNC_UNIT.timer is not installed; update the checkout by hand until it is"
 
 # ---- .env (#64, ADR-034) ----
 

@@ -18,8 +18,9 @@ after they become noncurrent. The live version of an object is never touched.
 | VM stopped | about $3 (disk only; the ephemeral IP is released on stop) |
 
 The VM runs 24/7 only for the live run and for tests, and is stopped otherwise
-(ADR-029). Its startup script (`startup.sh`) installs Docker, clones the repo and
-renders the repo's `.env` from Secret Manager on every boot (ADR-034). Budget is $50
+(ADR-029). Its startup script (`startup.sh`) installs Docker, clones the repo, installs
+the code-sync timer (#162) and renders the repo's `.env` from Secret Manager on every
+boot (ADR-034). Budget is $50
 credits per member, not pooled. The secret slots cost nothing until a version exists,
 and a version costs a few cents a month.
 
@@ -43,6 +44,20 @@ A stub that reads one file per secret from `$STUB_DIR`:
 
 Use only made-up values in the stub's files. `shellcheck Deployment/terraform/startup.sh`
 is clean.
+
+## Testing the code-sync units
+
+`BRT_UNITS_ONLY=1` writes only the two systemd units the startup script installs,
+`brt-code-sync.service` and `brt-code-sync.timer`, into `BRT_SYSTEMD_DIR`: no root, no
+systemctl, no clone. The timer starts the service at 17:30 America/New_York, and the
+service runs `Data-Pipeline/scripts/code_sync.py` (ADR-029, note of 2026-11-25).
+
+    mkdir -p /tmp/brt/units
+    BRT_UNITS_ONLY=1 BRT_SYSTEMD_DIR=/tmp/brt/units bash Deployment/terraform/startup.sh
+
+On a machine with systemd, `systemd-analyze calendar '*-*-* 17:30:00 America/New_York'`
+prints the next run in local time and in UTC, and `systemd-analyze verify` checks both
+files.
 
 ## Teardown
 
