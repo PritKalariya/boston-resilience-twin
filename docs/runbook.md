@@ -426,10 +426,57 @@ ruff check .
 docker compose run --rm --build test
 ```
 
+**Jobs and the aggregator (ADR-037, #159).** `ci.yml` has three jobs, all started
+together:
+
+| Job id | Name | What it runs |
+|---|---|---|
+| `lint-and-test` | `Lint and test (Python 3.12)` | The steps above (the required check today) |
+| `component-template` | `Component template` | `.github/workflows/component-ci.yml` on `.github/component-template`, which proves the component pattern on every pull request |
+| `ci` | `ci` | Always runs, after the others; fails unless every job in its `needs` succeeded |
+
+Each component has its own image (a Dockerfile with a `runtime` and a `test` stage), its
+own job and its own coverage bar: `component-ci.yml` builds the component's `test`
+target with the component folder as the build context and runs
+`python -m pytest tests --cov=<cov_source> --cov-fail-under=70` in it with no
+network. The 70 is written in that file and is not an input.
+
+**Add a component.** Copy `.github/component-template` (its README lists what to
+rename), then add a caller job to `ci.yml` and the job id to `needs` of `ci`:
+
+```yaml
+  serving:
+    name: Serving
+    uses: ./.github/workflows/component-ci.yml
+    with:
+      component: Serving
+      cov_source: serving
+
+  ci:
+    needs: [lint-and-test, component-template, serving]
+```
+
+`Model-Development/tests/test_ci_workflows.py` fails when a job is missing from
+`needs`, a caller omits `component` or `cov_source`, or `component-ci.yml` loses its
+bar, `--network none`, or gains a cloud token permission.
+
+**Run a component's tests locally.** The two commands CI runs, from the repo
+root (Docker only), shown for the template:
+
+```bash
+docker build --target test -f .github/component-template/Dockerfile -t component-template:test .github/component-template
+docker run --rm --network none component-template:test python -m pytest tests --cov=component_template --cov-fail-under=70 --cov-report=term-missing
+```
+
+For another component, replace the folder, the tag and the `--cov` package. The second
+command exits non-zero below 70 percent.
+
 **Making the check required (repo admin, once).** After the workflow has run
 once on a pull request, open Settings, Branches, the rule for `main`, tick
 "Require status checks to pass before merging", search for
-`Lint and test (Python 3.12)`, add it, and save. If the job name in
+`Lint and test (Python 3.12)`, add it, and save. Once the `ci` aggregator is on
+`main`, require `ci` instead and remove `Lint and test (Python 3.12)`, so a new
+component's job is covered without another settings change. If the job name in
 `ci.yml` ever changes, update the required check too, or every pull request
 waits for a check that never reports.
 

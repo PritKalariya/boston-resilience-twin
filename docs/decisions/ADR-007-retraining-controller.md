@@ -1,6 +1,6 @@
 # ADR-007: The drift-threshold rule retrains from day one; the contextual bandit replaces it only if it wins on replayed history
 
-- Status: accepted
+- Status: accepted; the contextual bandit and Q-learning decisions are cut by [ADR-037](ADR-037-deployment-architecture.md) (2026-11-23): the drift-threshold rule stays and its thresholds are calibrated on a replay
 - Date: 2026-10-04
 - Owner: Pu1ni2
 - Phase: setup

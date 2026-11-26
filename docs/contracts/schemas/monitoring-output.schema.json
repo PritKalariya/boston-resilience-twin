@@ -53,11 +53,15 @@
         },
         "gap": {
           "$ref": "#/$defs/ratio_metric"
+        },
+        "fpr_gap": {
+          "$ref": "#/$defs/ratio_metric"
         }
       },
       "required": [
         "groups",
-        "gap"
+        "gap",
+        "fpr_gap"
       ],
       "additionalProperties": false
     },
@@ -188,11 +192,25 @@
         },
         "recall": {
           "$ref": "#/$defs/ratio_metric"
+        },
+        "fp": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "negatives": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fpr": {
+          "$ref": "#/$defs/ratio_metric"
         }
       },
       "required": [
         "positives",
-        "recall"
+        "recall",
+        "fp",
+        "negatives",
+        "fpr"
       ],
       "additionalProperties": false
     },

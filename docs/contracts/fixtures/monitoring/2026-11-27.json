@@ -52,6 +52,12 @@
         "recall": {
           "value": null,
           "reason": "insufficient data"
+        },
+        "fp": 0,
+        "negatives": 0,
+        "fpr": {
+          "value": null,
+          "reason": "insufficient data"
         }
       },
       "lower": {
@@ -59,10 +65,20 @@
         "recall": {
           "value": null,
           "reason": "insufficient data"
+        },
+        "fp": 0,
+        "negatives": 0,
+        "fpr": {
+          "value": null,
+          "reason": "insufficient data"
         }
       }
     },
     "gap": {
+      "value": null,
+      "reason": "insufficient data"
+    },
+    "fpr_gap": {
       "value": null,
       "reason": "insufficient data"
     }

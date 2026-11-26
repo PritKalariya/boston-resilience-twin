@@ -1,6 +1,6 @@
 # ADR-008: Two monitoring tools, Cloud Monitoring and Evidently
 
-- Status: accepted
+- Status: accepted; MLflow tracing for the agents is cut by [ADR-037](ADR-037-deployment-architecture.md) (2026-11-24): the agent service and the critic write no MLflow traces
 - Date: 2026-10-04
 - Owner: Kirtan10
 - Phase: setup

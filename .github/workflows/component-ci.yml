@@ -1,0 +1,59 @@
+# Reusable CI for one component (#159, ADR-037). A component has its own image, its own job in
+# ci.yml that calls this file, and the same fixed coverage bar. The job builds the component's
+# `test` target with the component folder as the build context, then runs the tests in it with no
+# network. The bar is 70 percent line coverage of `cov_source`, written in this file and not an
+# input, so a caller cannot lower it. No secrets and no cloud credentials: the job only reads
+# the repository.
+#
+# Inputs:
+#   component   the component folder, for example Serving or .github/component-template
+#   cov_source  the package (or path) to measure, as the tests import it inside the image
+#   dockerfile  optional; defaults to <component>/Dockerfile
+#
+# To run the same two commands on a laptop, see docs/runbook.md, "CI".
+
+name: Component CI
+
+on:
+  workflow_call:
+    inputs:
+      component:
+        description: The component folder, the Docker build context
+        type: string
+        required: true
+      cov_source:
+        description: The package or path to measure, inside the image
+        type: string
+        required: true
+      dockerfile:
+        description: Path to the Dockerfile; defaults to <component>/Dockerfile
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test ${{ inputs.component }}
+    runs-on: ubuntu-24.04
+    # A fresh runner builds the image from scratch before the tests start.
+    timeout-minutes: 15
+    env:
+      COMPONENT: ${{ inputs.component }}
+      COV_SOURCE: ${{ inputs.cov_source }}
+      DOCKERFILE: ${{ inputs.dockerfile }}
+      IMAGE: component-ci-test:${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The inputs reach the shell as environment variables, never spliced into the script.
+      - name: Build the test image
+        run: docker build --target test -f "${DOCKERFILE:-$COMPONENT/Dockerfile}" -t "$IMAGE" "$COMPONENT"
+
+      # No network: a test that reaches out fails. The bar is the literal below.
+      - name: Run the tests with coverage
+        run: docker run --rm --network none "$IMAGE" python -m pytest tests --cov="$COV_SOURCE" --cov-fail-under=70 --cov-report=term-missing

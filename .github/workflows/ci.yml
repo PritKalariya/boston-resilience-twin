@@ -4,7 +4,8 @@
 # Airflow and cannot skip. No secrets: the job reads nothing from the
 # repository's secrets, the test container gets no keys and no network, and
 # tests/conftest.py blocks network access so tests use fixture files only. The
-# job name is the required status check on main (runbook, "CI").
+# job name `Lint and test (Python 3.12)` is the required status check on main
+# until the repo admin switches it to the `ci` aggregator job below (runbook, "CI").
 
 name: CI
 
@@ -62,3 +63,34 @@ jobs:
       # tool's --check, in the image the step above built, without coverage.
       - name: Contract tests (#159)
         run: docker compose run --rm test docs/contracts/tests --no-cov
+
+  # Each new component gets its own image, its own coverage bar and its own caller job
+  # (ADR-037, #159): the reusable workflow builds the component's `test` image from its
+  # folder and runs the tests in it with no network, at a fixed 70 percent. The template
+  # runs on every pull request, so the pattern is proven each time. No `needs`: it runs in
+  # parallel with the job above.
+  component-template:
+    name: Component template
+    uses: ./.github/workflows/component-ci.yml
+    with:
+      component: .github/component-template
+      cov_source: component_template
+
+  # The one status check to require. It always runs, so it reports even when a job fails or
+  # is cancelled, and it fails unless every job it needs succeeded. A new component adds its
+  # caller job above and its job id to `needs` here: Model-Development/tests/test_ci_workflows.py
+  # fails when a job is left out.
+  ci:
+    name: ci
+    if: always()
+    needs: [lint-and-test, component-template]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Aggregate the result
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'all(.[]; .result == "success")' > /dev/null \
+            || { echo "::error::a job did not succeed"; exit 1; }

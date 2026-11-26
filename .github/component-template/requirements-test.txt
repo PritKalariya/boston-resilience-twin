@@ -1,0 +1,5 @@
+# Test-only packages, installed in the `test` stage on top of requirements.txt. The versions
+# are the ones in the Airflow test image (brt-airflow:local, from airflow.Dockerfile), so a
+# component's tests run on the same pytest as the main suite.
+pytest==9.1.1
+pytest-cov==7.1.0
