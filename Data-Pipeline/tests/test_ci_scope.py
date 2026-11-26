@@ -39,6 +39,9 @@ BOTH = ["Data-Pipeline", "Model-Development"]
         (["Data-Pipeline/requirements.txt"], BOTH),
         (["Data-Pipeline/tests/run_tests.sh"], BOTH),
         (["docs/data/category-map.csv"], BOTH),
+        # The deployment contracts: the test service mounts them and CI runs their tests in the image.
+        (["docs/contracts/predict.md"], BOTH),
+        (["docs/contracts/schemas/data-manifest.schema.json"], BOTH),
         (["docs/runbook.md", ".coveragerc"], BOTH),
         # Nothing the tests can see: no tests.
         (["docs/runbook.md"], []),

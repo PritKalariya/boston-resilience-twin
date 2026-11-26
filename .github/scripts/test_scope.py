@@ -36,6 +36,7 @@ SHARED = (
     "airflow.Dockerfile",
     "airflow.Dockerfile.dockerignore",
     "docker-compose.yaml",
+    "docs/contracts/",
     "docs/data/",
     "Data-Pipeline/requirements.txt",
     "Data-Pipeline/tests/run_tests.sh",
