@@ -1,0 +1,4 @@
+setting,value,options,note
+predict_url,,the https URL of the brt-model Cloud Run service with no path; blank until #161 deploys it,"the model service the evening run calls with POST /predict, and the audience of its ID token; from `terraform output serving_service_urls` in Deployment/terraform-project2 (#161, ADR-038)"
+predict_timeout_seconds,120,whole number of 1 or more,how long one /predict request may take; the service scales to zero (min instances 0) so this covers a cold start
+predict_retry_waits_seconds,30;60;120;240,whole numbers of 0 or more separated by ;,"waits before each retry of a 5xx, a 429, a timeout or a lost connection, so five tries over about 7.5 minutes; any other 4xx is not retried"
