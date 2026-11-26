@@ -100,7 +100,7 @@ Each prediction:
 
 ### The forecast rows file
 
-`Data-Pipeline/data/forecast/<as_of>/features.parquet`, written by #160, versioned in DVC and named in the manifest as `files.forecast_rows` (see [data-manifest.md](data-manifest.md)).
+`Data-Pipeline/data/forecast/<as_of>/features.parquet`, written by #160 and named in the manifest as `files.forecast_rows` with its md5 and content path by #162's manifest task (see [data-manifest.md](data-manifest.md)); it reaches the bucket through that manifest, not DVC.
 
 - It holds exactly the request rows: `unit`, `forecast_date`, `as_of` and the 31 inputs, nothing else. One row per unit, all 24, sorted by `unit`.
 - Arrow types: `unit` string; `forecast_date` and `as_of` date32; the never-null integer inputs (the three calendar columns, the three alert counts and the three alert warnings) int64; every other input float64. Nullability is the same as in the request: the 14 inputs above may be null, every other column may not.
