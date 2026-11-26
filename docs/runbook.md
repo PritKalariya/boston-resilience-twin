@@ -400,6 +400,11 @@ docker compose run --rm test Data-Pipeline/tests/test_dvc_push.py --no-cov   # o
 docker compose run --rm test -x -k dvc --no-cov                               # stop at the first failure
 ```
 
+CI also runs the deployment contract tests (#159) in their own step after the
+full suite: `docker compose run --rm test docs/contracts/tests --no-cov`. They check the contract schemas, fixtures and
+cross-field rules and that the fixtures are in line with `docs/contracts/tools/build_fixtures.py`
+(see [docs/contracts/README.md](contracts/README.md)).
+
 - **`ADR-013 pins Python 3.12, but this is 3.x`.** The script ran outside the
   image, for example `bash Data-Pipeline/tests/run_tests.sh` on the host. Use
   the compose command.
@@ -424,7 +429,9 @@ docker compose run --rm test -x -k dvc --no-cov                               # 
 main. The `Lint and test (Python 3.12)` job checks Python is 3.12, runs
 `ruff check .` (errors only, rules in `ruff.toml`) and the `dvc.lock` check, then
 the test command ("Tests" above) on the Airflow image. So CI runs the DAG tests
-in the Airflow image and fails below the coverage bar. It uses no secrets, the
+in the Airflow image and fails below the coverage bar. A second step,
+`Contract tests (#159)`, runs the contract tests (see "Tests" above) on the same
+image whenever the image was built. It uses no secrets, the
 test container has no network, and `Data-Pipeline/tests/conftest.py` blocks
 network access in every test, so a test that calls a live API or Cloud Storage
 fails with `NetworkBlocked`. The job is cancelled after 15 minutes.
@@ -445,7 +452,7 @@ What keeps it fast (#165):
   `Data-Pipeline/dvc.lock` runs both). A change to a shared file runs every test:
   anything the test service builds from or mounts outside the two folders
   (`.github/`, `docs/data/`, `docker-compose.yaml`, `airflow.Dockerfile`,
-  `.coveragerc` and the rest of `SHARED` in the script), plus
+  `docs/contracts/`, `.coveragerc` and the rest of `SHARED` in the script), plus
   `Data-Pipeline/requirements.txt` and `run_tests.sh`. A pull request that
   changes nothing the tests can see, such as docs or Terraform only, builds
   nothing and runs no tests, and the check still passes. Main always runs every
@@ -478,10 +485,59 @@ ruff check .
 docker compose run --rm --build test
 ```
 
+**Jobs and the aggregator (ADR-037, #159).** `ci.yml` has these jobs, all started
+together:
+
+| Job id | Name | What it runs |
+|---|---|---|
+| `lint-and-test` | `Lint and test (Python 3.12)` | The steps above (the required check today) |
+| `component-template` | `Component template` | `.github/workflows/component-ci.yml` on `.github/component-template`, which proves the component pattern on every pull request |
+| `terraform` | `Terraform fmt and validate (<root>)` | `terraform fmt -check` and `validate` for both roots (above) |
+| `serving` | `Serving` | `component-ci.yml` on `Serving/` (#161) |
+| `ci` | `ci` | Always runs, after the others; fails unless every job in its `needs` succeeded |
+
+Each component has its own image (a Dockerfile with a `runtime` and a `test` stage), its
+own job and its own coverage bar: `component-ci.yml` builds the component's `test`
+target with the component folder as the build context and runs
+`python -m pytest tests --cov=<cov_source> --cov-fail-under=70` in it with no
+network. The 70 is written in that file and is not an input.
+
+**Add a component.** Copy `.github/component-template` (its README lists what to
+rename), then add a caller job to `ci.yml` and the job id to `needs` of `ci`:
+
+```yaml
+  serving:
+    name: Serving
+    uses: ./.github/workflows/component-ci.yml
+    with:
+      component: Serving
+      cov_source: serving
+
+  ci:
+    needs: [lint-and-test, component-template, serving]
+```
+
+`Model-Development/tests/test_ci_workflows.py` fails when a job is missing from
+`needs`, a caller omits `component` or `cov_source`, or `component-ci.yml` loses its
+bar, `--network none`, or gains a cloud token permission.
+
+**Run a component's tests locally.** The two commands CI runs, from the repo
+root (Docker only), shown for the template:
+
+```bash
+docker build --target test -f .github/component-template/Dockerfile -t component-template:test .github/component-template
+docker run --rm --network none component-template:test python -m pytest tests --cov=component_template --cov-fail-under=70 --cov-report=term-missing
+```
+
+For another component, replace the folder, the tag and the `--cov` package. The second
+command exits non-zero below 70 percent.
+
 **Making the check required (repo admin, once).** After the workflow has run
 once on a pull request, open Settings, Branches, the rule for `main`, tick
 "Require status checks to pass before merging", search for
-`Lint and test (Python 3.12)`, add it, and save. If the job name in
+`Lint and test (Python 3.12)`, add it, and save. Once the `ci` aggregator is on
+`main`, require `ci` instead and remove `Lint and test (Python 3.12)`, so a new
+component's job is covered without another settings change. If the job name in
 `ci.yml` ever changes, update the required check too, or every pull request
 waits for a check that never reports.
 

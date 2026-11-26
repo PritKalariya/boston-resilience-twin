@@ -27,3 +27,13 @@ output "model_bucket" {
   description = "Bucket for model files, one path per registered version."
   value       = google_storage_bucket.models.name
 }
+
+output "serving_runtime_email" {
+  description = "The runtime service account of brt-model and brt-web. Project 1's Terraform grants it read access to forecasts/ in the data bucket."
+  value       = google_service_account.brt_serving.email
+}
+
+output "serving_service_urls" {
+  description = "The Cloud Run URL of each service, by role."
+  value       = { for key, service in google_cloud_run_v2_service.serving : key => service.uri }
+}

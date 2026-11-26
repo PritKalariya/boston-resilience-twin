@@ -1,0 +1,245 @@
+{
+  "contract": "predict/v1",
+  "predictions": [
+    {
+      "unit": "Allston",
+      "date": "2026-11-26",
+      "probability": 0.0117,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Back Bay",
+      "date": "2026-11-26",
+      "probability": 0.0386,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Beacon Hill",
+      "date": "2026-11-26",
+      "probability": 0.0519,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Brighton",
+      "date": "2026-11-26",
+      "probability": 0.0351,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Charlestown",
+      "date": "2026-11-26",
+      "probability": 0.0345,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Chinatown",
+      "date": "2026-11-26",
+      "probability": 0.0463,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Dorchester",
+      "date": "2026-11-26",
+      "probability": 0.1873,
+      "prediction": 1,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Downtown",
+      "date": "2026-11-26",
+      "probability": 0.0254,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "East Boston",
+      "date": "2026-11-26",
+      "probability": 0.016,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Fenway",
+      "date": "2026-11-26",
+      "probability": 0.0124,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Harbor Islands",
+      "date": "2026-11-26",
+      "probability": 0.0113,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Hyde Park",
+      "date": "2026-11-26",
+      "probability": 0.0958,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Jamaica Plain",
+      "date": "2026-11-26",
+      "probability": 0.0271,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Longwood",
+      "date": "2026-11-26",
+      "probability": 0.0136,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Mattapan",
+      "date": "2026-11-26",
+      "probability": 0.096,
+      "prediction": 1,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Mission Hill",
+      "date": "2026-11-26",
+      "probability": 0.0597,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "North End",
+      "date": "2026-11-26",
+      "probability": 0.013,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Roslindale",
+      "date": "2026-11-26",
+      "probability": 0.0387,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "Roxbury",
+      "date": "2026-11-26",
+      "probability": 0.1421,
+      "prediction": 1,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "South Boston",
+      "date": "2026-11-26",
+      "probability": 0.0276,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "South Boston Waterfront",
+      "date": "2026-11-26",
+      "probability": 0.0592,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "South End",
+      "date": "2026-11-26",
+      "probability": 0.054,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "West End",
+      "date": "2026-11-26",
+      "probability": 0.0559,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    },
+    {
+      "unit": "West Roxbury",
+      "date": "2026-11-26",
+      "probability": 0.0286,
+      "prediction": 0,
+      "threshold": 0.096,
+      "model_version": "1",
+      "model_run_id": "3f9a1c07d2e84b56a0c1e7d94b2f6a85",
+      "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4"
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+# Reusable CI for one component (#159, ADR-037). A component has its own image, its own job in
+# ci.yml that calls this file, and the same fixed coverage bar. The job builds the component's
+# `test` target with the component folder as the build context, then runs the tests in it with no
+# network. The bar is 70 percent line coverage of `cov_source`, written in this file and not an
+# input, so a caller cannot lower it. No secrets and no cloud credentials: the job only reads
+# the repository.
+#
+# Inputs:
+#   component   the component folder, for example Serving or .github/component-template
+#   cov_source  one or more packages or paths to measure, space-separated, as the tests import
+#               them inside the image (Serving passes "serving /app/scripts"). Each becomes its
+#               own --cov flag; an element outside [A-Za-z0-9_./-] fails the job.
+#   dockerfile  optional; defaults to <component>/Dockerfile
+#   context     optional; the docker build context, defaults to the component folder. A component
+#               whose image copies files from outside its folder (Serving copies the contract
+#               schemas and Model-Development's lock) passes `.`, the repository root.
+#
+# To run the same two commands on a laptop, see docs/runbook.md, "CI".
+
+name: Component CI
+
+on:
+  workflow_call:
+    inputs:
+      component:
+        description: The component folder, the Docker build context
+        type: string
+        required: true
+      cov_source:
+        description: One or more packages or paths to measure, space-separated, inside the image
+        type: string
+        required: true
+      dockerfile:
+        description: Path to the Dockerfile; defaults to <component>/Dockerfile
+        type: string
+        required: false
+        default: ""
+      context:
+        description: The Docker build context; defaults to the component folder
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test ${{ inputs.component }}
+    runs-on: ubuntu-24.04
+    # A fresh runner builds the image from scratch before the tests start.
+    timeout-minutes: 15
+    env:
+      COMPONENT: ${{ inputs.component }}
+      COV_SOURCE: ${{ inputs.cov_source }}
+      DOCKERFILE: ${{ inputs.dockerfile }}
+      CONTEXT: ${{ inputs.context }}
+      IMAGE: component-ci-test:${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The inputs reach the shell as environment variables, never spliced into the script.
+      - name: Build the test image
+        run: docker build --target test -f "${DOCKERFILE:-$COMPONENT/Dockerfile}" -t "$IMAGE" "${CONTEXT:-$COMPONENT}"
+
+      # No network: a test that reaches out fails. The bar is the literal below. COV_SOURCE is split into
+      # an array on whitespace, each element is checked, and each becomes one --cov flag: the input is
+      # data for the array, never text of the script.
+      - name: Run the tests with coverage
+        run: |
+          read -r -d '' -a sources <<< "$COV_SOURCE" || true
+          if [ "${#sources[@]}" -eq 0 ]; then
+            echo "::error::cov_source is empty"
+            exit 1
+          fi
+          cov_flags=()
+          for source in "${sources[@]}"; do
+            if [[ ! "$source" =~ ^[A-Za-z0-9_./-]+$ ]]; then
+              echo "::error::cov_source element is not [A-Za-z0-9_./-]+"
+              exit 1
+            fi
+            cov_flags+=("--cov=$source")
+          done
+          docker run --rm --network none "$IMAGE" python -m pytest tests "${cov_flags[@]}" --cov-fail-under=70 --cov-report=term-missing

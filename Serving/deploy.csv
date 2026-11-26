@@ -1,0 +1,4 @@
+kind,name,routes,note
+image,brt-serving,,the one image both services run; its repository is the parent of registry.csv serving_image (Serving/scripts/deploy.py)
+service,brt-model,model,not public; only the Airflow VM's service account calls it (ADR-038); /health and /predict
+service,brt-web,web,public; the map page and /forecasts/{date} (ADR-038)

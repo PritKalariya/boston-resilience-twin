@@ -7,7 +7,8 @@ region     = "us-east1"
 # gcloud billing accounts list
 billing_account = "000000-000000-000000"
 
-# Teammates who review plans and debug CI (roles/editor + projectIamAdmin).
+# Teammates who plan, apply and debug CI (editor, projectIamAdmin, run.admin,
+# serviceAccountAdmin; ADR-036).
 project_admins = [
   "user:member-one@northeastern.edu",
 ]

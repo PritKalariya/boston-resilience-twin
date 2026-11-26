@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "retrain decision",
+  "description": "monitoring/decisions/<date>.json and latest.json (retrain-decision/v1).",
+  "type": "object",
+  "properties": {
+    "contract": {
+      "const": "retrain-decision/v1"
+    },
+    "date": {
+      "$ref": "#/$defs/date"
+    },
+    "retrain": {
+      "type": "boolean"
+    },
+    "reasons": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "f1_decay",
+          "drift_persistent",
+          "fairness_gap",
+          "manual"
+        ]
+      }
+    },
+    "source": {
+      "enum": [
+        "live",
+        "replay",
+        "manual"
+      ]
+    },
+    "forced": {
+      "type": "boolean"
+    },
+    "cooldown_until": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/date"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "thresholds_sha256": {
+      "$ref": "#/$defs/sha256_hex"
+    }
+  },
+  "required": [
+    "contract",
+    "date",
+    "retrain",
+    "reasons",
+    "source",
+    "forced",
+    "cooldown_until",
+    "thresholds_sha256"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "forced": {
+            "const": true
+          }
+        },
+        "required": [
+          "forced"
+        ]
+      },
+      "then": {
+        "properties": {
+          "source": {
+            "const": "manual"
+          },
+          "reasons": {
+            "contains": {
+              "const": "manual"
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "retrain": {
+            "const": true
+          }
+        },
+        "required": [
+          "retrain"
+        ]
+      },
+      "then": {
+        "properties": {
+          "reasons": {
+            "minItems": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "reasons": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "date": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "sha256_hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

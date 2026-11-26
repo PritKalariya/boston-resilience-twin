@@ -1,0 +1,31 @@
+# Build context for Serving/Dockerfile: the repository root, minus everything the Dockerfile does not copy.
+# BuildKit uses this file in place of any root .dockerignore, so the other images' contexts are unaffected.
+*
+!Serving/requirements.txt
+!Serving/requirements-test.txt
+!Serving/src
+!Serving/scripts
+!Serving/tests
+!Frontend
+!docs/contracts/schemas
+!docs/contracts/fixtures/predict/request.json
+!docs/contracts/fixtures/predict/response.json
+!docs/contracts/fixtures/forecasts/2026-11-26.parquet
+!docs/contracts/fixtures/forecasts/2026-11-26.records.json
+!Model-Development/requirements.lock
+!Serving/deploy.csv
+!Model-Development/registry/registry.csv
+!.github/workflows/deploy-serving.yml
+!.github/workflows/model.yml
+!Model-Development/scripts/models.py
+!Model-Development/scripts/inner_folds.py
+!Model-Development/scripts/model_params.py
+!Model-Development/scripts/training_data.py
+!Model-Development/scripts/seasonal_baseline.py
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.gitkeep
+# A model never enters through the context root: it comes only as the named context `model`.
+**/*.joblib
+**/gha-creds-*.json

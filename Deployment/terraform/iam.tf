@@ -49,6 +49,24 @@ resource "google_storage_bucket_iam_member" "ci_data_bucket_reader" {
   member = "serviceAccount:${each.value}"
 }
 
+# --- Model service runtime account (#161, ADR-038) ---------------------------
+
+# brt-serving (project 2) reads forecasts for the map. Objects under forecasts/ only: the service reads
+# an object by name and never lists the bucket (Serving/src/serving/forecasts.py), so objects.get is all
+# it needs. The condition needs uniform bucket-level access, which the data bucket has. Apply project 2
+# first: the account must exist before it can be granted a role.
+resource "google_storage_bucket_iam_member" "serving_forecasts_reader" {
+  bucket = google_storage_bucket.data.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${var.serving_runtime_email}"
+
+  condition {
+    title       = "forecasts-prefix-only"
+    description = "Read objects under forecasts/ only (ADR-038)."
+    expression  = "resource.name.startsWith(\"projects/_/buckets/${google_storage_bucket.data.name}/objects/forecasts/\")"
+  }
+}
+
 # --- Team members -----------------------------------------------------------
 
 locals {

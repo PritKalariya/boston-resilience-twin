@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "metric names",
+  "description": "metrics/metric-names.json (metric-names/v1): the Cloud Monitoring custom metrics, project 1.",
+  "type": "object",
+  "properties": {
+    "contract": {
+      "const": "metric-names/v1"
+    },
+    "prefix": {
+      "const": "custom.googleapis.com/brt/"
+    },
+    "metrics": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "items": {
+        "$ref": "#/$defs/descriptor"
+      }
+    }
+  },
+  "required": [
+    "contract",
+    "prefix",
+    "metrics"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "descriptor": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "enum": [
+            "f1",
+            "precision",
+            "recall",
+            "positives",
+            "fairness_gap",
+            "group_fpr",
+            "fpr_gap",
+            "drift_share",
+            "retrain_decision",
+            "forecast_freshness_hours"
+          ]
+        },
+        "metric_kind": {
+          "const": "GAUGE"
+        },
+        "value_type": {
+          "enum": [
+            "DOUBLE",
+            "INT64"
+          ]
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/label"
+          }
+        },
+        "producer": {
+          "type": "string",
+          "pattern": "^#[0-9]+$"
+        },
+        "written_when": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "name",
+        "metric_kind",
+        "value_type",
+        "unit",
+        "labels",
+        "producer",
+        "written_when"
+      ],
+      "additionalProperties": false
+    },
+    "label": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z_]+$"
+        },
+        "allowed_values": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "key",
+        "allowed_values"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

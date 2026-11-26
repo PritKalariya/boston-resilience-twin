@@ -1,0 +1,10 @@
+{
+  "contract": "retrain-decision/v1",
+  "date": "2026-11-27",
+  "retrain": false,
+  "reasons": [],
+  "source": "live",
+  "forced": false,
+  "cooldown_until": null,
+  "thresholds_sha256": "8ff5deb4399a3f4524272988c50bfa277fd50cad970579025aa19d1137208692"
+}

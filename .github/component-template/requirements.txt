@@ -1,0 +1,2 @@
+# Packages that ship in the runtime image. The template needs none: the standard library only.
+# A real component pins every package here to an exact version (==), and checks pip check passes.

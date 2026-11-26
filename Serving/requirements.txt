@@ -1,0 +1,23 @@
+# Packages that ship in the model service image (#161, ADR-037): the direct dependencies, each pinned
+# exactly. Installed with -c Model-Development/requirements.lock (see the Dockerfile), so a package the
+# lock pins has the lock's version, the one the saved model was trained and re-scored with. Nothing here
+# trains: xgboost, mlflow, optuna and shap are not installed, because loading and scoring the saved
+# LightGBM model needs scikit-learn and lightgbm only.
+fastapi==0.163.1
+uvicorn==0.54.0
+numpy==2.5.3
+pandas==3.0.5
+pyarrow==25.0.1
+joblib==1.6.0
+scikit-learn==1.9.1
+# LightGBM loads the OpenMP runtime: the Dockerfile installs libgomp1.
+lightgbm==4.7.0
+# The Cloud Storage JSON API for a gs:// FORECASTS_ROOT, through an authorized session (no storage library).
+google-auth==2.58.0
+requests==2.34.2
+# The request validator: the contract's JSON Schemas (draft 2020-12). jsonschema and the three packages
+# after it are not in the lock; each is the newest release at least two weeks old on 2026-11-25.
+jsonschema==4.26.0
+referencing==0.37.0
+rpds-py==2026.9.1
+jsonschema-specifications==2025.9.1

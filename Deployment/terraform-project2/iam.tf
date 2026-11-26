@@ -69,15 +69,21 @@ resource "google_storage_bucket_iam_member" "ci_writer_models_read" {
   member = "serviceAccount:${google_service_account.ci_writer.email}"
 }
 
-# --- Teammates who review plans and debug CI --------------------------------
+# --- Teammates who plan, apply and debug CI ---------------------------------
 
 # roles/owner cannot be granted through the API to an account outside the
 # project's organization (it needs a console invitation, which is click-ops),
-# so Terraform grants the nearest pair: everything Editor allows, plus IAM.
+# so Terraform grants what this work needs instead: everything Editor allows,
+# project IAM, and IAM on the two resource types Deployment grants on, which
+# Editor cannot set: Cloud Run services (run.admin, for run.invoker) and
+# service accounts (serviceAccountAdmin, for actAs on the runtime account).
+# ADR-036 records the widening and what it allows.
 locals {
   admin_roles = [
     "roles/editor",
     "roles/resourcemanager.projectIamAdmin",
+    "roles/run.admin",
+    "roles/iam.serviceAccountAdmin",
   ]
   admin_grants = {
     for pair in setproduct(var.project_admins, local.admin_roles) :
@@ -96,4 +102,25 @@ resource "google_project_iam_member" "admins" {
   member  = each.value.member
 
   depends_on = [google_project_service.project_2]
+}
+
+# --- CI writer: deploy the model service (#161, ADR-038) ----------------------
+
+# run.developer deploys revisions of the two services (and any other Cloud Run service in the project:
+# a project role is the narrowest the deploy script's calls allow). It cannot set IAM policy or create
+# a service account key. modelRegistrar is unchanged.
+resource "google_project_iam_member" "ci_writer_run_developer" {
+  project = var.project_id
+  role    = "roles/run.developer"
+  member  = "serviceAccount:${google_service_account.ci_writer.email}"
+
+  depends_on = [google_project_service.run]
+}
+
+# A revision that runs as brt-serving can only be deployed by an identity that may act as it. On this
+# one account only, never project wide.
+resource "google_service_account_iam_member" "ci_writer_act_as_serving" {
+  service_account_id = google_service_account.brt_serving.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.ci_writer.email}"
 }

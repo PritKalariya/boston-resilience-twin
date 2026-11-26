@@ -1,0 +1,197 @@
+{
+  "contract": "brief/v1",
+  "forecast_date": "2026-11-26",
+  "model_version": "1",
+  "data_version": "sha256:7ea796239d5557bf9a541595d7950b1e8d5bd5d1ae2b1cd07c2ed3e8c5a1faa4",
+  "flagged": [
+    {
+      "unit": "Dorchester",
+      "probability": 0.1873,
+      "associations": [
+        {
+          "feature": "tree_rel7",
+          "value": 2.37
+        },
+        {
+          "feature": "wx_gust_max_ms",
+          "value": 14.8
+        }
+      ]
+    },
+    {
+      "unit": "Roxbury",
+      "probability": 0.1421,
+      "associations": [
+        {
+          "feature": "tree_rel_last",
+          "value": 1.92
+        },
+        {
+          "feature": "wx_precip_mm",
+          "value": 4.2
+        }
+      ]
+    },
+    {
+      "unit": "Mattapan",
+      "probability": 0.096,
+      "associations": [
+        {
+          "feature": "tree_rel28",
+          "value": 1.58
+        },
+        {
+          "feature": "alert_tree_count",
+          "value": 1
+        }
+      ]
+    }
+  ],
+  "model_health": {
+    "f1": {
+      "value": null,
+      "reason": "no data"
+    },
+    "recall": {
+      "value": null,
+      "reason": "no data"
+    },
+    "fairness_gap": {
+      "value": null,
+      "reason": "no data"
+    }
+  },
+  "text": "Advisory forecast for tomorrow, for human review. Flagged neighborhoods, those at or above the model threshold of 0.096: Dorchester with probability 0.19, Roxbury with probability 0.14, and Mattapan with probability 0.10. Inputs associated with each flag, not causes: for Dorchester, tree_rel7 is 2.4 and wx_gust_max_ms is 14.8; for Roxbury, tree_rel_last is 1.9 and wx_precip_mm is 4.2; for Mattapan, tree_rel28 is 1.6 and alert_tree_count is 1. Model health is not measured yet because no forecast has been graded.",
+  "claims": [
+    {
+      "id": "c1",
+      "value": 0.096,
+      "display": "0.096",
+      "source": {
+        "file": "gs://boston-resilience-twin-data/forecasts/2026-11-26.parquet",
+        "field": "threshold",
+        "row": {
+          "unit": "Dorchester",
+          "date": "2026-11-26"
+        }
+      }
+    },
+    {
+      "id": "c2",
+      "value": 0.1873,
+      "display": "0.19",
+      "source": {
+        "file": "gs://boston-resilience-twin-data/forecasts/2026-11-26.parquet",
+        "field": "probability",
+        "row": {
+          "unit": "Dorchester",
+          "date": "2026-11-26"
+        }
+      }
+    },
+    {
+      "id": "c3",
+      "value": 2.37,
+      "display": "2.4",
+      "source": {
+        "file": "gs://boston-resilience-twin-data/dvc/files/md5/9c/2e5a1d7b3f48e6a0d4c8b2f1e97a35",
+        "field": "tree_rel7",
+        "row": {
+          "unit": "Dorchester",
+          "date": "2026-11-26"
+        }
+      }
+    },
+    {
+      "id": "c4",
+      "value": 14.8,
+      "display": "14.8",
+      "source": {
+        "file": "gs://boston-resilience-twin-data/dvc/files/md5/9c/2e5a1d7b3f48e6a0d4c8b2f1e97a35",
+        "field": "wx_gust_max_ms",
+        "row": {
+          "unit": "Dorchester",
+          "date": "2026-11-26"
+        }
+      }
+    },
+    {
+      "id": "c5",
+      "value": 0.1421,
+      "display": "0.14",
+      "source": {
+        "file": "gs://boston-resilience-twin-data/forecasts/2026-11-26.parquet",
+        "field": "probability",
+        "row": {
+          "unit": "Roxbury",
+          "date": "2026-11-26"
+        }
+      }
+    },
+    {
+      "id": "c6",
+      "value": 1.92,
+      "display": "1.9",
+      "source": {
+        "file": "gs://boston-resilience-twin-data/dvc/files/md5/9c/2e5a1d7b3f48e6a0d4c8b2f1e97a35",
+        "field": "tree_rel_last",
+        "row": {
+          "unit": "Roxbury",
+          "date": "2026-11-26"
+        }
+      }
+    },
+    {
+      "id": "c7",
+      "value": 4.2,
+      "display": "4.2",
+      "source": {
+        "file": "gs://boston-resilience-twin-data/dvc/files/md5/9c/2e5a1d7b3f48e6a0d4c8b2f1e97a35",
+        "field": "wx_precip_mm",
+        "row": {
+          "unit": "Roxbury",
+          "date": "2026-11-26"
+        }
+      }
+    },
+    {
+      "id": "c8",
+      "value": 0.096,
+      "display": "0.10",
+      "source": {
+        "file": "gs://boston-resilience-twin-data/forecasts/2026-11-26.parquet",
+        "field": "probability",
+        "row": {
+          "unit": "Mattapan",
+          "date": "2026-11-26"
+        }
+      }
+    },
+    {
+      "id": "c9",
+      "value": 1.58,
+      "display": "1.6",
+      "source": {
+        "file": "gs://boston-resilience-twin-data/dvc/files/md5/9c/2e5a1d7b3f48e6a0d4c8b2f1e97a35",
+        "field": "tree_rel28",
+        "row": {
+          "unit": "Mattapan",
+          "date": "2026-11-26"
+        }
+      }
+    },
+    {
+      "id": "c10",
+      "value": 1,
+      "display": "1",
+      "source": {
+        "file": "gs://boston-resilience-twin-data/dvc/files/md5/9c/2e5a1d7b3f48e6a0d4c8b2f1e97a35",
+        "field": "alert_tree_count",
+        "row": {
+          "unit": "Mattapan",
+          "date": "2026-11-26"
+        }
+      }
+    }
+  ]
+}

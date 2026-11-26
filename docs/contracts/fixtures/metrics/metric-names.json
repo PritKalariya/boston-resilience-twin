@@ -1,0 +1,145 @@
+{
+  "contract": "metric-names/v1",
+  "prefix": "custom.googleapis.com/brt/",
+  "metrics": [
+    {
+      "name": "f1",
+      "metric_kind": "GAUGE",
+      "value_type": "DOUBLE",
+      "unit": "1",
+      "labels": [
+        {
+          "key": "window",
+          "allowed_values": [
+            "7d",
+            "30d"
+          ]
+        }
+      ],
+      "producer": "#169",
+      "written_when": "each monitoring run, after grading, unless the metric is null (a null metric writes no point)"
+    },
+    {
+      "name": "precision",
+      "metric_kind": "GAUGE",
+      "value_type": "DOUBLE",
+      "unit": "1",
+      "labels": [
+        {
+          "key": "window",
+          "allowed_values": [
+            "7d",
+            "30d"
+          ]
+        }
+      ],
+      "producer": "#169",
+      "written_when": "each monitoring run, after grading, unless the metric is null (a null metric writes no point)"
+    },
+    {
+      "name": "recall",
+      "metric_kind": "GAUGE",
+      "value_type": "DOUBLE",
+      "unit": "1",
+      "labels": [
+        {
+          "key": "window",
+          "allowed_values": [
+            "7d",
+            "30d"
+          ]
+        }
+      ],
+      "producer": "#169",
+      "written_when": "each monitoring run, after grading, unless the metric is null (a null metric writes no point)"
+    },
+    {
+      "name": "positives",
+      "metric_kind": "GAUGE",
+      "value_type": "INT64",
+      "unit": "1",
+      "labels": [
+        {
+          "key": "window",
+          "allowed_values": [
+            "7d",
+            "30d"
+          ]
+        }
+      ],
+      "producer": "#169",
+      "written_when": "each monitoring run, after grading; always written, 0 when the window has no final positives"
+    },
+    {
+      "name": "fairness_gap",
+      "metric_kind": "GAUGE",
+      "value_type": "DOUBLE",
+      "unit": "1",
+      "labels": [],
+      "producer": "#169",
+      "written_when": "each monitoring run, after grading, unless the metric is null (a null metric writes no point)"
+    },
+    {
+      "name": "group_fpr",
+      "metric_kind": "GAUGE",
+      "value_type": "DOUBLE",
+      "unit": "1",
+      "labels": [
+        {
+          "key": "group",
+          "allowed_values": [
+            "lower",
+            "higher"
+          ]
+        }
+      ],
+      "producer": "#169",
+      "written_when": "each monitoring run, after grading, unless the metric is null (a null metric writes no point)"
+    },
+    {
+      "name": "fpr_gap",
+      "metric_kind": "GAUGE",
+      "value_type": "DOUBLE",
+      "unit": "1",
+      "labels": [],
+      "producer": "#169",
+      "written_when": "each monitoring run, after grading, unless the metric is null (a null metric writes no point)"
+    },
+    {
+      "name": "drift_share",
+      "metric_kind": "GAUGE",
+      "value_type": "DOUBLE",
+      "unit": "1",
+      "labels": [],
+      "producer": "#169",
+      "written_when": "each monitoring run, after grading, unless the metric is null (a null metric writes no point)"
+    },
+    {
+      "name": "retrain_decision",
+      "metric_kind": "GAUGE",
+      "value_type": "INT64",
+      "unit": "1",
+      "labels": [
+        {
+          "key": "source",
+          "allowed_values": [
+            "live",
+            "replay",
+            "manual"
+          ]
+        }
+      ],
+      "producer": "#169",
+      "written_when": "each monitoring run, after #170 writes monitoring/decisions/<date>.json: 1 when retrain is true, else 0"
+    },
+    {
+      "name": "forecast_freshness_hours",
+      "metric_kind": "GAUGE",
+      "value_type": "DOUBLE",
+      "unit": "h",
+      "labels": [],
+      "producer": "#169",
+      "written_when": "every monitoring run: hours from the latest forecast file's issued_at_utc to the monitor run's time, so a missed evening raises it"
+    }
+  ]
+}

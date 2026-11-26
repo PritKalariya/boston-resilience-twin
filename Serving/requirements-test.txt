@@ -1,0 +1,16 @@
+# Test-only packages, installed in the `test` stage on top of requirements.txt, also with
+# -c Model-Development/requirements.lock. pytest and pytest-cov are the versions in the Airflow test
+# image, as in .github/component-template.
+pytest==9.1.1
+pytest-cov==7.1.0
+# starlette's TestClient (1.10 deprecates httpx for httpx2). Not in the lock; the newest release at least two
+# weeks old on 2026-11-25.
+httpx2==2.16.0
+# What httpx2 pulls in that the lock does not pin (its other dependencies, anyio, h11, idna and
+# typing-extensions, are in the lock). Each is at least two weeks old on 2026-11-25.
+httpcore2==2.16.0
+truststore==0.10.5
+# The fixture trains a tiny model with Model-Development/scripts/models.py, which imports these at module
+# level. Both are in the lock, so these are its versions.
+PyYAML==6.0.3
+xgboost-cpu==3.4.1
