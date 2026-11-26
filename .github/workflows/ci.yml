@@ -76,6 +76,16 @@ jobs:
       component: .github/component-template
       cov_source: component_template
 
+  # The model service (#161, ADR-037). Its image copies the contract schemas and the training lock from
+  # outside Serving/, so its build context is the repository root.
+  serving:
+    name: Serving
+    uses: ./.github/workflows/component-ci.yml
+    with:
+      component: Serving
+      context: .
+      cov_source: serving
+
   # The one status check to require. It always runs, so it reports even when a job fails or
   # is cancelled, and it fails unless every job it needs succeeded. A new component adds its
   # caller job above and its job id to `needs` here: Model-Development/tests/test_ci_workflows.py
@@ -83,7 +93,7 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [lint-and-test, component-template]
+    needs: [lint-and-test, component-template, serving]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
