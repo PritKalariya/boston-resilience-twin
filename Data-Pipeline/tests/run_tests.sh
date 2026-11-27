@@ -29,11 +29,36 @@ if [ "$#" -gt 0 ]; then
 fi
 
 # No arguments: the full suite, then a 70 percent bar for each scripts folder on its own (#112).
+# BRT_TEST_SUITES names the component folders to test (default both); CI sets it from
+# .github/scripts/test_scope.py on a pull request (#165), and an empty value tests nothing.
+# Each folder's bar is checked only when its tests ran. The tests run in parallel
+# (pytest-xdist, #165); pytest-cov merges the workers' coverage before the bars read it.
+# BRT_TEST_WORKERS sets the worker count (0 runs in one process). The default is one per logical
+# CPU, at most 8: past that a big laptop gains little and each worker holds its own copy of the
+# test data. Not -n auto: with psutil installed it counts physical cores, 2 on CI's 4-vCPU runner.
+# --dist worksteal lets an idle worker take tests queued for a busy one, so one slow file does
+# not hold up the end of the run.
+suites="${BRT_TEST_SUITES-Data-Pipeline Model-Development}"
+if [ -z "$suites" ]; then
+  echo "No test input changed (BRT_TEST_SUITES is empty): no tests to run."
+  exit 0
+fi
+tests=()
+cov=()
+for suite in $suites; do
+  case "$suite" in
+    Data-Pipeline|Model-Development) tests+=("$suite/tests"); cov+=("--cov=$suite/scripts") ;;
+    *) echo "Unknown suite in BRT_TEST_SUITES: $suite" >&2; exit 2 ;;
+  esac
+done
+cpus="$(python -c 'import os; print(os.cpu_count() or 1)')"
+workers="${BRT_TEST_WORKERS:-$(( cpus < 8 ? cpus : 8 ))}"
+echo "Testing: $suites ($workers workers)"
 status=0
-python -m pytest -p no:cacheprovider --cov --cov-fail-under=0 --cov-report=term-missing \
-  Data-Pipeline/tests Model-Development/tests || status=$?
-for folder in Data-Pipeline/scripts Model-Development/scripts; do
-  echo "Coverage bar (70 percent) for $folder"
-  python -m coverage report --include="$folder/*" --fail-under=70 --skip-covered || status=1
+python -m pytest -p no:cacheprovider -n "$workers" --dist worksteal \
+  "${cov[@]}" --cov-fail-under=0 --cov-report=term-missing "${tests[@]}" || status=$?
+for suite in $suites; do
+  echo "Coverage bar (70 percent) for $suite/scripts"
+  python -m coverage report --include="$suite/scripts/*" --fail-under=70 --skip-covered || status=1
 done
 exit "$status"

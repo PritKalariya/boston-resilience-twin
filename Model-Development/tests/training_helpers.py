@@ -10,6 +10,7 @@ import csv
 import sys
 from pathlib import Path
 
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
 import pytest
@@ -18,6 +19,25 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import training_data  # noqa: E402
+
+
+# LightGBM's scikit-learn API turns n_jobs=None, the default models.py keeps, into one thread per
+# physical core whatever OMP_NUM_THREADS says. The test service runs a pytest worker per logical CPU
+# with OMP_NUM_THREADS=1, so on a 24-CPU laptop every worker's fit started 12 threads and the suite
+# ran for more than 25 minutes instead of about 2 (#165). In the tests only, None means 0: OpenMP's
+# default, which follows OMP_NUM_THREADS, as LightGBM's own Booster already does. Training keeps
+# LightGBM's default, so no locked result changes. Set here, on import, because every test that fits
+# LightGBM imports this module and each pytest worker collects them all (a second conftest.py would
+# shadow Data-Pipeline's). test_lightgbm_threads.py fails if a LightGBM upgrade drops the method.
+def _threads_follow_omp(process_n_jobs):
+    def follow_omp(self, n_jobs):
+        return 0 if n_jobs is None else process_n_jobs(self, n_jobs)
+    follow_omp.follows_omp = True
+    return follow_omp
+
+
+if not getattr(lgb.LGBMModel._process_n_jobs, "follows_omp", False):
+    lgb.LGBMModel._process_n_jobs = _threads_follow_omp(lgb.LGBMModel._process_n_jobs)
 
 UNITS = ("Alpha", "Beta")
 MLFLOW_STORE: Path | None = None  # conftest.py's session store; write_repo uses it unless told otherwise

@@ -368,9 +368,23 @@ changed), then runs `Data-Pipeline/tests/run_tests.sh` in it:
 1. prints the Python and Airflow versions and stops unless Python is 3.12 (ADR-013);
 2. runs every test in `Data-Pipeline/tests` and `Model-Development/tests`, the DAG
    tests included (`test_daily_pipeline.py` parses `Data-Pipeline/dags` with Airflow's
-   DagBag);
-3. prints the line coverage of each module in `Data-Pipeline/scripts/` and fails
-   below the bar in `.coveragerc` (70 percent).
+   DagBag), in parallel with pytest-xdist (#165);
+3. prints the line coverage of each module in `Data-Pipeline/scripts/` and
+   `Model-Development/scripts/` and fails when either folder, on its own, is below the
+   bar in `.coveragerc` (70 percent).
+
+Two variables change what the full run does (`run_tests.sh`, #165):
+
+```bash
+BRT_TEST_SUITES=Model-Development docker compose run --rm --build test   # one folder's tests and its bar only
+BRT_TEST_WORKERS=0 docker compose run --rm --build test                  # one process, to rule out a parallel-only failure
+```
+
+`BRT_TEST_SUITES` takes `Data-Pipeline`, `Model-Development` or both (the default); empty
+runs no tests. `BRT_TEST_WORKERS` takes a number of pytest workers, `logical` (one per
+logical CPU) or `auto` (one per physical core: 2 on CI's 4-vCPU runner). Unset, it is one per
+logical CPU, at most 8 (4 on CI): past that a laptop gains little and each worker holds its
+own copy of the test data.
 
 The `test` service in `docker-compose.yaml` starts nothing else and is not part
 of `docker compose up`. It gets no `.env`, no keys, no database and no network,
@@ -400,6 +414,11 @@ cross-field rules and that the fixtures are in line with `docs/contracts/tools/b
   report lists each module's missing lines; add tests rather than lowering the bar.
 - **`Read-only file system`.** A test wrote into the repo; write to pytest's
   `tmp_path` instead.
+- **A test fails in the full run but passes alone.** The tests run in parallel, in
+  an order that changes between runs, so a test that depends on another test's
+  state or on a fixed file name fails only sometimes. Rerun with
+  `BRT_TEST_WORKERS=0` to confirm, then give the test its own `tmp_path` or
+  fixture instead of shared state.
 - **Linux: `Permission denied` on a mounted file.** The container runs as
   `AIRFLOW_UID` (README, Linux setup), which must be able to read the checkout.
 - **On the host,** `python -m pytest Data-Pipeline/tests` still runs with
@@ -409,15 +428,60 @@ cross-field rules and that the fixtures are in line with `docs/contracts/tools/b
 ## CI
 
 `.github/workflows/ci.yml` runs on every pull request and every push to
-main: check Python is 3.12, `ruff check .` (errors only, rules in
-`ruff.toml`), then the test command `docker compose run --rm --build test`
-("Tests" above). So CI runs the DAG tests in the Airflow image and fails below
-the coverage bar; a second step, `Contract tests (#159)`, runs the contract tests
-(see "Tests" above). It uses no secrets, the test container has no network, and
-`Data-Pipeline/tests/conftest.py` blocks network access in every test, so a
-test that calls a live API or Cloud Storage fails with `NetworkBlocked`.
-The job is cancelled after 15 minutes: on a fresh runner the image is built
-from scratch, which takes a few minutes before the tests start.
+main. The `Lint and test (Python 3.12)` job checks Python is 3.12, runs
+`ruff check .` (errors only, rules in `ruff.toml`) and the `dvc.lock` check, then
+the test command ("Tests" above) on the Airflow image. So CI runs the DAG tests
+in the Airflow image and fails below the coverage bar. A second step,
+`Contract tests (#159)`, runs the contract tests (see "Tests" above) on the same
+image whenever the image was built. It uses no secrets, the
+test container has no network, and `Data-Pipeline/tests/conftest.py` blocks
+network access in every test, so a test that calls a live API or Cloud Storage
+fails with `NetworkBlocked`. The job is cancelled after 15 minutes.
+
+What keeps it fast (#165):
+
+- **Parallel tests.** `run_tests.sh` runs pytest with one worker per logical CPU, at
+  most 8 (`--dist worksteal`, so an idle worker takes tests queued for a busy one), and
+  the test service gives each worker one OpenMP and BLAS thread (`OMP_NUM_THREADS=1`
+  and the like in `docker-compose.yaml`), so model fits in different workers do not
+  fight over the CPUs. LightGBM's scikit-learn API ignores `OMP_NUM_THREADS` when
+  `n_jobs` is unset and starts a thread per physical core, so
+  `Model-Development/tests/training_helpers.py` makes it follow `OMP_NUM_THREADS` in
+  the tests only; training keeps LightGBM's default. Coverage uses Python 3.12's `sys.monitoring`
+  (`COVERAGE_CORE=sysmon`), which measures the same lines at less cost.
+- **Only the folders a pull request reaches.**
+  `.github/scripts/test_scope.py` diffs the pull request against its base and
+  sets `BRT_TEST_SUITES`: a change inside `Model-Development/` tests that folder,
+  one inside `Data-Pipeline/` tests that one, and each also runs when a file the
+  other reads from it changes (`READS_FROM_OTHER` in the script; for example
+  `Data-Pipeline/dvc.lock` runs both). A change to a shared file runs every test:
+  anything the test service builds from or mounts outside the two folders
+  (`.github/`, `docs/data/`, `docker-compose.yaml`, `airflow.Dockerfile`,
+  `docs/contracts/`, `.coveragerc` and the rest of `SHARED` in the script), plus
+  `Data-Pipeline/requirements.txt` and `run_tests.sh`. A pull request that
+  changes nothing the tests can see, such as docs or Terraform only, builds
+  nothing and runs no tests, and the check still passes. Main always runs every
+  test with both bars, and so does a pull request whose diff fails.
+  `test_ci_scope.py` fails when one folder starts reading a file of the other
+  that `READS_FROM_OTHER` does not list: add the path there.
+
+The image is built from scratch on every run (about 50 to 80 s: the base image
+pull, apt and pip), in the background from the start of the job while lint and
+the `dvc.lock` check run, and the test step waits for it. It is not built from a
+layer cache. On PR #194 (run 45070449553) a GitHub
+Actions layer cache made the build slower: 173 s with an empty cache and 69 s
+with a warm one, because loading the 2 GB image into Docker took 45 s on its
+own. Revisit if the image gets much smaller or the pip step much longer.
+
+The `Terraform fmt and validate` jobs, one per root (`Deployment/terraform`,
+`Deployment/terraform-project2`), run `terraform fmt -check -diff`, then
+`terraform init -backend=false` and `terraform validate` with Terraform 1.16.4.
+Without the backend no state is read and no Google credential is needed; init
+only downloads the providers. They run beside the lint and test job, so they add
+no time to it.
+
+- **`terraform fmt -check` fails.** Run `terraform fmt` in that root and commit
+  the result.
 
 Run the same checks locally before pushing:
 
@@ -426,13 +490,15 @@ ruff check .
 docker compose run --rm --build test
 ```
 
-**Jobs and the aggregator (ADR-037, #159).** `ci.yml` has three jobs, all started
+**Jobs and the aggregator (ADR-037, #159).** `ci.yml` has these jobs, all started
 together:
 
 | Job id | Name | What it runs |
 |---|---|---|
 | `lint-and-test` | `Lint and test (Python 3.12)` | The steps above (the required check today) |
 | `component-template` | `Component template` | `.github/workflows/component-ci.yml` on `.github/component-template`, which proves the component pattern on every pull request |
+| `terraform` | `Terraform fmt and validate (<root>)` | `terraform fmt -check` and `validate` for both roots (above) |
+| `serving` | `Serving` | `component-ci.yml` on `Serving/` (#161) |
 | `ci` | `ci` | Always runs, after the others; fails unless every job in its `needs` succeeded |
 
 Each component has its own image (a Dockerfile with a `runtime` and a `test` stage), its

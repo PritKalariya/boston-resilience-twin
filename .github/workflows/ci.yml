@@ -6,6 +6,11 @@
 # tests/conftest.py blocks network access so tests use fixture files only. The
 # job name `Lint and test (Python 3.12)` is the required status check on main
 # until the repo admin switches it to the `ci` aggregator job below (runbook, "CI").
+#
+# Speed (#165): the tests run in parallel (run_tests.sh), and a pull request tests
+# only the component folders its changes reach (.github/scripts/test_scope.py). Main,
+# and a change to any shared file, still runs every test with both coverage bars. The
+# Terraform job checks both roots' format and syntax with no cloud calls.
 
 name: CI
 
@@ -25,12 +30,43 @@ jobs:
   lint-and-test:
     name: Lint and test (Python 3.12)
     runs-on: ubuntu-24.04
-    # Building the Airflow image on a fresh runner adds a few minutes to the tests.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The whole history, so the scope step can diff a pull request against its base.
+          fetch-depth: 0
           persist-credentials: false
+
+      # Which component folders to test: on a pull request, the ones its changes reach
+      # (empty when no test input changed); on main, all of them. First, so the image build
+      # can start before lint. The runner's own python3 is enough: the script needs git only.
+      - name: Which tests to run
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            python3 .github/scripts/test_scope.py --base "$BASE" --head "$HEAD" --github-output
+          else
+            python3 .github/scripts/test_scope.py --all --github-output
+          fi
+
+      - name: No test input changed
+        if: steps.scope.outputs.suites == ''
+        run: echo "No file the tests can see changed, so no tests run (.github/scripts/test_scope.py)."
+
+      # The image build (airflow.Dockerfile, as `docker compose build test`) runs in the
+      # background while Python, lint and the lock check run, and the test step waits for it.
+      # The build is not cached across runs: on PR #194 a GitHub Actions layer cache made it
+      # slower (69 s warm against 51 s from scratch), since loading the 2 GB image into Docker
+      # cost 45 s (runbook, "CI").
+      - name: Start the image build
+        if: steps.scope.outputs.suites != ''
+        run: |
+          nohup sh -c 'docker compose build test > "$RUNNER_TEMP/build.log" 2>&1; echo $? > "$RUNNER_TEMP/build.rc"' > /dev/null 2>&1 &
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -53,16 +89,60 @@ jobs:
           pip install PyYAML==6.0.3
           python Model-Development/scripts/lock_check.py
 
-      # The README and runbook command: builds the Airflow image (airflow.Dockerfile),
-      # prints the Python version and stops unless it is 3.12, then runs every test
-      # and fails below the coverage bar in .coveragerc.
+      - name: Wait for the image build
+        if: steps.scope.outputs.suites != ''
+        run: |
+          while [ ! -f "$RUNNER_TEMP/build.rc" ]; do sleep 1; done
+          cat "$RUNNER_TEMP/build.log"
+          exit "$(cat "$RUNNER_TEMP/build.rc")"
+
+      # The README and runbook command on the image just built (so no --build): prints the
+      # Python version and stops unless it is 3.12, then runs the chosen folders' tests in
+      # parallel and fails below the coverage bar in .coveragerc for each folder that ran.
       - name: Test (Airflow image, Python 3.12, coverage)
-        run: docker compose run --rm --build test
+        if: steps.scope.outputs.suites != ''
+        env:
+          BRT_TEST_SUITES: ${{ steps.scope.outputs.suites }}
+        run: docker compose run --rm test
 
       # The deployment contracts (#159): schemas, fixtures, cross-field rules and the fixture
-      # tool's --check, in the image the step above built, without coverage.
+      # tool's --check, in the image built above, without coverage. Runs whenever the image
+      # was built; a change under docs/contracts/ is shared, so it always builds one.
       - name: Contract tests (#159)
+        if: steps.scope.outputs.suites != ''
         run: docker compose run --rm test docs/contracts/tests --no-cov
+
+  # terraform fmt and validate for both roots (#165): init skips the backend, so no state
+  # is read and no Google credential is needed; it downloads the providers only.
+  terraform:
+    name: Terraform fmt and validate (${{ matrix.root }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        root: [Deployment/terraform, Deployment/terraform-project2]
+    defaults:
+      run:
+        working-directory: ${{ matrix.root }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+
+      - name: terraform fmt -check
+        run: terraform fmt -check -diff
+
+      - name: terraform init (no backend)
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        run: terraform validate -no-color
 
   # Each new component gets its own image, its own coverage bar and its own caller job
   # (ADR-037, #159): the reusable workflow builds the component's `test` image from its
@@ -93,7 +173,7 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [lint-and-test, component-template, serving]
+    needs: [lint-and-test, terraform, component-template, serving]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
