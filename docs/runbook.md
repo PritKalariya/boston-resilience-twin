@@ -381,8 +381,10 @@ BRT_TEST_WORKERS=0 docker compose run --rm --build test                  # one p
 ```
 
 `BRT_TEST_SUITES` takes `Data-Pipeline`, `Model-Development` or both (the default); empty
-runs no tests. `BRT_TEST_WORKERS` takes a number of pytest workers, `logical` (the default,
-one per logical CPU) or `auto` (one per physical core: 2 on CI's 4-vCPU runner).
+runs no tests. `BRT_TEST_WORKERS` takes a number of pytest workers, `logical` (one per
+logical CPU) or `auto` (one per physical core: 2 on CI's 4-vCPU runner). Unset, it is one per
+logical CPU, at most 8 (4 on CI): past that a laptop gains little and each worker holds its
+own copy of the test data.
 
 The `test` service in `docker-compose.yaml` starts nothing else and is not part
 of `docker compose up`. It gets no `.env`, no keys, no database and no network,
@@ -438,11 +440,14 @@ fails with `NetworkBlocked`. The job is cancelled after 15 minutes.
 
 What keeps it fast (#165):
 
-- **Parallel tests.** `run_tests.sh` runs pytest with one worker per logical CPU
-  (`--dist worksteal`, so an idle worker takes tests queued for a busy one), and the
-  test service gives each worker one OpenMP and BLAS thread (`OMP_NUM_THREADS=1`
+- **Parallel tests.** `run_tests.sh` runs pytest with one worker per logical CPU, at
+  most 8 (`--dist worksteal`, so an idle worker takes tests queued for a busy one), and
+  the test service gives each worker one OpenMP and BLAS thread (`OMP_NUM_THREADS=1`
   and the like in `docker-compose.yaml`), so model fits in different workers do not
-  fight over the CPUs. Coverage uses Python 3.12's `sys.monitoring`
+  fight over the CPUs. LightGBM's scikit-learn API ignores `OMP_NUM_THREADS` when
+  `n_jobs` is unset and starts a thread per physical core, so
+  `Model-Development/tests/training_helpers.py` makes it follow `OMP_NUM_THREADS` in
+  the tests only; training keeps LightGBM's default. Coverage uses Python 3.12's `sys.monitoring`
   (`COVERAGE_CORE=sysmon`), which measures the same lines at less cost.
 - **Only the folders a pull request reaches.**
   `.github/scripts/test_scope.py` diffs the pull request against its base and

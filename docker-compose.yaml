@@ -312,7 +312,7 @@ services:
       # Which component folders to test and how many pytest workers (#165, run_tests.sh).
       # CI sets the suites from .github/scripts/test_scope.py; unset, both run.
       BRT_TEST_SUITES: ${BRT_TEST_SUITES-Data-Pipeline Model-Development}
-      BRT_TEST_WORKERS: ${BRT_TEST_WORKERS:-logical}
+      BRT_TEST_WORKERS: ${BRT_TEST_WORKERS:-}  # empty: run_tests.sh picks one per logical CPU, at most 8
       # One OpenMP and BLAS thread per pytest worker: LightGBM, XGBoost and NumPy otherwise
       # start a thread per CPU in every worker, and the oversubscribed threads spin. On a
       # laptop that made the Model-Development tests on 4 workers take 603 s instead of 163 s.
